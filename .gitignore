@@ -178,3 +178,5 @@ cython_debug/
 
 # version files
 src/shield_das/_version.py
+
+results/
