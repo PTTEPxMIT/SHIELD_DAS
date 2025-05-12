@@ -54,7 +54,6 @@ start_button.pack(padx=20, pady=10)
 stop_button = tk.Button(root, text="Stop", command=my_recorder.stop)
 stop_button.pack(padx=20, pady=10)
 
-# Live plot inside GUI
 plotter = DataPlotter(root, my_recorder)
 
 
