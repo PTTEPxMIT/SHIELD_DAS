@@ -1,14 +1,18 @@
 from threading import Thread, Event
 import time
 from datetime import datetime
+from .pressure_gauge import PressureGauge
 
 
 class DataRecorder:
 
-    def __init__(self, gauges, output_filename="output_test.csv", labjack=None):
+    def __init__(
+        self,
+        gauges: list[PressureGauge],
+        labjack=None,
+    ):
 
         self.gauges = gauges
-        self.output_file = output_filename
         self.labjack = labjack
 
         self.stop_event = Event()
