@@ -6,6 +6,6 @@ SHIELD data acquisition system
 
 Test mode meaning random pressure data is generated rather than reading and converting voltage data from a LabJack
 
-'''
+```
 python main.py
 ```
