@@ -12,9 +12,31 @@ class DataPlotter:
         self.recorder = recorder
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
+        # Default window size in seconds
+        self.time_window = 10
+
         # Layout frames
         self.control_frame = tk.Frame(root)
         self.control_frame.pack(side=tk.TOP, fill=tk.X)
+
+        # Add window size control
+        self.window_frame = tk.Frame(self.control_frame)
+        self.window_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=5)
+
+        # Label for the entry
+        self.window_label = tk.Label(self.window_frame, text="Time Window (seconds):")
+        self.window_label.pack(side=tk.LEFT, padx=(0, 5))
+
+        # Entry for time window
+        self.window_entry = tk.Entry(self.window_frame, width=10)
+        self.window_entry.insert(0, str(self.time_window))
+        self.window_entry.pack(side=tk.LEFT)
+
+        # Button to apply the changes
+        self.apply_button = tk.Button(
+            self.window_frame, text="Apply", command=self.update_time_window
+        )
+        self.apply_button.pack(side=tk.LEFT, padx=5)
 
         self.plot_frame = tk.Frame(root)
         self.plot_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
@@ -41,6 +63,24 @@ class DataPlotter:
             self.fig, self.update_plot, interval=500, cache_frame_data=False
         )
 
+    def update_time_window(self):
+        """Update the time window value from the entry field"""
+        try:
+            new_window = float(self.window_entry.get())
+            if new_window > 0:
+                self.time_window = new_window
+                print(f"Time window updated to {self.time_window} seconds")
+            else:
+                print("Time window must be a positive number")
+                # Reset to previous value
+                self.window_entry.delete(0, tk.END)
+                self.window_entry.insert(0, str(self.time_window))
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+            # Reset to previous value
+            self.window_entry.delete(0, tk.END)
+            self.window_entry.insert(0, str(self.time_window))
+
     def start(self):
         self.recorder.start()
 
@@ -62,7 +102,6 @@ class DataPlotter:
         return [t - start_time for t in times]
 
     def update_plot(self, frame):
-
         # Clear the plots first
         self.ax_downstream.clear()
         self.ax_upstream.clear()
@@ -92,10 +131,15 @@ class DataPlotter:
                 # Convert string timestamps to seconds since start
                 time_seconds = self.convert_timestamps_to_seconds(timestamp_copy)
 
-                # Only show the last 20 data points if we have more
-                if len(time_seconds) > 20:
-                    time_seconds = time_seconds[-20:]
-                    pressure_copy = pressure_copy[-20:]
+                # Calculate number of points to show based on time_window
+                target_points = int(
+                    self.time_window / 0.5
+                )  # Assuming 0.5s per data point
+
+                # Only show the last N data points if we have more
+                if len(time_seconds) > target_points:
+                    time_seconds = time_seconds[-target_points:]
+                    pressure_copy = pressure_copy[-target_points:]
 
                 # Keep track of all time values for setting axis limits later
                 all_times.extend(time_seconds)
@@ -117,7 +161,10 @@ class DataPlotter:
 
         # Only add a legend if we have data to plot
         if has_data:
+            self.ax_upstream.legend()
             self.ax_downstream.legend()
+
+            # Remove top and right spines for cleaner look
             self.ax_downstream.spines["top"].set_visible(False)
             self.ax_downstream.spines["right"].set_visible(False)
             self.ax_upstream.spines["top"].set_visible(False)
@@ -130,10 +177,16 @@ class DataPlotter:
 
             # Add a small margin (5%) for better visualization
             margin = (x_max - x_min) * 0.05 if x_max > x_min else 0.1
+
+            # Apply the same limits to both plots
+            self.ax_upstream.set_xlim(x_min - margin, x_max + margin)
             self.ax_downstream.set_xlim(x_min - margin, x_max + margin)
         else:
             # Set default limits if no data
-            self.ax_downstream.set_xlim(0, 10)
+            self.ax_upstream.set_xlim(0, self.time_window)
+            self.ax_downstream.set_xlim(0, self.time_window)
+
+        self.canvas.draw()
 
     def on_close(self):
         self.stop()
