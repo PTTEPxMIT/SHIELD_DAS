@@ -116,6 +116,14 @@ class DataPlotter:
         self.ax_downstream.set_xlabel("Time (s)")
         self.ax_downstream.set_ylabel("Pressure (Torr)")
 
+        # Track gauge counts for each location (to assign colors)
+        upstream_count = 0
+        downstream_count = 0
+
+        # Define colors for each location
+        upstream_colors = ["#0066cc", "#003366"]  # Blue, Dark Blue
+        downstream_colors = ["#ff9900", "#cc0000"]  # Orange, Red
+
         # Variables to track the overall min/max x values across all gauges
         all_times = []
         has_data = False  # Flag to check if any data was plotted
@@ -145,24 +153,30 @@ class DataPlotter:
                 all_times.extend(time_seconds)
 
                 if gauge.gauge_location == "upstream":
+                    colour = upstream_colors[upstream_count % len(upstream_colors)]
                     self.ax_upstream.plot(
                         time_seconds,
                         pressure_copy,
                         label=gauge.name,
-                        color="blue",
+                        color=colour,
                     )
+                    upstream_count += 1
                 elif gauge.gauge_location == "downstream":
+                    colour = downstream_colors[
+                        downstream_count % len(downstream_colors)
+                    ]
                     self.ax_downstream.plot(
                         time_seconds,
                         pressure_copy,
                         label=gauge.name,
-                        color="orange",
+                        color=colour,
                     )
+                    downstream_count += 1
 
         # Only add a legend if we have data to plot
         if has_data:
-            self.ax_upstream.legend()
-            self.ax_downstream.legend()
+            self.ax_upstream.legend(loc="upper right")
+            self.ax_downstream.legend(loc="upper right")
 
             # Remove top and right spines for cleaner look
             self.ax_downstream.spines["top"].set_visible(False)
