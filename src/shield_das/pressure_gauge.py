@@ -163,8 +163,8 @@ class CVM211_Gauge(PressureGauge):
         self,
         name="CVM211",
         ain_channel=8,
-        export_filename="WGM701_pressure_data.csv",
-        gauge_location="downstream",
+        export_filename="CVM211_pressure_data.csv",
+        gauge_location="upstream",
         test_mode=False,
     ):
         super().__init__(name, ain_channel, export_filename, gauge_location, test_mode)
@@ -195,7 +195,7 @@ class Baratron626D_Gauge(PressureGauge):
         self,
         name="Baratron626D",
         ain_channel=6,
-        export_filename="WGM701_pressure_data.csv",
+        export_filename="Baratron626D_pressure_data.csv",
         gauge_location="downstream",
         test_mode=False,
     ):
