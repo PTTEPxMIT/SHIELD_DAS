@@ -128,6 +128,10 @@ class DataPlotter:
         all_times = []
         has_data = False  # Flag to check if any data was plotted
 
+        # Variables to track latest y values for each subplot
+        upstream_latest_values = []
+        downstream_latest_values = []
+
         for gauge in self.recorder.gauges:
             # Create a copy of the data to prevent changes during plotting
             timestamp_copy = gauge.timestamp_data.copy()
@@ -151,6 +155,15 @@ class DataPlotter:
 
                 # Keep track of all time values for setting axis limits later
                 all_times.extend(time_seconds)
+
+                # Store the latest value for y-axis scaling
+                if pressure_copy:
+                    latest_value = pressure_copy[-1]
+
+                    if gauge.gauge_location == "upstream":
+                        upstream_latest_values.append(latest_value)
+                    elif gauge.gauge_location == "downstream":
+                        downstream_latest_values.append(latest_value)
 
                 if gauge.gauge_location == "upstream":
                     colour = upstream_colors[upstream_count % len(upstream_colors)]
@@ -186,19 +199,38 @@ class DataPlotter:
 
         # Set limits based on all plotted data, outside the gauge loop
         if all_times:
+            # X-axis limits
             x_min = min(all_times)
             x_max = max(all_times)
 
             # Add a small margin (5%) for better visualization
             margin = (x_max - x_min) * 0.05 if x_max > x_min else 0.1
 
-            # Apply the same limits to both plots
+            # Apply the same x limits to both plots
             self.ax_upstream.set_xlim(x_min - margin, x_max + margin)
             self.ax_downstream.set_xlim(x_min - margin, x_max + margin)
+
+            # Y-axis limits based on latest values
+            if upstream_latest_values:
+                latest_avg = sum(upstream_latest_values) / len(upstream_latest_values)
+                # Set y-limits to show a range around the latest value
+                # Using a factor of 2 to show values from half to double the latest value
+                self.ax_upstream.set_ylim(latest_avg * 0.5, latest_avg * 2)
+
+            if downstream_latest_values:
+                latest_avg = sum(downstream_latest_values) / len(
+                    downstream_latest_values
+                )
+                # Set y-limits to show a range around the latest value
+                self.ax_downstream.set_ylim(latest_avg * 0.5, latest_avg * 2)
         else:
             # Set default limits if no data
             self.ax_upstream.set_xlim(0, self.time_window)
             self.ax_downstream.set_xlim(0, self.time_window)
+
+            # Default y-limits
+            self.ax_upstream.set_ylim(0, 1)
+            self.ax_downstream.set_ylim(0, 1)
 
         self.canvas.draw()
 
