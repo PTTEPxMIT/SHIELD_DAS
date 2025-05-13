@@ -18,6 +18,11 @@ class DataRecorder:
         self.stop_event = Event()
         self.thread = None
 
+        if self.labjack is not None:
+            # Get the calibration constants from the U6, otherwise default nominal values
+            # will be be used for binary to decimal (analog) conversions.
+            self.labjack.getCalibrationData()
+
         for gauge in self.gauges:
             gauge.initialise_export()
 
