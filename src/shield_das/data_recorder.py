@@ -104,6 +104,44 @@ class DataRecorder:
         # Close the U6.
         if self.labjack is not None:
             self.labjack.close()
+    
+    def reset(self):
+        """
+        Reset the recorder to its initial state.
+        This clears all data and prepares for a fresh start.
+        """
+        # Stop recording if it's running
+        self.stop()
+        
+        # Clear data from all gauges
+        for gauge in self.gauges:
+            gauge.timestamp_data = []
+            gauge.pressure_data = []
+            gauge.voltage_data = []
+            gauge.backup_counter = 0
+            gauge.measurements_since_backup = 0
+        
+        # Create a new results directory
+        self.run_dir = self._create_results_directory()
+        
+        # Create new backup directory
+        self.backup_dir = os.path.join(self.run_dir, "backup")
+        os.makedirs(self.backup_dir, exist_ok=True)
+        
+        # Reinitialize gauge exports with the new paths
+        for gauge in self.gauges:
+            # Update export filename to include the new results directory
+            original_filename = os.path.basename(gauge.export_filename)
+            gauge.export_filename = os.path.join(self.run_dir, original_filename)
+            gauge.initialise_export()
+            
+            # Initialize backup for this gauge
+            gauge.initialise_backup(self.backup_dir)
+        
+        # Reset elapsed time
+        self.elapsed_time = 0.0
+        
+        print(f"DataRecorder reset. New run directory: {self.run_dir}")
 
     def record_data(self):
         """
