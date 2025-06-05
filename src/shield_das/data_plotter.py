@@ -5,6 +5,7 @@ from dash.dependencies import Input, Output
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import dash_bootstrap_components as dbc
+
 import threading
 import webbrowser
 
@@ -191,10 +192,13 @@ class DataPlotter:
             button_id = ctx.triggered[0]["prop_id"].split(".")[0]
 
             if button_id == "start-button":
-                self.recorder.start()
+                # Start a fresh recording session
+                self.recorder.reset()  # Reset everything first
+                self.recorder.start()  # Then start recording
                 self.recording_started = True
                 return True, False
             elif button_id == "stop-button":
+                # Stop recording and reset for next run
                 self.recorder.stop()
                 self.recording_started = False
                 return False, True
