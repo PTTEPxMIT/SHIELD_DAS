@@ -1,239 +1,233 @@
-import tkinter as tk
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import matplotlib.animation as animation
-from matplotlib.figure import Figure
 from .data_recorder import DataRecorder
-from datetime import datetime
+import dash
+from dash import dcc, html
+from dash.dependencies import Input, Output
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import dash_bootstrap_components as dbc
+import threading
+import webbrowser
 
 
 class DataPlotter:
-    def __init__(self, root, recorder: DataRecorder):
-        self.root = root
+    def __init__(self, recorder: DataRecorder, port=8050):
         self.recorder = recorder
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.port = port
+        self.app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+        self.app_running = False
+        self.server_thread = None
 
-        # Default window size in seconds
-        self.time_window = 10
+        # Setup the app layout
+        self.app.layout = self.create_layout()
 
-        # Layout frames
-        self.control_frame = tk.Frame(root)
-        self.control_frame.pack(side=tk.TOP, fill=tk.X)
+        # Register callbacks
+        self.register_callbacks()
 
-        # Add window size control
-        self.window_frame = tk.Frame(self.control_frame)
-        self.window_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=5)
+        # Flag to track if recording has been started
+        self.recording_started = False
 
-        # Label for the entry
-        self.window_label = tk.Label(self.window_frame, text="Time Window (seconds):")
-        self.window_label.pack(side=tk.LEFT, padx=(0, 5))
-
-        # Entry for time window
-        self.window_entry = tk.Entry(self.window_frame, width=10)
-        self.window_entry.insert(0, str(self.time_window))
-        self.window_entry.pack(side=tk.LEFT)
-
-        # Button to apply the changes
-        self.apply_button = tk.Button(
-            self.window_frame, text="Apply", command=self.update_time_window
+    def create_layout(self):
+        return dbc.Container(
+            [
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            html.H1(
+                                "SHIELD Data Acquisition System",
+                                className="text-center mb-4",
+                            ),
+                            width=12,
+                        )
+                    ]
+                ),
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                dbc.Button(
+                                    "Start Recording",
+                                    id="start-button",
+                                    color="success",
+                                    className="me-2",
+                                ),
+                                dbc.Button(
+                                    "Stop Recording", id="stop-button", color="danger"
+                                ),
+                            ],
+                            width=12,
+                            className="text-center mb-4",
+                        )
+                    ]
+                ),
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader("Pressure Readings"),
+                                        dbc.CardBody(
+                                            [
+                                                dcc.Graph(id="pressure-plots"),
+                                                dcc.Interval(
+                                                    id="interval-component",
+                                                    interval=500,  # in milliseconds
+                                                    n_intervals=0,
+                                                ),
+                                            ]
+                                        ),
+                                    ]
+                                )
+                            ],
+                            width=12,
+                        )
+                    ]
+                ),
+            ],
+            fluid=True,
         )
-        self.apply_button.pack(side=tk.LEFT, padx=5)
 
-        self.plot_frame = tk.Frame(root)
-        self.plot_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-
-        # Create the figure with two subplots
-        self.fig = Figure(figsize=(10, 4), dpi=100)
-        self.ax_upstream = self.fig.add_subplot(121)
-        self.ax_downstream = self.fig.add_subplot(122)
-
-        self.ax_upstream.set_title("Upstream Pressures")
-        self.ax_downstream.set_title("Downstream Pressures")
-
-        self.ax_upstream.set_xlabel("Time (s)")
-        self.ax_upstream.set_ylabel("Pressure (Torr)")
-
-        self.ax_downstream.set_xlabel("Time (s)")
-        self.ax_downstream.set_ylabel("Pressure (Torr)")
-
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_frame)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        # Animation
-        self.ani = animation.FuncAnimation(
-            self.fig, self.update_plot, interval=500, cache_frame_data=False
+    def register_callbacks(self):
+        @self.app.callback(
+            Output("pressure-plots", "figure"),
+            Input("interval-component", "n_intervals"),
         )
+        def update_plots(n_intervals):
+            # Create figure with two subplots side by side
+            fig = make_subplots(
+                rows=1,
+                cols=2,
+                subplot_titles=("Upstream Pressures", "Downstream Pressures"),
+                shared_yaxes=False,
+            )
 
-    def update_time_window(self):
-        """Update the time window value from the entry field"""
-        try:
-            new_window = float(self.window_entry.get())
-            if new_window > 0:
-                self.time_window = new_window
-                print(f"Time window updated to {self.time_window} seconds")
-            else:
-                print("Time window must be a positive number")
-                # Reset to previous value
-                self.window_entry.delete(0, tk.END)
-                self.window_entry.insert(0, str(self.time_window))
-        except ValueError:
-            print("Invalid input. Please enter a number.")
-            # Reset to previous value
-            self.window_entry.delete(0, tk.END)
-            self.window_entry.insert(0, str(self.time_window))
+            # Track if we have data to display
+            has_data = False
+            all_times = []
 
-    def start(self):
-        self.recorder.start()
+            # Create figure
+            for gauge in self.recorder.gauges:
+                # Create a copy of the data to prevent changes during plotting
+                timestamp_copy = gauge.timestamp_data.copy()
+                pressure_copy = gauge.pressure_data.copy()
 
-    def stop(self):
-        self.recorder.stop()
+                # Only proceed if we have data
+                if len(timestamp_copy) > 0:
+                    has_data = True
+                    # Convert string timestamps to seconds since start
+                    time_seconds = self.convert_timestamps_to_seconds(timestamp_copy)
+
+                    # Only show the last 20 data points if we have more
+                    if len(time_seconds) > 20:
+                        time_seconds = time_seconds[-20:]
+                        pressure_copy = pressure_copy[-20:]
+
+                    # Keep track of all time values for setting axis limits later
+                    all_times.extend(time_seconds)
+
+                    # Add trace to appropriate subplot
+                    if gauge.gauge_location == "upstream":
+                        fig.add_trace(
+                            go.Scatter(
+                                x=time_seconds,
+                                y=pressure_copy,
+                                mode="lines+markers",
+                                name=gauge.name,
+                                line=dict(color="blue"),
+                            ),
+                            row=1,
+                            col=1,
+                        )
+                    elif gauge.gauge_location == "downstream":
+                        fig.add_trace(
+                            go.Scatter(
+                                x=time_seconds,
+                                y=pressure_copy,
+                                mode="lines+markers",
+                                name=gauge.name,
+                                line=dict(color="orange"),
+                            ),
+                            row=1,
+                            col=2,
+                        )
+
+            # Set x-axis limits based on data
+            if all_times:
+                x_min = min(all_times)
+                x_max = max(all_times)
+                margin = (x_max - x_min) * 0.05 if x_max > x_min else 0.1
+
+                fig.update_xaxes(range=[x_min - margin, x_max + margin], row=1, col=1)
+                fig.update_xaxes(range=[x_min - margin, x_max + margin], row=1, col=2)
+
+            # Update layout
+            fig.update_layout(
+                height=500,
+                xaxis_title="Time (s)",
+                yaxis_title="Pressure (Torr)",
+                xaxis2_title="Time (s)",
+                yaxis2_title="Pressure (Torr)",
+                legend=dict(
+                    orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
+                ),
+                template="plotly_white",
+            )
+
+            return fig
+
+        @self.app.callback(
+            Output("start-button", "disabled"),
+            Output("stop-button", "disabled"),
+            Input("start-button", "n_clicks"),
+            Input("stop-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def handle_buttons(start_clicks, stop_clicks):
+            ctx = dash.callback_context
+
+            if not ctx.triggered:
+                return False, True
+
+            button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+            if button_id == "start-button":
+                self.recorder.start()
+                self.recording_started = True
+                return True, False
+            elif button_id == "stop-button":
+                self.recorder.stop()
+                self.recording_started = False
+                return False, True
+
+            # Default state
+            return False, True
 
     def convert_timestamps_to_seconds(self, timestamp_strings):
         """Convert string timestamps to seconds since first timestamp"""
         if not timestamp_strings:
             return []
 
-        times = []
-        for ts_str in timestamp_strings:
-            dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S.%f")
-            times.append(dt.timestamp())
+        # For simple numeric timestamps, just convert the strings to floats
+        return [float(ts_str) for ts_str in timestamp_strings]
 
-        # Calculate seconds since first timestamp
-        start_time = times[0]
-        return [t - start_time for t in times]
+    def start(self):
+        """Start the Dash web server in a separate thread"""
+        if not self.app_running:
+            self.app_running = True
 
-    def update_plot(self, frame):
-        # Clear the plots first
-        self.ax_downstream.clear()
-        self.ax_upstream.clear()
+            # Open web browser after a short delay
+            threading.Timer(
+                1.0, lambda: webbrowser.open(f"http://127.0.0.1:{self.port}")
+            ).start()
 
-        # Reset titles and labels
-        self.ax_upstream.set_title("Upstream Pressures")
-        self.ax_downstream.set_title("Downstream Pressures")
+            # Start the server in a separate thread
+            self.server_thread = threading.Thread(
+                target=lambda: self.app.run(debug=False, port=self.port)
+            )
+            self.server_thread.daemon = True
+            self.server_thread.start()
 
-        self.ax_upstream.set_xlabel("Time (s)")
-        self.ax_upstream.set_ylabel("Pressure (Torr)")
-
-        self.ax_downstream.set_xlabel("Time (s)")
-        self.ax_downstream.set_ylabel("Pressure (Torr)")
-
-        # Track gauge counts for each location (to assign colors)
-        upstream_count = 0
-        downstream_count = 0
-
-        # Define colors for each location
-        upstream_colors = ["#0066cc", "#003366"]  # Blue, Dark Blue
-        downstream_colors = ["#ff9900", "#cc0000"]  # Orange, Red
-
-        # Variables to track the overall min/max x values across all gauges
-        all_times = []
-        has_data = False  # Flag to check if any data was plotted
-
-        # Variables to track latest y values for each subplot
-        upstream_latest_values = []
-        downstream_latest_values = []
-
-        for gauge in self.recorder.gauges:
-            # Create a copy of the data to prevent changes during plotting
-            timestamp_copy = gauge.timestamp_data.copy()
-            pressure_copy = gauge.pressure_data.copy()
-
-            # Only proceed if we have data
-            if len(timestamp_copy) > 0:
-                has_data = True  # We have data to plot
-                # Convert string timestamps to seconds since start
-                time_seconds = self.convert_timestamps_to_seconds(timestamp_copy)
-
-                # Calculate number of points to show based on time_window
-                target_points = int(
-                    self.time_window / 0.5
-                )  # Assuming 0.5s per data point
-
-                # Only show the last N data points if we have more
-                if len(time_seconds) > target_points:
-                    time_seconds = time_seconds[-target_points:]
-                    pressure_copy = pressure_copy[-target_points:]
-
-                # Keep track of all time values for setting axis limits later
-                all_times.extend(time_seconds)
-
-                # Store the latest value for y-axis scaling
-                if pressure_copy:
-                    latest_value = pressure_copy[-1]
-
-                    if gauge.gauge_location == "upstream":
-                        upstream_latest_values.append(latest_value)
-                    elif gauge.gauge_location == "downstream":
-                        downstream_latest_values.append(latest_value)
-
-                if gauge.gauge_location == "upstream":
-                    colour = upstream_colors[upstream_count % len(upstream_colors)]
-                    self.ax_upstream.plot(
-                        time_seconds,
-                        pressure_copy,
-                        label=gauge.name,
-                        color=colour,
-                    )
-                    upstream_count += 1
-                elif gauge.gauge_location == "downstream":
-                    colour = downstream_colors[
-                        downstream_count % len(downstream_colors)
-                    ]
-                    self.ax_downstream.plot(
-                        time_seconds,
-                        pressure_copy,
-                        label=gauge.name,
-                        color=colour,
-                    )
-                    downstream_count += 1
-
-        # Only add a legend if we have data to plot
-        if has_data:
-            self.ax_upstream.legend(loc="upper right")
-            self.ax_downstream.legend(loc="upper right")
-
-            # Remove top and right spines for cleaner look
-            self.ax_downstream.spines["top"].set_visible(False)
-            self.ax_downstream.spines["right"].set_visible(False)
-            self.ax_upstream.spines["top"].set_visible(False)
-            self.ax_upstream.spines["right"].set_visible(False)
-
-        # Set limits based on all plotted data, outside the gauge loop
-        if all_times:
-            # X-axis limits
-            x_min = min(all_times)
-            x_max = max(all_times)
-
-            # Add a small margin (5%) for better visualization
-            margin = (x_max - x_min) * 0.05 if x_max > x_min else 0.1
-
-            # Apply the same x limits to both plots
-            self.ax_upstream.set_xlim(x_min - margin, x_max + margin)
-            self.ax_downstream.set_xlim(x_min - margin, x_max + margin)
-
-            # Y-axis limits based on latest values
-            if upstream_latest_values:
-                latest_avg = sum(upstream_latest_values) / len(upstream_latest_values)
-                # Set y-limits to show a range around the latest value
-                # Using a factor of 2 to show values from half to double the latest value
-                self.ax_upstream.set_ylim(latest_avg * 0.5, latest_avg * 2)
-
-            if downstream_latest_values:
-                latest_avg = sum(downstream_latest_values) / len(
-                    downstream_latest_values
-                )
-                # Set y-limits to show a range around the latest value
-                self.ax_downstream.set_ylim(latest_avg * 0.5, latest_avg * 2)
-        else:
-            # Set default limits if no data
-            self.ax_upstream.set_xlim(0, self.time_window)
-            self.ax_downstream.set_xlim(0, self.time_window)
-
-            # Default y-limits
-            self.ax_upstream.set_ylim(0, 1)
-            self.ax_downstream.set_ylim(0, 1)
-
-        self.canvas.draw()
-
-    def on_close(self):
-        self.stop()
-        self.root.destroy()
+    def stop(self):
+        """Stop the data recorder"""
+        if self.recording_started:
+            self.recorder.stop()
