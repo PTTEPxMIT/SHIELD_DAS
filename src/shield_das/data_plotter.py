@@ -28,72 +28,57 @@ class DataPlotter:
         self.recording_started = False
 
     def create_layout(self):
-        return dbc.Container(
-            [
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            html.H1(
-                                "SHIELD Data Acquisition System",
-                                className="text-center mb-4",
-                            ),
-                            width=12,
-                        )
-                    ]
-                ),
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            [
-                                dbc.Button(
-                                    "Start Recording",
-                                    id="start-button",
-                                    color="success",
-                                    className="me-2",
-                                ),
-                                dbc.Button(
-                                    "Stop Recording", id="stop-button", color="danger"
-                                ),
-                            ],
-                            width=12,
-                            className="text-center mb-4",
-                        )
-                    ]
-                ),
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            [
-                                dbc.Card(
-                                    [
-                                        dbc.CardHeader("Pressure Readings"),
-                                        dbc.CardBody(
-                                            [
-                                                dcc.Graph(id="pressure-plots"),
-                                                dcc.Interval(
-                                                    id="interval-component",
-                                                    interval=500,  # in milliseconds
-                                                    n_intervals=0,
-                                                ),
-                                            ]
-                                        ),
-                                    ]
-                                )
-                            ],
-                            width=12,
-                        )
-                    ]
-                ),
-            ],
-            fluid=True,
-        )
+        return dbc.Container([
+            dbc.Row([
+                dbc.Col(
+                    html.H1("SHIELD Data Acquisition System", className="text-center mb-4"),
+                    width=12
+                )
+            ]),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Button("Start Recording", id="start-button", color="success", className="me-2"),
+                    dbc.Button("Stop Recording", id="stop-button", color="danger")
+                ], width=12, className="text-center mb-4")
+            ]),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader("Pressure Readings"),
+                        dbc.CardBody([
+                            dcc.Graph(id="pressure-plots"),
+                            dcc.Interval(
+                                id="interval-component",
+                                interval=500,  # in milliseconds
+                                n_intervals=0
+                            )
+                        ])
+                    ])
+                ], width=12)
+            ]),
+            # New row for the toggle, centered below the graphs
+            dbc.Row([
+                dbc.Col([
+                    dbc.Switch(
+                        id="error-bars-toggle",
+                        label="Show Error Bars",
+                        value=True,
+                        className="d-inline-block mt-3"  # Add margin top
+                    )
+                ], width=12, className="text-center mb-3")  # Center the content
+            ])
+        ], fluid=True)
 
     def register_callbacks(self):
         @self.app.callback(
             Output("pressure-plots", "figure"),
-            Input("interval-component", "n_intervals"),
+            [Input("interval-component", "n_intervals"),
+            Input("error-bars-toggle", "value")],
         )
-        def update_plots(n_intervals):
+        def update_plots(n_intervals, show_errors):  # No 'self' parameter here
+            # show_errors will be True/False instead of a list with dbc.Switch
+            show_error_bars = show_errors
+
             # Create figure with two subplots side by side
             fig = make_subplots(
                 rows=1,
@@ -105,6 +90,14 @@ class DataPlotter:
             # Track if we have data to display
             has_data = False
             all_times = []
+            
+            # Track gauge counts for each location (to assign colors)
+            upstream_count = 0
+            downstream_count = 0
+            
+            # Define colors for each location
+            upstream_colors = ["#0066cc", "#003366"]  # Blue, Dark Blue
+            downstream_colors = ["#ff9900", "#cc0000"]  # Orange, Red
 
             # Create figure
             for gauge in self.recorder.gauges:
@@ -125,28 +118,53 @@ class DataPlotter:
 
                     # Keep track of all time values for setting axis limits later
                     all_times.extend(time_seconds)
-
+                    
+                    # Calculate error bars for each pressure value
+                    error_values = [gauge.calculate_error(p) for p in pressure_copy]
+                    
                     # Add trace to appropriate subplot
                     if gauge.gauge_location == "upstream":
+                        color = upstream_colors[upstream_count % len(upstream_colors)]
+                        upstream_count += 1
+                        
                         fig.add_trace(
                             go.Scatter(
                                 x=time_seconds,
                                 y=pressure_copy,
                                 mode="lines+markers",
                                 name=gauge.name,
-                                line=dict(color="blue"),
+                                line=dict(color=color),
+                                error_y=dict(
+                                    type='data',
+                                    array=error_values,
+                                    visible=show_error_bars,
+                                    color=color,
+                                    thickness=1.5,
+                                    width=3
+                                )
                             ),
                             row=1,
                             col=1,
                         )
                     elif gauge.gauge_location == "downstream":
+                        color = downstream_colors[downstream_count % len(downstream_colors)]
+                        downstream_count += 1
+                        
                         fig.add_trace(
                             go.Scatter(
                                 x=time_seconds,
                                 y=pressure_copy,
                                 mode="lines+markers",
                                 name=gauge.name,
-                                line=dict(color="orange"),
+                                line=dict(color=color),
+                                error_y=dict(
+                                    type='data',
+                                    array=error_values,
+                                    visible=show_error_bars,
+                                    color=color,
+                                    thickness=1.5,
+                                    width=3
+                                )
                             ),
                             row=1,
                             col=2,
@@ -177,10 +195,10 @@ class DataPlotter:
             return fig
 
         @self.app.callback(
-            Output("start-button", "disabled"),
-            Output("stop-button", "disabled"),
-            Input("start-button", "n_clicks"),
-            Input("stop-button", "n_clicks"),
+            [Output("start-button", "disabled"),
+             Output("stop-button", "disabled")],
+            [Input("start-button", "n_clicks"),
+             Input("stop-button", "n_clicks")],
             prevent_initial_call=True,
         )
         def handle_buttons(start_clicks, stop_clicks):

@@ -91,7 +91,7 @@ class PressureGauge:
             timestamp (str): The timestamp of the reading
         """
         if self.test_mode:
-            pressure = np.random.uniform(400, 500)
+            pressure = np.random.uniform(1, 50)
             self.timestamp_data.append(timestamp)
             self.voltage_data.append("test_mode")
             self.pressure_data.append(pressure)
@@ -191,8 +191,32 @@ class WGM701_Gauge(PressureGauge):
         # Convert voltage to pressure in Torr
         pressure = 10 ** ((voltage - 5.5) / 0.5)
 
+        if pressure > 760:
+            pressure = 760
+        elif pressure < 7.6e-10:
+            pressure = 7.6e-10
+
         return pressure
 
+    def calculate_error(self, pressure_value:float) -> float:
+        """
+        Calculate the error in the pressure reading.
+
+        Args:
+            pressure_value: The pressure reading in Torr
+
+        Returns:
+            float: The error in the pressure reading
+        """
+
+        if 7.6e-09 < pressure_value < 7.6e-03:
+            error = pressure_value * 0.3
+        elif 7.6e-03 < pressure_value < 75:
+            error = pressure_value * 0.15
+        elif 75 < pressure_value < 760:
+            error = pressure_value * 0.5
+
+        return error
 
 class CVM211_Gauge(PressureGauge):
     """
@@ -223,7 +247,32 @@ class CVM211_Gauge(PressureGauge):
         # Convert voltage to pressure in Torr
         pressure = 10 ** (voltage - 5)
 
+        if pressure > 1000:
+            pressure = 1000
+        elif pressure < 1e-04:
+            pressure = 1e-04
+
         return pressure
+
+    def calculate_error(self, pressure_value:float) -> float:
+        """
+        Calculate the error in the pressure reading.
+
+        Args:`
+            pressure_value: The pressure reading in Torr
+
+        Returns:
+            float: The error in the pressure reading
+        """
+        
+        if 1e-04 < pressure_value < 1e-03:
+            error = 0.1e-03
+        elif 1e-03 < pressure_value < 400:
+            error = pressure_value * 0.1
+        elif 400 < pressure_value < 1000:
+            error = pressure_value * 0.025
+
+        return error
 
 
 class Baratron626D_Gauge(PressureGauge):
@@ -263,3 +312,21 @@ class Baratron626D_Gauge(PressureGauge):
                 pressure = 1
 
         return pressure
+
+    def calculate_error(self, pressure_value:float) -> float:
+        """
+        Calculate the error in the pressure reading.
+
+        Args:
+            pressure_value: The pressure reading in Torr
+
+        Returns:
+            float: The error in the pressure reading
+        """
+
+        if 1 < pressure_value < 1000:
+            error = pressure_value * 0.0025
+        elif pressure_value < 1:
+            error = pressure_value * 0.005
+
+        return error
