@@ -2,6 +2,8 @@ from threading import Thread, Event
 import time
 from datetime import datetime
 from .pressure_gauge import PressureGauge
+import os
+import glob
 
 
 class DataRecorder:
@@ -10,21 +12,74 @@ class DataRecorder:
         self,
         gauges: list[PressureGauge],
         labjack=None,
+        results_dir="results"
     ):
 
         self.gauges = gauges
         self.labjack = labjack
+        self.results_dir = results_dir
 
         self.stop_event = Event()
         self.thread = None
+
+        # Create the results directory path
+        self.run_dir = self._create_results_directory()
 
         if self.labjack is not None:
             # Get the calibration constants from the U6, otherwise default nominal values
             # will be be used for binary to decimal (analog) conversions.
             self.labjack.getCalibrationData()
 
+        # Initialize gauge exports with the new paths
         for gauge in self.gauges:
+            # Update export filename to include the results directory
+            original_filename = os.path.basename(gauge.export_filename)
+            gauge.export_filename = os.path.join(self.run_dir, original_filename)
             gauge.initialise_export()
+
+    
+    def _create_results_directory(self):
+        """
+        Creates a new directory for the results based on current date and run number.
+        Returns the path to the created directory.
+        """
+        # Create the main results directory if it doesn't exist
+        if not os.path.exists(self.results_dir):
+            os.makedirs(self.results_dir)
+        
+        # Get current date in MM.DD format
+        current_date = datetime.now().strftime("%m.%d")
+        date_dir = os.path.join(self.results_dir, current_date)
+        
+        # Create the date directory if it doesn't exist
+        if not os.path.exists(date_dir):
+            os.makedirs(date_dir)
+        
+        # Find the highest run number for today
+        run_dirs = glob.glob(os.path.join(date_dir, "run_*"))
+        run_numbers = []
+        
+        for dir_path in run_dirs:
+            dir_name = os.path.basename(dir_path)
+            try:
+                # Extract the number after "run_"
+                run_number = int(dir_name.split("_")[1])
+                run_numbers.append(run_number)
+            except (IndexError, ValueError):
+                # Skip directories that don't match the pattern
+                continue
+        
+        # Set next run number (start with 1 if none exist)
+        next_run = 1
+        if run_numbers:
+            next_run = max(run_numbers) + 1
+        
+        # Create the new run directory
+        run_dir = os.path.join(date_dir, f"run_{next_run}")
+        os.makedirs(run_dir)
+        
+        print(f"Created results directory: {run_dir}")
+        return run_dir
 
     def start(self):
         self.stop_event.clear()
