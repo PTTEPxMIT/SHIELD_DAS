@@ -41,27 +41,23 @@ class DataRecorder:
             self.labjack.close()
 
     def record_data(self):
-        # Overwrite the output file with header
-
-        last_recorded = -1
+        """
+        Record data from all gauges at a fixed interval of 0.5 seconds.
+        """
+        # Start with elapsed time of 0
+        self.elapsed_time = 0.0
 
         while not self.stop_event.is_set():
-            now = time.time()
-            fractional = now % 1
+            # Format the elapsed time with 1 decimal place
+            timestamp = f"{self.elapsed_time:.1f}"
 
-            if abs(fractional - 0.0) < 0.05 or abs(fractional - 0.5) < 0.05:
-                rounded_time = round(now * 2) / 2
-                if rounded_time != last_recorded:
-                    dt = datetime.fromtimestamp(rounded_time)
-                    timestamp = (
-                        dt.strftime("%Y-%m-%d %H:%M:%S")
-                        + f".{int(dt.microsecond / 100000)}"
-                    )
+            # Get data from each gauge
+            for gauge in self.gauges:
+                gauge.get_data(labjack=self.labjack, timestamp=timestamp)
+                gauge.export_write()
 
-                    for gauge in self.gauges:
-                        gauge.get_data(labjack=self.labjack, timestamp=timestamp)
-                        gauge.export_write()
+            # Sleep for 0.5 seconds before next reading
+            time.sleep(0.5)
 
-                    last_recorded = rounded_time
-
-            time.sleep(0.01)
+            # Increment the elapsed time
+            self.elapsed_time += 0.5
