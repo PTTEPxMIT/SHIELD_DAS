@@ -42,9 +42,9 @@ class PressureGauge:
     def get_ain_channel_voltage(
         self,
         labjack,
-        resolution_index: float = 0,
-        gain_index: float = 0,
-        settling_factor: float = 0,
+        resolution_index: int = 0,
+        gain_index: int = 0,
+        settling_factor: int = 0,
     ) -> float:
         """
         Obtains the voltage reading from a channel of the LabJack u6 hub.
@@ -62,13 +62,9 @@ class PressureGauge:
             # Simulate a voltage reading for testing purposes
             return round(np.random.uniform(6.8, 6.9), 4)
 
-        # Common analog input settings.
-        resolution_index = 0  # Resolution Index = 0 (default)
-        gain_index = 0  # Gain Index = 0 (x1 which is +/-10V range)
-        settling_factor = 0  # Settling Factor = 0 (auto)
-
         # Get a single-ended reading from AIN0 using the getAIN convenience method.
         # getAIN will get the binary voltage and convert it to a decimal value.
+
         ain_channel_voltage = labjack.getAIN(
             positiveChannel=self.ain_channel,
             resolutionIndex=resolution_index,

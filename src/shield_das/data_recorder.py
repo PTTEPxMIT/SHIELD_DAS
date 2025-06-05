@@ -1,164 +1,153 @@
-from threading import Thread, Event
+from threading import Thread, Event, Lock
 import time
 from datetime import datetime
 from .pressure_gauge import PressureGauge
 import os
 import glob
 
+from queue import Queue
+import threading
+
 
 class DataRecorder:
-
-    def __init__(
-        self,
-        gauges: list[PressureGauge],
-        labjack=None,
-        results_dir="results"
-    ):
-
+    def __init__(self, gauges, labjack=None, results_dir="results"):
         self.gauges = gauges
-        self.labjack = labjack
+        self.labjack_config = labjack  # Just reference for detection
         self.results_dir = results_dir
-
-        self.stop_event = Event()
+        
+        # Thread control
+        self.stop_event = threading.Event()
         self.thread = None
-
-        # Create the results directory path
+        
+        # Create results directories and setup files
         self.run_dir = self._create_results_directory()
-
-        # Create backup directory
         self.backup_dir = os.path.join(self.run_dir, "backup")
         os.makedirs(self.backup_dir, exist_ok=True)
-
-        if self.labjack is not None:
-            # Get the calibration constants from the U6, otherwise default nominal values
-            # will be be used for binary to decimal (analog) conversions.
-            self.labjack.getCalibrationData()
-
-        # Initialize gauge exports with the new paths
-        for gauge in self.gauges:
-            # Update export filename to include the results directory
-            original_filename = os.path.basename(gauge.export_filename)
-            gauge.export_filename = os.path.join(self.run_dir, original_filename)
-            gauge.initialise_export()
-
-            # Initialize backup for this gauge
-            gauge.initialise_backup(self.backup_dir)
-
+        
+        # Setup gauge exports
+        self._setup_gauge_exports()
+        
         # Initialize elapsed time
         self.elapsed_time = 0.0
 
-    
     def _create_results_directory(self):
-        """
-        Creates a new directory for the results based on current date and run number.
-        Returns the path to the created directory.
-        """
-        # Create the main results directory if it doesn't exist
-        if not os.path.exists(self.results_dir):
-            os.makedirs(self.results_dir)
+        """Creates a new directory for results based on date and run number"""
+        # Create main results directory
+        os.makedirs(self.results_dir, exist_ok=True)
         
-        # Get current date in MM.DD format
+        # Get current date and create date directory
         current_date = datetime.now().strftime("%m.%d")
         date_dir = os.path.join(self.results_dir, current_date)
+        os.makedirs(date_dir, exist_ok=True)
         
-        # Create the date directory if it doesn't exist
-        if not os.path.exists(date_dir):
-            os.makedirs(date_dir)
-        
-        # Find the highest run number for today
+        # Find highest run number
         run_dirs = glob.glob(os.path.join(date_dir, "run_*"))
-        run_numbers = []
+        run_numbers = [
+            int(os.path.basename(d).split("_")[1]) 
+            for d in run_dirs 
+            if os.path.basename(d).split("_")[1].isdigit()
+        ]
         
-        for dir_path in run_dirs:
-            dir_name = os.path.basename(dir_path)
-            try:
-                # Extract the number after "run_"
-                run_number = int(dir_name.split("_")[1])
-                run_numbers.append(run_number)
-            except (IndexError, ValueError):
-                # Skip directories that don't match the pattern
-                continue
+        # Set next run number
+        next_run = 1 if not run_numbers else max(run_numbers) + 1
         
-        # Set next run number (start with 1 if none exist)
-        next_run = 1
-        if run_numbers:
-            next_run = max(run_numbers) + 1
-        
-        # Create the new run directory
+        # Create run directory
         run_dir = os.path.join(date_dir, f"run_{next_run}")
         os.makedirs(run_dir)
-        
         print(f"Created results directory: {run_dir}")
+        
         return run_dir
-
-    def start(self):
-        self.stop_event.clear()
-        self.thread = Thread(target=self.record_data)
-        self.thread.start()
-
-    def stop(self):
-        self.stop_event.set()
-        if self.thread:
-            self.thread.join()
-
-        # Close the U6.
-        if self.labjack is not None:
-            self.labjack.close()
     
-    def reset(self):
-        """
-        Reset the recorder to its initial state.
-        This clears all data and prepares for a fresh start.
-        """
-        # Stop recording if it's running
-        self.stop()
-        
-        # Clear data from all gauges
+    def _setup_gauge_exports(self):
+        """Setup export files for all gauges"""
         for gauge in self.gauges:
-            gauge.timestamp_data = []
-            gauge.pressure_data = []
-            gauge.voltage_data = []
-            gauge.backup_counter = 0
-            gauge.measurements_since_backup = 0
-        
-        # Create a new results directory
-        self.run_dir = self._create_results_directory()
-        
-        # Create new backup directory
-        self.backup_dir = os.path.join(self.run_dir, "backup")
-        os.makedirs(self.backup_dir, exist_ok=True)
-        
-        # Reinitialize gauge exports with the new paths
-        for gauge in self.gauges:
-            # Update export filename to include the new results directory
+            # Update path and initialize export
             original_filename = os.path.basename(gauge.export_filename)
             gauge.export_filename = os.path.join(self.run_dir, original_filename)
             gauge.initialise_export()
             
-            # Initialize backup for this gauge
-            gauge.initialise_backup(self.backup_dir)
+            # Initialize backup if supported
+            if hasattr(gauge, 'initialise_backup'):
+                gauge.initialise_backup(self.backup_dir)
+    
+    def start(self):
+        """Start recording data"""
+        self.stop_event.clear()
+        self.thread = threading.Thread(target=self.record_data)
+        self.thread.daemon = True
+        self.thread.start()
+    
+    def stop(self):
+        """Stop recording data"""
+        self.stop_event.set()
+        if self.thread:
+            self.thread.join(timeout=2.0)
+    
+    def reset(self):
+        """Reset for a new run"""
+        # Stop current recording
+        self.stop()
         
-        # Reset elapsed time
+        # Clear data
+        for gauge in self.gauges:
+            gauge.timestamp_data = []
+            gauge.pressure_data = []
+            gauge.voltage_data = []
+            if hasattr(gauge, 'backup_counter'):
+                gauge.backup_counter = 0
+        
+        # Create new directories
+        self.run_dir = self._create_results_directory()
+        self.backup_dir = os.path.join(self.run_dir, "backup")
+        os.makedirs(self.backup_dir, exist_ok=True)
+        
+        # Setup exports again
+        self._setup_gauge_exports()
+        
+        # Reset time
+        self.elapsed_time = 0.0
+    
+    def record_data(self):
+        """Record data from all gauges"""
+        # Create thread-local LabJack
+        thread_labjack = None
+        if self.labjack_config is not None:
+            try:
+                import u6
+                thread_labjack = u6.U6(firstFound=True)
+                thread_labjack.getCalibrationData()
+                print("LabJack connected")
+            except Exception as e:
+                print(f"LabJack connection error: {e}")
+        
+        # Start with elapsed time of 0
         self.elapsed_time = 0.0
         
-        print(f"DataRecorder reset. New run directory: {self.run_dir}")
-
-    def record_data(self):
-        """
-        Record data from all gauges at a fixed interval of 0.5 seconds.
-        """
-
+        # Main data collection loop
         while not self.stop_event.is_set():
-            # Format the elapsed time with 1 decimal place
             timestamp = f"{self.elapsed_time:.1f}"
-
-            # Get data from each gauge
+            
             for gauge in self.gauges:
-                gauge.get_data(labjack=self.labjack, timestamp=timestamp)
+                try:
+                    # Get data based on mode
+                    if gauge.test_mode or thread_labjack is None:
+                        gauge.get_data(labjack=None, timestamp=timestamp)
+                    else:
+                        print("coucou")
+                        gauge.get_data(labjack=thread_labjack, timestamp=timestamp)
+                except Exception as e:
+                    print(f"Error reading from {gauge.name}: {e}")
+                
+                # Always write to file
                 gauge.export_write()
-
-            # Sleep for 0.5 seconds before next reading
+            
+            # Sleep and increment time
             time.sleep(0.5)
-
-            # Increment the elapsed time
             self.elapsed_time += 0.5
+        
+        # Cleanup
+        if thread_labjack:
+            try:
+                thread_labjack.close()
+            except:
+                pass
