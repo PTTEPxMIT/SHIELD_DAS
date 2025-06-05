@@ -25,6 +25,10 @@ class DataRecorder:
         # Create the results directory path
         self.run_dir = self._create_results_directory()
 
+        # Create backup directory
+        self.backup_dir = os.path.join(self.run_dir, "backup")
+        os.makedirs(self.backup_dir, exist_ok=True)
+
         if self.labjack is not None:
             # Get the calibration constants from the U6, otherwise default nominal values
             # will be be used for binary to decimal (analog) conversions.
@@ -36,6 +40,12 @@ class DataRecorder:
             original_filename = os.path.basename(gauge.export_filename)
             gauge.export_filename = os.path.join(self.run_dir, original_filename)
             gauge.initialise_export()
+
+            # Initialize backup for this gauge
+            gauge.initialise_backup(self.backup_dir)
+
+        # Initialize elapsed time
+        self.elapsed_time = 0.0
 
     
     def _create_results_directory(self):
@@ -99,8 +109,6 @@ class DataRecorder:
         """
         Record data from all gauges at a fixed interval of 0.5 seconds.
         """
-        # Start with elapsed time of 0
-        self.elapsed_time = 0.0
 
         while not self.stop_event.is_set():
             # Format the elapsed time with 1 decimal place

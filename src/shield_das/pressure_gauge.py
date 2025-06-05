@@ -1,6 +1,6 @@
 import numpy as np
 from typing import Optional
-
+import os
 
 class PressureGauge:
 
@@ -18,14 +18,16 @@ class PressureGauge:
         self.gauge_location = gauge_location
         self.test_mode = test_mode
 
-        self.export_header = [
-            "timestamp",
-            f"voltage {self.name} (V)",
-            f"pressure {self.name} (Torr)",
-        ]
+        # Data storage
         self.timestamp_data = []
-        self.voltage_data = []
         self.pressure_data = []
+        self.voltage_data = []
+        
+        # Backup settings
+        self.backup_dir = None
+        self.backup_counter = 0
+        self.measurements_since_backup = 0
+        self.backup_interval = 10  # Save backup every 10 measurements
 
     @property
     def gauge_location(self):
@@ -74,6 +76,7 @@ class PressureGauge:
             settlingFactor=settling_factor,
             differential=False,
         )
+
         return ain_channel_voltage
 
     def voltage_to_pressure(self, voltage):
@@ -103,23 +106,60 @@ class PressureGauge:
         self.pressure_data.append(pressure)
 
     def initialise_export(self):
-        """
-        Initializes the export of data to a CSV file.
-
-        Args:
-            output_filename (str): The name of the output file
-        """
-        # Save the header to the CSV file
+        """Initialize the main export file."""
+        # Create the directory if it doesn't exist
+        os.makedirs(os.path.dirname(self.export_filename), exist_ok=True)
+        
+        # Create and write the header to the file
         with open(self.export_filename, "w") as f:
-            f.write(",".join(self.export_header) + "\n")
-
+            f.write("Timestamp,Pressure (Torr),Voltage (V)\n")
+    
+    def initialise_backup(self, backup_root_dir):
+        """Initialize the backup directory for this gauge."""
+        # Create a backup directory for this specific gauge
+        self.backup_dir = os.path.join(backup_root_dir, f"{self.name}_backup")
+        os.makedirs(self.backup_dir, exist_ok=True)
+        print(f"Initialized backup directory: {self.backup_dir}")
+    
     def export_write(self):
-        """
-        Exports the timestamp, voltage and pressure data to a CSV file.
-        """
-        row = [self.timestamp_data[-1], self.voltage_data[-1], self.pressure_data[-1]]
-        with open(self.export_filename, "a") as f:
-            np.savetxt(f, [row], delimiter=",", fmt="%s")
+        """Write the latest data point to the main export file."""
+        if len(self.timestamp_data) > 0:
+            # Get the latest data point
+            idx = len(self.timestamp_data) - 1
+            timestamp = self.timestamp_data[idx]
+            pressure = self.pressure_data[idx]
+            voltage = self.voltage_data[idx] if idx < len(self.voltage_data) else 0
+            
+            # Write to the main export file
+            with open(self.export_filename, "a") as f:
+                f.write(f"{timestamp},{pressure},{voltage}\n")
+            
+            # Increment the backup counter and check if we need to create a backup
+            self.measurements_since_backup += 1
+            if self.measurements_since_backup >= self.backup_interval:
+                self.create_backup()
+                self.measurements_since_backup = 0
+    
+    def create_backup(self):
+        """Create a backup file with all current data."""
+        if self.backup_dir is None:
+            return  # Backup not initialized
+        
+        # Create a new backup filename with incrementing counter
+        backup_filename = os.path.join(
+            self.backup_dir, 
+            f"{self.name}_backup_{self.backup_counter:05d}.csv"
+        )
+        
+        # Write all current data to the backup file
+        with open(backup_filename, "w") as f:
+            f.write("Timestamp,Pressure (Torr),Voltage (V)\n")
+            for i in range(len(self.timestamp_data)):
+                voltage = self.voltage_data[i] if i < len(self.voltage_data) else 0
+                f.write(f"{self.timestamp_data[i]},{self.pressure_data[i]},{voltage}\n")
+        
+        print(f"Created backup file: {backup_filename}")
+        self.backup_counter += 1
 
 
 class WGM701_Gauge(PressureGauge):
@@ -214,5 +254,12 @@ class Baratron626D_Gauge(PressureGauge):
         """
         # Convert voltage to pressure in Torr
         pressure = 0.01 * 10 ** (2 * voltage)
+
+        if self.name == "Baratron626D_1KT":
+            if pressure > 1000:
+                pressure = 1000
+        elif self.name == "Baratron626D_1T":
+            if pressure > 1:
+                pressure = 1
 
         return pressure
