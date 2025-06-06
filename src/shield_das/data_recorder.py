@@ -7,7 +7,38 @@ import threading
 
 
 class DataRecorder:
-    def __init__(self, gauges: list[PressureGauge], results_dir: str = "results", test_mode=False,):
+    """
+    Class to manage data recording from multiple pressure gauges.
+    This class handles the setup, start, stop, and reset of data recording,
+    as well as the management of results directories and gauge exports.
+
+    Arguements:
+        gauges: List of PressureGauge instances to record data from
+        results_dir: Directory where results will be stored (default: "results")
+        test_mode: If True, runs in test mode without actual hardware interaction (default: False)
+    
+    Attributes:
+        gauges: List of PressureGauge instances to record data from
+        results_dir: Directory where results will be stored
+        test_mode: If True, runs in test mode without actual hardware interaction
+        stop_event: Event to control the recording thread
+        thread: Thread for recording data
+        run_dir: Directory for the current run's results
+        backup_dir: Directory for backup files
+        elapsed_time: Time elapsed since the start of recording
+    """
+
+    gauges: list[PressureGauge]
+    results_dir: str
+    test_mode: bool
+
+    stop_event: threading.Event
+    thread: threading.Thread
+    run_dir: str
+    backup_dir: str
+    elapsed_time: float
+
+    def __init__(self, gauges: list[PressureGauge], results_dir: str = "results", test_mode=False):
         self.gauges = gauges
         self.results_dir = results_dir
         self.test_mode = test_mode
@@ -21,8 +52,8 @@ class DataRecorder:
         self.backup_dir = os.path.join(self.run_dir, "backup")
         os.makedirs(self.backup_dir, exist_ok=True)
         
-        # Setup gauge exports
-        self._setup_gauge_exports()
+        # Initialise gauge exports
+        self._initialise_gauge_exports()
         
         # Initialize elapsed time
         self.elapsed_time = 0.0
@@ -55,8 +86,8 @@ class DataRecorder:
         
         return run_dir
     
-    def _setup_gauge_exports(self):
-        """Setup export files for all gauges"""
+    def _initialise_gauge_exports(self):
+        """Initialise export files for all gauges"""
         for gauge in self.gauges:
             # Update path and initialize export
             original_filename = os.path.basename(gauge.export_filename)
