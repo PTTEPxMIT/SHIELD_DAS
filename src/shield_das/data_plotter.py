@@ -235,10 +235,9 @@ class DataPlotter:
             if all_times:
                 x_min = min(all_times)
                 x_max = max(all_times)
-                margin = (x_max - x_min) * 0.05 if x_max > x_min else 0.1
 
-                fig.update_xaxes(range=[x_min - margin, x_max + margin], row=1, col=1)
-                fig.update_xaxes(range=[x_min - margin, x_max + margin], row=1, col=2)
+                fig.update_xaxes(range=[x_min, x_max], row=1, col=1)
+                fig.update_xaxes(range=[x_min, x_max], row=1, col=2)
 
             # Set y-axis limits and log scale for upstream plot
             if upstream_min != float('inf') and upstream_max != float('-inf'):
