@@ -1,4 +1,3 @@
-# main.py
 from shield_das import (
     DataRecorder,
     WGM701_Gauge,
@@ -7,7 +6,7 @@ from shield_das import (
     Baratron626D_Gauge
 )
 import time
-import u6
+import sys
 
 # Create gauges
 gauge_1 = WGM701_Gauge(
@@ -34,13 +33,27 @@ my_recorder = DataRecorder(
 )
 
 if __name__ == "__main__":
-    # Create and start the plotter
-    plotter = DataPlotter(my_recorder)
-    plotter.start()
+    # Check if we're running in headless mode
+    headless = "--headless" in sys.argv
     
-    # Keep the main thread running
+    if headless:
+        # Start recorder directly in headless mode
+        print("Starting recorder in headless mode...")
+        my_recorder.start()
+        print("Press Ctrl+C to stop recording")
+    else:
+        # Create and start the plotter
+        plotter = DataPlotter(my_recorder)
+        plotter.start()
+    
+    # Keep the main thread running (same for both modes)
     try:
         while True:
             time.sleep(1)
+            # Print status every 10 seconds in headless mode
+            if headless and int(time.time()) % 10 == 0:
+                print(f"Recording in progress... Elapsed time: {my_recorder.elapsed_time:.1f}s")
     except KeyboardInterrupt:
+        print("Stopping recorder...")
         my_recorder.stop()
+        print("Recorder stopped")
