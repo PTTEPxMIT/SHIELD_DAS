@@ -41,6 +41,29 @@ class DataPlotter:
                     dbc.Button("Stop Recording", id="stop-button", color="danger")
                 ], width=12, className="text-center mb-4")
             ]),
+            # Add a row for the time window control
+            dbc.Row([
+                dbc.Col([
+                    dbc.Row([
+                        dbc.Col(
+                            dbc.Label("Time Window (seconds):", className="me-2 align-middle"),
+                            width="auto"
+                        ),
+                        dbc.Col(
+                            dbc.Input(
+                                id="time-window-input",
+                                type="number",
+                                min=1,
+                                max=100,
+                                step=1,
+                                value=10,  # Default 10 seconds
+                                style={"width": "80px"}
+                            ),
+                            width="auto"
+                        )
+                    ], className="d-flex justify-content-center align-items-center mb-3")
+                ], width=12)
+            ]),
             dbc.Row([
                 dbc.Col([
                     dbc.Card([
@@ -56,7 +79,7 @@ class DataPlotter:
                     ])
                 ], width=12)
             ]),
-            # New row for the toggle, centered below the graphs
+            # Row for the toggle, centered below the graphs
             dbc.Row([
                 dbc.Col([
                     dbc.Switch(
@@ -73,11 +96,16 @@ class DataPlotter:
         @self.app.callback(
             Output("pressure-plots", "figure"),
             [Input("interval-component", "n_intervals"),
-            Input("error-bars-toggle", "value")],
+            Input("error-bars-toggle", "value"),
+            Input("time-window-input", "value")],
         )
-        def update_plots(n_intervals, show_errors):
+        def update_plots(n_intervals, show_errors, time_window):
             # show_errors will be True/False instead of a list with dbc.Switch
             show_error_bars = show_errors
+            
+            # Default to 10 seconds if invalid value
+            if time_window is None or time_window < 1:
+                time_window = 10
 
             # Create figure with two subplots side by side
             fig = make_subplots(
@@ -105,6 +133,12 @@ class DataPlotter:
             upstream_colors = ["#0066cc", "#003366"]  # Blue, Dark Blue
             downstream_colors = ["#ff9900", "#cc0000"]  # Orange, Red
 
+            # Get current time (latest reading)
+            current_time = 0
+            for gauge in self.recorder.gauges:
+                if gauge.timestamp_data and float(gauge.timestamp_data[-1]) > current_time:
+                    current_time = float(gauge.timestamp_data[-1])
+
             # Create figure
             for gauge in self.recorder.gauges:
                 # Create a copy of the data to prevent changes during plotting
@@ -116,11 +150,22 @@ class DataPlotter:
                     has_data = True
                     # Convert string timestamps to seconds since start
                     time_seconds = self.convert_timestamps_to_seconds(timestamp_copy)
-
-                    # Only show the last 20 data points if we have more
-                    if len(time_seconds) > 20:
-                        time_seconds = time_seconds[-20:]
-                        pressure_copy = pressure_copy[-20:]
+                    
+                    # Filter data based on time window
+                    if len(time_seconds) > 0:
+                        # Find data points within the time window
+                        time_window_data = []
+                        for i, t in enumerate(time_seconds):
+                            if current_time - t <= time_window:
+                                time_window_data.append(i)
+                        
+                        if time_window_data:
+                            time_seconds = [time_seconds[i] for i in time_window_data]
+                            pressure_copy = [pressure_copy[i] for i in time_window_data]
+                        else:
+                            # If no data in window, show the most recent points
+                            time_seconds = time_seconds[-5:] if len(time_seconds) > 5 else time_seconds
+                            pressure_copy = pressure_copy[-5:] if len(pressure_copy) > 5 else pressure_copy
 
                     # Keep track of all time values for setting axis limits later
                     all_times.extend(time_seconds)
