@@ -1,16 +1,13 @@
-from threading import Thread, Event, Lock
 import time
 from datetime import datetime
 from .pressure_gauge import PressureGauge
 import os
 import glob
-
-from queue import Queue
 import threading
 
 
 class DataRecorder:
-    def __init__(self, gauges, labjack=None, results_dir="results"):
+    def __init__(self, gauges: list[PressureGauge], labjack=None, results_dir: str = "results"):
         self.gauges = gauges
         self.labjack_config = labjack  # Just reference for detection
         self.results_dir = results_dir
@@ -133,7 +130,6 @@ class DataRecorder:
                     if gauge.test_mode or thread_labjack is None:
                         gauge.get_data(labjack=None, timestamp=timestamp)
                     else:
-                        print("coucou")
                         gauge.get_data(labjack=thread_labjack, timestamp=timestamp)
                 except Exception as e:
                     print(f"Error reading from {gauge.name}: {e}")
