@@ -59,7 +59,7 @@ class DataRecorder:
         self.elapsed_time = 0.0
 
     def _create_results_directory(self):
-        """Creates a new directory for results based on date and run number"""
+        """Creates a new directory for results based on date and run number and if test_mode is enabled, it will not create directories."""
         # Create main results directory
         os.makedirs(self.results_dir, exist_ok=True)
         
@@ -68,21 +68,31 @@ class DataRecorder:
         date_dir = os.path.join(self.results_dir, current_date)
         os.makedirs(date_dir, exist_ok=True)
         
-        # Find highest run number
-        run_dirs = glob.glob(os.path.join(date_dir, "run_*"))
-        run_numbers = [
-            int(os.path.basename(d).split("_")[1]) 
-            for d in run_dirs 
-            if os.path.basename(d).split("_")[1].isdigit()
-        ]
-        
-        # Set next run number
-        next_run = 1 if not run_numbers else max(run_numbers) + 1
-        
-        # Create run directory
-        run_dir = os.path.join(date_dir, f"run_{next_run}")
-        os.makedirs(run_dir)
-        print(f"Created results directory: {run_dir}")
+        # Use test_run for test mode, otherwise increment run number
+        if self.test_mode:
+            run_dir = os.path.join(date_dir, "test_run")
+            # Remove existing directory if it exists
+            if os.path.exists(run_dir):
+                import shutil
+                shutil.rmtree(run_dir)
+            os.makedirs(run_dir)
+            print(f"Created test results directory: {run_dir}")
+        else:
+            # Find highest run number
+            run_dirs = glob.glob(os.path.join(date_dir, "run_*"))
+            run_numbers = [
+                int(os.path.basename(d).split("_")[1]) 
+                for d in run_dirs 
+                if os.path.basename(d).split("_")[1].isdigit()
+            ]
+            
+            # Set next run number
+            next_run = 1 if not run_numbers else max(run_numbers) + 1
+            
+            # Create run directory
+            run_dir = os.path.join(date_dir, f"run_{next_run}")
+            os.makedirs(run_dir)
+            print(f"Created results directory: {run_dir}")
         
         return run_dir
     
@@ -129,8 +139,8 @@ class DataRecorder:
         self.backup_dir = os.path.join(self.run_dir, "backup")
         os.makedirs(self.backup_dir, exist_ok=True)
         
-        # Setup exports again
-        self._setup_gauge_exports()
+        # Initialise exports again
+        self._initialise_gauge_exports()
         
         # Reset time
         self.elapsed_time = 0.0
