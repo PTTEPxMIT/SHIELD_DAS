@@ -27,12 +27,10 @@ gauge_4 = Baratron626D_Gauge(
     export_filename="Baratron626D_1T_downstream_pressure_data.csv",
 )
 
-labjack = u6.U6(firstFound=True)
 
 # Create recorder
 my_recorder = DataRecorder(
     gauges=[gauge_1, gauge_2, gauge_3, gauge_4],
-    labjack=labjack,
 )
 
 if __name__ == "__main__":

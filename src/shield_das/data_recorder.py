@@ -7,10 +7,10 @@ import threading
 
 
 class DataRecorder:
-    def __init__(self, gauges: list[PressureGauge], labjack=None, results_dir: str = "results"):
+    def __init__(self, gauges: list[PressureGauge], results_dir: str = "results", test_mode=False,):
         self.gauges = gauges
-        self.labjack_config = labjack  # Just reference for detection
         self.results_dir = results_dir
+        self.test_mode = test_mode
         
         # Thread control
         self.stop_event = threading.Event()
@@ -106,13 +106,12 @@ class DataRecorder:
     
     def record_data(self):
         """Record data from all gauges"""
-        # Create thread-local LabJack
-        thread_labjack = None
-        if self.labjack_config is not None:
+
+        if not self.test_mode:
             try:
                 import u6
-                thread_labjack = u6.U6(firstFound=True)
-                thread_labjack.getCalibrationData()
+                labjack = u6.U6(firstFound=True)
+                labjack.getCalibrationData()
                 print("LabJack connected")
             except Exception as e:
                 print(f"LabJack connection error: {e}")
@@ -127,10 +126,10 @@ class DataRecorder:
             for gauge in self.gauges:
                 try:
                     # Get data based on mode
-                    if gauge.test_mode or thread_labjack is None:
+                    if self.test_mode:
                         gauge.get_data(labjack=None, timestamp=timestamp)
                     else:
-                        gauge.get_data(labjack=thread_labjack, timestamp=timestamp)
+                        gauge.get_data(labjack=labjack, timestamp=timestamp)
                 except Exception as e:
                     print(f"Error reading from {gauge.name}: {e}")
                 
@@ -140,10 +139,3 @@ class DataRecorder:
             # Sleep and increment time
             time.sleep(0.5)
             self.elapsed_time += 0.5
-        
-        # Cleanup
-        if thread_labjack:
-            try:
-                thread_labjack.close()
-            except:
-                pass

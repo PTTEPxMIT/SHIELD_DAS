@@ -8,20 +8,18 @@ import time
 
 
 gauge_1 = WGM701_Gauge(
-    test_mode=True,
     gauge_location="downstream",
     export_filename="WGM701_pressure_data.csv",
 
 )
 gauge_2 = CVM211_Gauge(
-    test_mode=True,
     gauge_location="upstream",
     export_filename="CVM211_pressure_data.csv",
 )
 
 my_recorder = DataRecorder(
     gauges=[gauge_1, gauge_2],
-    labjack=None,
+    test_mode=True
 )
 
 

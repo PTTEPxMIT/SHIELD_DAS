@@ -10,13 +10,11 @@ class PressureGauge:
         ain_channel: int,
         export_filename: str,
         gauge_location: str,
-        test_mode: Optional[bool] = False,
     ):
         self.name = name
         self.export_filename = export_filename
         self.ain_channel = ain_channel
         self.gauge_location = gauge_location
-        self.test_mode = test_mode
 
         # Data storage
         self.timestamp_data = []
@@ -58,10 +56,6 @@ class PressureGauge:
             float: The voltage reading from the channel
         """
 
-        if self.test_mode:
-            # Simulate a voltage reading for testing purposes
-            return round(np.random.uniform(6.8, 6.9), 4)
-
         # Get a single-ended reading from AIN0 using the getAIN convenience method.
         # getAIN will get the binary voltage and convert it to a decimal value.
 
@@ -86,7 +80,7 @@ class PressureGauge:
             labjack: The LabJack device
             timestamp (str): The timestamp of the reading
         """
-        if self.test_mode:
+        if labjack is None:
             pressure = np.random.uniform(1, 50)
             self.timestamp_data.append(timestamp)
             self.voltage_data.append("test_mode")
@@ -169,9 +163,8 @@ class WGM701_Gauge(PressureGauge):
         ain_channel=10,
         export_filename="WGM701_pressure_data.csv",
         gauge_location="downstream",
-        test_mode=False,
     ):
-        super().__init__(name, ain_channel, export_filename, gauge_location, test_mode)
+        super().__init__(name, ain_channel, export_filename, gauge_location)
 
     def voltage_to_pressure(self, voltage):
         """
@@ -225,9 +218,8 @@ class CVM211_Gauge(PressureGauge):
         ain_channel=8,
         export_filename="CVM211_pressure_data.csv",
         gauge_location="upstream",
-        test_mode=False,
     ):
-        super().__init__(name, ain_channel, export_filename, gauge_location, test_mode)
+        super().__init__(name, ain_channel, export_filename, gauge_location)
 
     def voltage_to_pressure(self, voltage):
         """
@@ -282,9 +274,8 @@ class Baratron626D_Gauge(PressureGauge):
         ain_channel=6,
         export_filename="Baratron626D_pressure_data.csv",
         gauge_location="downstream",
-        test_mode=False,
     ):
-        super().__init__(name, ain_channel, export_filename, gauge_location, test_mode)
+        super().__init__(name, ain_channel, export_filename, gauge_location)
 
     def voltage_to_pressure(self, voltage):
         """
