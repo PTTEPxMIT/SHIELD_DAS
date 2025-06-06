@@ -5,7 +5,7 @@ from dash.dependencies import Input, Output
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import dash_bootstrap_components as dbc
-
+import math
 import threading
 import webbrowser
 
@@ -75,7 +75,7 @@ class DataPlotter:
             [Input("interval-component", "n_intervals"),
             Input("error-bars-toggle", "value")],
         )
-        def update_plots(n_intervals, show_errors):  # No 'self' parameter here
+        def update_plots(n_intervals, show_errors):
             # show_errors will be True/False instead of a list with dbc.Switch
             show_error_bars = show_errors
 
@@ -90,6 +90,12 @@ class DataPlotter:
             # Track if we have data to display
             has_data = False
             all_times = []
+            
+            # Track min/max values for y-axis scaling
+            upstream_min = float('inf')
+            upstream_max = float('-inf')
+            downstream_min = float('inf')
+            downstream_max = float('-inf')
             
             # Track gauge counts for each location (to assign colors)
             upstream_count = 0
@@ -124,6 +130,11 @@ class DataPlotter:
                     
                     # Add trace to appropriate subplot
                     if gauge.gauge_location == "upstream":
+                        # Update min/max for upstream
+                        if pressure_copy:
+                            upstream_min = min(upstream_min, min(pressure_copy))
+                            upstream_max = max(upstream_max, max(pressure_copy))
+                        
                         color = upstream_colors[upstream_count % len(upstream_colors)]
                         upstream_count += 1
                         
@@ -147,6 +158,11 @@ class DataPlotter:
                             col=1,
                         )
                     elif gauge.gauge_location == "downstream":
+                        # Update min/max for downstream
+                        if pressure_copy:
+                            downstream_min = min(downstream_min, min(pressure_copy))
+                            downstream_max = max(downstream_max, max(pressure_copy))
+                        
                         color = downstream_colors[downstream_count % len(downstream_colors)]
                         downstream_count += 1
                         
@@ -178,6 +194,46 @@ class DataPlotter:
 
                 fig.update_xaxes(range=[x_min - margin, x_max + margin], row=1, col=1)
                 fig.update_xaxes(range=[x_min - margin, x_max + margin], row=1, col=2)
+
+            # Set y-axis limits and log scale for upstream plot
+            if upstream_min != float('inf') and upstream_max != float('-inf'):
+                # For log scale, we need to ensure values are positive
+                if upstream_min <= 0:
+                    upstream_min = 1e-10  # Small positive value
+                
+                # Set the limits
+                y_min = upstream_min * 0.1
+                y_max = upstream_max * 10
+                
+                fig.update_yaxes(
+                    type="log",
+                    range=[math.log10(y_min), math.log10(y_max)],
+                    row=1, 
+                    col=1
+                )
+            else:
+                # Default log scale if no data
+                fig.update_yaxes(type="log", row=1, col=1)
+
+            # Set y-axis limits and log scale for downstream plot
+            if downstream_min != float('inf') and downstream_max != float('-inf'):
+                # For log scale, we need to ensure values are positive
+                if downstream_min <= 0:
+                    downstream_min = 1e-10  # Small positive value
+                
+                # Set the limits to 90% of min and 110% of max
+                y_min = downstream_min * 0.1
+                y_max = downstream_max * 10
+                
+                fig.update_yaxes(
+                    type="log",
+                    range=[math.log10(y_min), math.log10(y_max)],
+                    row=1, 
+                    col=2
+                )
+            else:
+                # Default log scale if no data
+                fig.update_yaxes(type="log", row=1, col=2)
 
             # Update layout
             fig.update_layout(
