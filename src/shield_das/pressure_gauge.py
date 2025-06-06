@@ -1,9 +1,44 @@
 import numpy as np
 from typing import Optional
 import os
+import u6
 
 class PressureGauge:
+    """
+    Base class for all pressure gauges.
 
+    Arguments:
+        name: Name of the gauge
+        ain_channel: The AIN channel of the gauge
+        export_filename: The filename to export the data to
+        gauge_location: Location of the gauge, either "upstream" or "downstream"
+    
+    Attributes:
+        name: Name of the gauge
+        ain_channel: The AIN channel of the gauge
+        export_filename: The filename to export the data to
+        gauge_location: Location of the gauge, either "upstream" or "downstream"
+        timestamp_data: List to store timestamps of readings in seconds
+        pressure_data: List to store pressure readings in Torr
+        voltage_data: List to store voltage readings in volts
+        backup_dir: Directory for backups
+        backup_counter: Counter for backup files
+        measurements_since_backup: Counter for measurements since last backup
+        backup_interval: Interval for creating backups
+    """
+
+    name: str
+    ain_channel: int
+    export_filename: str
+    gauge_location: str
+    timestamp_data: list[float]
+    pressure_data: list[float]
+    voltage_data: list[float]
+    backup_dir: str
+    backup_counter: int
+    measurements_since_backup: int
+    backup_interval: int
+    
     def __init__(
         self,
         name: str,
@@ -39,18 +74,19 @@ class PressureGauge:
 
     def get_ain_channel_voltage(
         self,
-        labjack,
-        resolution_index: int = 0,
-        gain_index: int = 0,
-        settling_factor: int = 0,
+        labjack: u6.U6,
+        resolution_index: Optional[int] = 0,
+        gain_index: Optional[int] = 0,
+        settling_factor: Optional[int] = 0,
     ) -> float:
         """
         Obtains the voltage reading from a channel of the LabJack u6 hub.
 
         Args:
-            resolution_index (float): Resolution index for the reading
-            gain_index (float): Gain index for the reading (x1 which is +/-10V range)
-            settling_factor (float): Settling factor for the reading
+            labjack: The LabJack device
+            resolution_index: Resolution index for the reading
+            gain_index: Gain index for the reading (x1 which is +/-10V range)
+            settling_factor: Settling factor for the reading
 
         returns:
             float: The voltage reading from the channel
@@ -72,13 +108,13 @@ class PressureGauge:
     def voltage_to_pressure(self, voltage):
         pass
 
-    def get_data(self, labjack, timestamp):
+    def get_data(self, labjack: u6.U6, timestamp: float):
         """
         Gets the data from the gauge and appends it to the lists.
 
         Args:
             labjack: The LabJack device
-            timestamp (str): The timestamp of the reading
+            timestamp: The time of the reading
         """
         if labjack is None:
             pressure = np.random.uniform(1, 50)
@@ -104,7 +140,7 @@ class PressureGauge:
         with open(self.export_filename, "w") as f:
             f.write("Timestamp,Pressure (Torr),Voltage (V)\n")
     
-    def initialise_backup(self, backup_root_dir):
+    def initialise_backup(self, backup_root_dir: str):
         """Initialize the backup directory for this gauge."""
         # Create a backup directory for this specific gauge
         self.backup_dir = os.path.join(backup_root_dir, f"{self.name}_backup")
@@ -159,20 +195,20 @@ class WGM701_Gauge(PressureGauge):
 
     def __init__(
         self,
-        name="WGM701",
-        ain_channel=10,
-        export_filename="WGM701_pressure_data.csv",
-        gauge_location="downstream",
+        name: str = "WGM701",
+        ain_channel: int = 10,
+        export_filename: str = "WGM701_pressure_data.csv",
+        gauge_location: str = "downstream",
     ):
         super().__init__(name, ain_channel, export_filename, gauge_location)
 
-    def voltage_to_pressure(self, voltage):
+    def voltage_to_pressure(self, voltage: float) -> float:
         """
         Converts the voltage reading from a Instrutech WGM701 pressure gauge
         to pressure in Torr.
 
         Args:
-            voltage (float): The voltage reading from the gauge
+            voltage: The voltage reading from the gauge
 
         Returns:
             float: The pressure in Torr
@@ -180,6 +216,7 @@ class WGM701_Gauge(PressureGauge):
         # Convert voltage to pressure in Torr
         pressure = 10 ** ((voltage - 5.5) / 0.5)
 
+        # Ensure pressure is within the valid range
         if pressure > 760:
             pressure = 760
         elif pressure < 7.6e-10:
@@ -187,7 +224,7 @@ class WGM701_Gauge(PressureGauge):
 
         return pressure
 
-    def calculate_error(self, pressure_value:float) -> float:
+    def calculate_error(self, pressure_value: float) -> float:
         """
         Calculate the error in the pressure reading.
 
@@ -214,20 +251,20 @@ class CVM211_Gauge(PressureGauge):
 
     def __init__(
         self,
-        name="CVM211",
-        ain_channel=8,
-        export_filename="CVM211_pressure_data.csv",
-        gauge_location="upstream",
+        name: str = "CVM211",
+        ain_channel: int = 8,
+        export_filename: str = "CVM211_pressure_data.csv",
+        gauge_location: str = "upstream",
     ):
         super().__init__(name, ain_channel, export_filename, gauge_location)
 
-    def voltage_to_pressure(self, voltage):
+    def voltage_to_pressure(self, voltage: float) -> float:
         """
         Converts the voltage reading from a Instrutech WGM701 pressure gauge
         to pressure in Torr.
 
         Args:
-            voltage (float): The voltage reading from the gauge
+            voltage: The voltage reading from the gauge
 
         Returns:
             float: The pressure in Torr
@@ -235,6 +272,7 @@ class CVM211_Gauge(PressureGauge):
         # Convert voltage to pressure in Torr
         pressure = 10 ** (voltage - 5)
 
+        # Ensure pressure is within the valid range
         if pressure > 1000:
             pressure = 1000
         elif pressure < 1e-04:
@@ -270,20 +308,20 @@ class Baratron626D_Gauge(PressureGauge):
 
     def __init__(
         self,
-        name="Baratron626D",
-        ain_channel=6,
-        export_filename="Baratron626D_pressure_data.csv",
-        gauge_location="downstream",
+        name: str = "Baratron626D",
+        ain_channel: int = 6,
+        export_filename: str = "Baratron626D_pressure_data.csv",
+        gauge_location: str = "downstream",
     ):
         super().__init__(name, ain_channel, export_filename, gauge_location)
 
-    def voltage_to_pressure(self, voltage):
+    def voltage_to_pressure(self, voltage: float) -> float:
         """
         Converts the voltage reading from a Instrutech WGM701 pressure gauge
         to pressure in Torr.
 
         Args:
-            voltage (float): The voltage reading from the gauge
+            voltage: The voltage reading from the gauge
 
         Returns:
             float: The pressure in Torr
@@ -291,16 +329,22 @@ class Baratron626D_Gauge(PressureGauge):
         # Convert voltage to pressure in Torr
         pressure = 0.01 * 10 ** (2 * voltage)
 
+        # Ensure pressure is within the valid range
         if self.name == "Baratron626D_1KT":
             if pressure > 1000:
                 pressure = 1000
+            elif pressure < 0.5:
+                pressure = 0.5
+            
         elif self.name == "Baratron626D_1T":
             if pressure > 1:
                 pressure = 1
+            elif pressure < 0.0005:
+                pressure = 0.0005
 
         return pressure
 
-    def calculate_error(self, pressure_value:float) -> float:
+    def calculate_error(self, pressure_value: float) -> float:
         """
         Calculate the error in the pressure reading.
 
