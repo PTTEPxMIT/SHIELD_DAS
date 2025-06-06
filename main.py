@@ -18,10 +18,12 @@ gauge_2 = CVM211_Gauge(
     export_filename="CVM211_pressure_data.csv",
 )
 gauge_3 = Baratron626D_Gauge(
+    name="Baratron626D_1KT",
     gauge_location="upstream",
     export_filename="Baratron626D_1000T_upstream_pressure_data.csv",
 )
 gauge_4 = Baratron626D_Gauge(
+    name="Baratron626D_1T",
     gauge_location="downstream",
     export_filename="Baratron626D_1T_downstream_pressure_data.csv",
 )
@@ -30,6 +32,7 @@ gauge_4 = Baratron626D_Gauge(
 # Create recorder
 my_recorder = DataRecorder(
     gauges=[gauge_1, gauge_2, gauge_3, gauge_4],
+    # test_mode=True,
 )
 
 if __name__ == "__main__":
