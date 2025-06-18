@@ -55,8 +55,9 @@ class DataRecorder:
         # Initialise gauge exports
         self._initialise_gauge_exports()
         
-        # Initialize elapsed time
+        # Initialize time tracking
         self.elapsed_time = 0.0
+        self.start_time = None
 
     def _create_results_directory(self):
         """Creates a new directory for results based on date and run number and if test_mode is enabled, it will not create directories."""
@@ -157,20 +158,23 @@ class DataRecorder:
             except Exception as e:
                 print(f"LabJack connection error: {e}")
         
-        # Start with elapsed time of 0
+        # Start with elapsed time of 0 and record start time
         self.elapsed_time = 0.0
+        self.start_time = datetime.now()
+        print(f"Recording started at {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
         # Main data collection loop
         while not self.stop_event.is_set():
             timestamp = f"{self.elapsed_time:.1f}"
+            current_time = datetime.now()
             
             for gauge in self.gauges:
                 try:
                     # Get data based on mode
                     if self.test_mode:
-                        gauge.get_data(labjack=None, timestamp=timestamp)
+                        gauge.get_data(labjack=None, timestamp=timestamp, real_timestamp=current_time)
                     else:
-                        gauge.get_data(labjack=labjack, timestamp=timestamp)
+                        gauge.get_data(labjack=labjack, timestamp=timestamp, real_timestamp=current_time)
                 except Exception as e:
                     print(f"Error reading from {gauge.name}: {e}")
                 
