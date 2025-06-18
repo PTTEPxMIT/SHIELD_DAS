@@ -318,9 +318,11 @@ class DataPlotter:
                                     color=color,
                                     thickness=1.5,
                                     width=3
-                                )
+                                ),
                             )
-                        )            # Set x-axis limits based on time window
+                        )            
+                        
+            # Set x-axis limits based on time window
             if has_data:
                 # Synchronize x-axis based on current time and window
                 x_min = max(0, current_time - time_window)
@@ -364,8 +366,8 @@ class DataPlotter:
                 )
             else:
                 # Default log scale if no data
-                downstream_fig.update_yaxes(type="log")
-
+                downstream_fig.update_yaxes(type="log")            
+                
             # Update layout for upstream plot
             upstream_fig.update_layout(
                 height=400,
@@ -373,17 +375,33 @@ class DataPlotter:
                 yaxis_title="Pressure (Torr)",
                 template="plotly_white",
                 margin=dict(l=50, r=20, t=30, b=50),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                )
             )
-            
+            # Update layout for downstream plot
             downstream_fig.update_layout(
                 height=400,
                 xaxis_title="Relative Time (s)",
                 yaxis_title="Pressure (Torr)",
                 template="plotly_white",
                 margin=dict(l=50, r=20, t=30, b=50),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                )
             )
 
-            return downstream_fig, upstream_fig        # Create temperature plot and update temperature value
+            return downstream_fig, upstream_fig        
+        
+        # Create temperature plot and update temperature value
         @self.app.callback(
             [Output("temperature-plot", "figure"),
              Output("current-temperature", "children")],
