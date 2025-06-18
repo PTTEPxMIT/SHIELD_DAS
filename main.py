@@ -8,7 +8,7 @@ from shield_das import (
 import time
 import sys
 
-# Create gauges
+# Define gauges
 gauge_1 = WGM701_Gauge(
     gauge_location="downstream",
     export_filename="WGM701_pressure_data.csv",
@@ -28,11 +28,10 @@ gauge_4 = Baratron626D_Gauge(
     export_filename="Baratron626D_1T_downstream_pressure_data.csv",
 )
 
-
 # Create recorder
 my_recorder = DataRecorder(
     gauges=[gauge_1, gauge_2, gauge_3, gauge_4],
-    # test_mode=True,
+    test_mode=True,
 )
 
 if __name__ == "__main__":
@@ -41,9 +40,7 @@ if __name__ == "__main__":
     
     if headless:
         # Start recorder directly in headless mode
-        print("Starting recorder in headless mode...")
         my_recorder.start()
-        print("Press Ctrl+C to stop recording")
     else:
         # Create and start the plotter
         plotter = DataPlotter(my_recorder)
@@ -55,8 +52,8 @@ if __name__ == "__main__":
             time.sleep(1)
             # Print status every 10 seconds in headless mode
             if headless and int(time.time()) % 10 == 0:
-                print(f"Recording in progress... Elapsed time: {my_recorder.elapsed_time:.1f}s")
+                import datetime
+                print(f"Current time: {datetime.datetime.now()} - Recording in progress... Elapsed time: {my_recorder.elapsed_time:.1f}s")
     except KeyboardInterrupt:
-        print("Stopping recorder...")
         my_recorder.stop()
         print("Recorder stopped")
