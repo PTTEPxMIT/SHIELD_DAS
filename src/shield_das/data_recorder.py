@@ -64,14 +64,19 @@ class DataRecorder:
         # Create main results directory
         os.makedirs(self.results_dir, exist_ok=True)
         
-        # Get current date and create date directory
-        current_date = datetime.now().strftime("%m.%d")
+        # Get current date and time
+        now = datetime.now()
+        current_date = now.strftime("%m.%d")
+        current_time = now.strftime("%Hh%M")  # Format as HHhMM
+        
+        # Create date directory
         date_dir = os.path.join(self.results_dir, current_date)
         os.makedirs(date_dir, exist_ok=True)
         
         # Use test_run for test mode, otherwise increment run number
         if self.test_mode:
-            run_dir = os.path.join(date_dir, "test_run")
+            # Include time in test run directory
+            run_dir = os.path.join(date_dir, f"test_run_{current_time}")
             # Remove existing directory if it exists
             if os.path.exists(run_dir):
                 import shutil
@@ -82,7 +87,7 @@ class DataRecorder:
             # Find highest run number
             run_dirs = glob.glob(os.path.join(date_dir, "run_*"))
             run_numbers = [
-                int(os.path.basename(d).split("_")[1]) 
+                int(os.path.basename(d).split("_")[1])  # Extract just the number part
                 for d in run_dirs 
                 if os.path.basename(d).split("_")[1].isdigit()
             ]
@@ -90,8 +95,8 @@ class DataRecorder:
             # Set next run number
             next_run = 1 if not run_numbers else max(run_numbers) + 1
             
-            # Create run directory
-            run_dir = os.path.join(date_dir, f"run_{next_run}")
+            # Create run directory with time included
+            run_dir = os.path.join(date_dir, f"run_{next_run}_{current_time}")
             os.makedirs(run_dir)
             print(f"Created results directory: {run_dir}")
         
