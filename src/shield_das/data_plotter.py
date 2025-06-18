@@ -62,8 +62,7 @@ class DataPlotter:
                         )
                     ], className="d-flex justify-content-center align-items-center mb-3")
                 ], width=12)
-            ]),
-              # Three columns layout: Upstream (left), Temperature (centre) and Downstream (right)
+            ]),              # Three columns layout: Upstream (left), Temperature (centre) and Downstream (right)
             dbc.Row([
                 # Upstream Column (Left)
                 dbc.Col([
@@ -87,7 +86,7 @@ class DataPlotter:
                         dbc.CardHeader("Temperature"),
                         dbc.CardBody([
                             html.H3(id="current-temperature", className="text-center"),
-                            html.P("°C", className="text-center mb-3")
+                            html.P("°C", className="text-center mb-0")
                         ])
                     ], className="border-success mb-3"),
                     # Temperature Plot
@@ -321,12 +320,11 @@ class DataPlotter:
                                     width=3
                                 )
                             )
-                        )
-
-            # Set x-axis limits based on data
-            if all_times:
-                x_min = min(all_times)
-                x_max = max(all_times)
+                        )            # Set x-axis limits based on time window
+            if has_data:
+                # Synchronize x-axis based on current time and window
+                x_min = max(0, current_time - time_window)
+                x_max = current_time
                 
                 # Use same x range for both plots
                 for fig in [upstream_fig, downstream_fig]:
@@ -385,9 +383,7 @@ class DataPlotter:
                 margin=dict(l=50, r=20, t=30, b=50),
             )
 
-            return downstream_fig, upstream_fig
-
-        # Create temperature plot and update temperature value
+            return downstream_fig, upstream_fig        # Create temperature plot and update temperature value
         @self.app.callback(
             [Output("temperature-plot", "figure"),
              Output("current-temperature", "children")],
@@ -410,13 +406,20 @@ class DataPlotter:
             temp_data = self.recorder.temperature_data.copy()
             temp_timestamps = self.recorder.temperature_timestamps.copy()
             
-            if len(temp_data) > 0:
-                has_data = True
+            # Get global time range from all data for synchronized x-axis
+            current_time = 0
+            
+            # First find the latest time point from all sources (gauges and temperature)
+            for gauge in self.recorder.gauges:
+                if gauge.timestamp_data and float(gauge.timestamp_data[-1]) > current_time:
+                    current_time = float(gauge.timestamp_data[-1])
+            
+            if temp_timestamps and len(temp_timestamps) > 0:
+                latest_temp_time = max(temp_timestamps)
+                if latest_temp_time > current_time:
+                    current_time = latest_temp_time
                 
-                # Get current time (latest reading)
-                current_time = 0
-                if temp_timestamps:
-                    current_time = max(temp_timestamps)
+                has_data = True
                 
                 # Filter data based on time window
                 time_window_data = []
@@ -447,10 +450,11 @@ class DataPlotter:
                 if temp_data:
                     current_temp = f"{temp_data[-1]:.1f}"
             
-            # Set x-axis limits if we have data
-            if has_data and temp_timestamps:
-                x_min = min(temp_timestamps)
-                x_max = max(temp_timestamps)
+            # Set x-axis limits based on time window
+            if has_data:
+                # Synchronize x-axis with pressure plots
+                x_min = max(0, current_time - time_window)
+                x_max = current_time
                 temp_fig.update_xaxes(range=[x_min, x_max])
             
             # Update layout for temperature plot
