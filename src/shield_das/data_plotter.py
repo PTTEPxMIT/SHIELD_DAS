@@ -353,16 +353,15 @@ class DataPlotter:
             # Update layout for upstream plot
             upstream_fig.update_layout(
                 height=400,
-                xaxis_title="Time (s)",
+                xaxis_title="Relative Time (s)",
                 yaxis_title="Pressure (Torr)",
                 template="plotly_white",
                 margin=dict(l=50, r=20, t=30, b=50),
             )
             
-            # Update layout for downstream plot
             downstream_fig.update_layout(
                 height=400,
-                xaxis_title="Time (s)",
+                xaxis_title="Relative Time (s)",
                 yaxis_title="Pressure (Torr)",
                 template="plotly_white",
                 margin=dict(l=50, r=20, t=30, b=50),

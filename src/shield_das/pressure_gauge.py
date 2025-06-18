@@ -2,6 +2,7 @@ import numpy as np
 from typing import Optional
 import os
 import u6
+import datetime
 
 class PressureGauge:
     """
@@ -19,6 +20,7 @@ class PressureGauge:
         export_filename: The filename to export the data to
         gauge_location: Location of the gauge, either "upstream" or "downstream"
         timestamp_data: List to store timestamps of readings in seconds
+        real_timestamp_data: List to store real timestamps of readings in seconds
         pressure_data: List to store pressure readings in Torr
         voltage_data: List to store voltage readings in volts
         backup_dir: Directory for backups
@@ -53,6 +55,7 @@ class PressureGauge:
 
         # Data storage
         self.timestamp_data = []
+        self.real_timestamp_data = []
         self.pressure_data = []
         self.voltage_data = []
         
@@ -108,17 +111,22 @@ class PressureGauge:
     def voltage_to_pressure(self, voltage):
         pass
 
-    def get_data(self, labjack: u6.U6, timestamp: float):
+    def get_data(self, labjack: u6.U6, timestamp: float, real_timestamp=None):
         """
         Gets the data from the gauge and appends it to the lists.
 
         Args:
             labjack: The LabJack device
-            timestamp: The time of the reading
+            timestamp: The relative time of the reading (seconds since start)
+            real_timestamp: The actual datetime of the reading
         """
+        if real_timestamp is None:
+            real_timestamp = datetime.now()
+            
         if labjack is None:
             pressure = np.random.uniform(1, 50)
             self.timestamp_data.append(timestamp)
+            self.real_timestamp_data.append(real_timestamp)
             self.voltage_data.append("test_mode")
             self.pressure_data.append(pressure)
             return
@@ -128,6 +136,7 @@ class PressureGauge:
 
         # Append the data to the lists
         self.timestamp_data.append(timestamp)
+        self.real_timestamp_data.append(real_timestamp)
         self.voltage_data.append(voltage)
         self.pressure_data.append(pressure)
 
@@ -138,27 +147,21 @@ class PressureGauge:
         
         # Create and write the header to the file
         with open(self.export_filename, "w") as f:
-            f.write("Timestamp,Pressure (Torr),Voltage (V)\n")
-    
-    def initialise_backup(self, backup_root_dir: str):
-        """Initialize the backup directory for this gauge."""
-        # Create a backup directory for this specific gauge
-        self.backup_dir = os.path.join(backup_root_dir, f"{self.name}_backup")
-        os.makedirs(self.backup_dir, exist_ok=True)
-        print(f"Initialized backup directory: {self.backup_dir}")
+            f.write("RealTimestamp,RelativeTime,Pressure (Torr),Voltage (V)\n")
     
     def export_write(self):
         """Write the latest data point to the main export file."""
         if len(self.timestamp_data) > 0:
             # Get the latest data point
             idx = len(self.timestamp_data) - 1
-            timestamp = self.timestamp_data[idx]
+            rel_timestamp = self.timestamp_data[idx]
+            real_timestamp = self.real_timestamp_data[idx].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
             pressure = self.pressure_data[idx]
             voltage = self.voltage_data[idx] if idx < len(self.voltage_data) else 0
             
             # Write to the main export file
             with open(self.export_filename, "a") as f:
-                f.write(f"{timestamp},{pressure},{voltage}\n")
+                f.write(f"{real_timestamp},{rel_timestamp},{pressure},{voltage}\n")
             
             # Increment the backup counter and check if we need to create a backup
             self.measurements_since_backup += 1
@@ -179,10 +182,12 @@ class PressureGauge:
         
         # Write all current data to the backup file
         with open(backup_filename, "w") as f:
-            f.write("Timestamp,Pressure (Torr),Voltage (V)\n")
+            f.write("RealTimestamp,RelativeTime,Pressure (Torr),Voltage (V)\n")
             for i in range(len(self.timestamp_data)):
+                real_ts = self.real_timestamp_data[i].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                rel_ts = self.timestamp_data[i]
                 voltage = self.voltage_data[i] if i < len(self.voltage_data) else 0
-                f.write(f"{self.timestamp_data[i]},{self.pressure_data[i]},{voltage}\n")
+                f.write(f"{real_ts},{rel_ts},{self.pressure_data[i]},{voltage}\n")
         
         print(f"Created backup file: {backup_filename}")
         self.backup_counter += 1
@@ -299,7 +304,6 @@ class CVM211_Gauge(PressureGauge):
             error = pressure_value * 0.025
 
         return error
-
 
 class Baratron626D_Gauge(PressureGauge):
     """
