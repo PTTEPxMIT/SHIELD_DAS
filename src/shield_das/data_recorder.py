@@ -171,15 +171,14 @@ class DataRecorder:
         # Main data collection loop
         while not self.stop_event.is_set():
             timestamp = f"{self.elapsed_time:.1f}"
-            current_time = datetime.now()
             
             for gauge in self.gauges:
                 try:
                     # Get data based on mode
                     if self.test_mode:
-                        gauge.get_data(labjack=None, timestamp=timestamp, real_timestamp=current_time)
+                        gauge.get_data(labjack=None, timestamp=timestamp)
                     else:
-                        gauge.get_data(labjack=labjack, timestamp=timestamp, real_timestamp=current_time)
+                        gauge.get_data(labjack=labjack, timestamp=timestamp)
                 except Exception as e:
                     print(f"Error reading from {gauge.name}: {e}")
                 

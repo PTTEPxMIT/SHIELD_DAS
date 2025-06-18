@@ -2,7 +2,7 @@ import numpy as np
 from typing import Optional
 import os
 import u6
-import datetime
+from datetime import datetime
 
 class PressureGauge:
     """
@@ -111,17 +111,15 @@ class PressureGauge:
     def voltage_to_pressure(self, voltage):
         pass
 
-    def get_data(self, labjack: u6.U6, timestamp: float, real_timestamp=None):
+    def get_data(self, labjack: u6.U6, timestamp: float):
         """
         Gets the data from the gauge and appends it to the lists.
 
         Args:
             labjack: The LabJack device
             timestamp: The relative time of the reading (seconds since start)
-            real_timestamp: The actual datetime of the reading
         """
-        if real_timestamp is None:
-            real_timestamp = datetime.now()
+        real_timestamp = datetime.now()
             
         if labjack is None:
             pressure = np.random.uniform(1, 50)
