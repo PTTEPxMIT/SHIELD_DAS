@@ -3,7 +3,6 @@ import dash
 from dash import dcc, html
 from dash.dependencies import Input, Output
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import dash_bootstrap_components as dbc
 import math
 import threading
@@ -64,13 +63,12 @@ class DataPlotter:
                     ], className="d-flex justify-content-center align-items-center mb-3")
                 ], width=12)
             ]),
-            
-            # Two columns layout: Upstream (left) and Downstream (right)
+              # Three columns layout: Upstream (left), Temperature (centre) and Downstream (right)
             dbc.Row([
                 # Upstream Column (Left)
                 dbc.Col([
                     html.H3("Upstream", className="text-center text-primary mb-3"),
-                    # Upstream Gauge Cards (will be filled by callback) - in a row
+                    # Upstream Gauge Cards (will be filled by callback) in a row
                     html.Div(id="upstream-gauges", className="mb-3"),
                     # Upstream Plot
                     dbc.Card([
@@ -79,7 +77,27 @@ class DataPlotter:
                             dcc.Graph(id="upstream-plot")
                         ])
                     ])
-                ], width=6),
+                ], width=4),
+                
+                # Temperature Column (Center)
+                dbc.Col([
+                    html.H3("Temperature", className="text-center text-success mb-3"),
+                    # Temperature Card
+                    dbc.Card([
+                        dbc.CardHeader("Temperature"),
+                        dbc.CardBody([
+                            html.H3(id="current-temperature", className="text-center"),
+                            html.P("°C", className="text-center mb-3")
+                        ])
+                    ], className="border-success mb-3"),
+                    # Temperature Plot
+                    dbc.Card([
+                        dbc.CardHeader("Temperature History"),
+                        dbc.CardBody([
+                            dcc.Graph(id="temperature-plot")
+                        ])
+                    ])
+                ], width=4),
                 
                 # Downstream Column (Right)
                 dbc.Col([
@@ -93,7 +111,7 @@ class DataPlotter:
                             dcc.Graph(id="downstream-plot")
                         ])
                     ])
-                ], width=6)
+                ], width=4)
             ]),
             
             # Row for the toggle and interval
@@ -368,6 +386,83 @@ class DataPlotter:
             )
 
             return downstream_fig, upstream_fig
+
+        # Create temperature plot and update temperature value
+        @self.app.callback(
+            [Output("temperature-plot", "figure"),
+             Output("current-temperature", "children")],
+            [Input("interval-component", "n_intervals"),
+             Input("time-window-input", "value")],
+        )
+        def update_temperature_plot(n_intervals, time_window):
+            # Default to 10 seconds if invalid value
+            if time_window is None or time_window < 1:
+                time_window = 10
+                
+            # Create temperature figure
+            temp_fig = go.Figure()
+            
+            # Track if we have data
+            has_data = False
+            current_temp = "--"
+            
+            # Get temperature data from recorder
+            temp_data = self.recorder.temperature_data.copy()
+            temp_timestamps = self.recorder.temperature_timestamps.copy()
+            
+            if len(temp_data) > 0:
+                has_data = True
+                
+                # Get current time (latest reading)
+                current_time = 0
+                if temp_timestamps:
+                    current_time = max(temp_timestamps)
+                
+                # Filter data based on time window
+                time_window_data = []
+                for i, t in enumerate(temp_timestamps):
+                    if current_time - t <= time_window:
+                        time_window_data.append(i)
+                
+                if time_window_data:
+                    filtered_timestamps = [temp_timestamps[i] for i in time_window_data]
+                    filtered_temps = [temp_data[i] for i in time_window_data]
+                else:
+                    # If no data in window, show the most recent points
+                    filtered_timestamps = temp_timestamps[-5:] if len(temp_timestamps) > 5 else temp_timestamps
+                    filtered_temps = temp_data[-5:] if len(temp_data) > 5 else temp_data
+                
+                # Add trace for temperature
+                temp_fig.add_trace(
+                    go.Scatter(
+                        x=filtered_timestamps,
+                        y=filtered_temps,
+                        mode="lines+markers",
+                        name="Temperature",
+                        line=dict(color="#28a745"),  # Bootstrap success color
+                    )
+                )
+                
+                # Update current temperature display
+                if temp_data:
+                    current_temp = f"{temp_data[-1]:.1f}"
+            
+            # Set x-axis limits if we have data
+            if has_data and temp_timestamps:
+                x_min = min(temp_timestamps)
+                x_max = max(temp_timestamps)
+                temp_fig.update_xaxes(range=[x_min, x_max])
+            
+            # Update layout for temperature plot
+            temp_fig.update_layout(
+                height=400,
+                xaxis_title="Relative Time (s)",
+                yaxis_title="Temperature (°C)",
+                template="plotly_white",
+                margin=dict(l=50, r=20, t=30, b=50),
+            )
+            
+            return temp_fig, current_temp
 
         @self.app.callback(
             [Output("start-button", "disabled"),
