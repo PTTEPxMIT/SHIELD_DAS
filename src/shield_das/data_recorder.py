@@ -35,13 +35,14 @@ class DataRecorder:
     results_dir: str
     test_mode: bool
     record_temperature: bool = True
-
     stop_event: threading.Event
     thread: threading.Thread
     run_dir: str
     backup_dir: str
     elapsed_time: float
-
+    temperature_data: list
+    temperature_timestamps: list
+    
     def __init__(self, gauges: list[PressureGauge], results_dir: str = "results", test_mode=False, record_temperature=True):
         self.gauges = gauges
         self.results_dir = results_dir
@@ -63,6 +64,10 @@ class DataRecorder:
         # Initialize time tracking
         self.elapsed_time = 0.0
         self.start_time = None
+        
+        # Initialize temperature data storage
+        self.temperature_data = []
+        self.temperature_timestamps = []
 
     def _create_results_directory(self):
         """Creates a new directory for results based on date and run number and if test_mode is enabled, it will not create directories."""
@@ -150,6 +155,10 @@ class DataRecorder:
             if hasattr(gauge, 'backup_counter'):
                 gauge.backup_counter = 0
         
+        # Clear temperature data
+        self.temperature_data = []
+        self.temperature_timestamps = []
+        
         # Create new directories
         self.run_dir = self._create_results_directory()
         self.backup_dir = os.path.join(self.run_dir, "backup")
@@ -202,11 +211,10 @@ class DataRecorder:
                 else:
                     # Simulate temperature reading in test mode
                     self.get_and_export_temperature(labjack=None)
-            
-            # Sleep and increment time
+              # Sleep and increment time
             time.sleep(0.5)
             self.elapsed_time += 0.5
-
+            
     def get_and_export_temperature(self, labjack: u6.U6=None):
         """Get temperature from the thermocouple and export it"""
 
@@ -218,6 +226,10 @@ class DataRecorder:
         
         # Get current real timestamp
         real_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        
+        # Store data in memory
+        self.temperature_data.append(temp_c)
+        self.temperature_timestamps.append(self.elapsed_time)
         
         # Export temperature data with both real and relative timestamps
         with open(os.path.join(self.run_dir, "temperature_data.csv"), "a") as f:
