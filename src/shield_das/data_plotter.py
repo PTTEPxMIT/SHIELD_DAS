@@ -400,15 +400,15 @@ class DataPlotter:
             )
 
             return downstream_fig, upstream_fig        
-        
         # Create temperature plot and update temperature value
         @self.app.callback(
             [Output("temperature-plot", "figure"),
              Output("current-temperature", "children")],
             [Input("interval-component", "n_intervals"),
-             Input("time-window-input", "value")],
+             Input("time-window-input", "value"),
+             Input("error-bars-toggle", "value")],
         )
-        def update_temperature_plot(n_intervals, time_window):
+        def update_temperature_plot(n_intervals, time_window, show_errors):
             # Default to 10 seconds if invalid value
             if time_window is None or time_window < 1:
                 time_window = 10
@@ -461,6 +461,15 @@ class DataPlotter:
                         mode="lines+markers",
                         name="Temperature",
                         line=dict(color="#28a745"),  # Bootstrap success color
+                        error_y=dict(
+                            type='data',
+                            # Calculate error using the specified formula
+                            array=[math.sqrt(2.2**2 + 2.0**2 + 0.5**2) for _ in filtered_temps],
+                            visible=show_errors,
+                            color="#28a745",
+                            thickness=1.5,
+                            width=3
+                        )
                     )
                 )
                 
@@ -482,6 +491,13 @@ class DataPlotter:
                 yaxis_title="Temperature (°C)",
                 template="plotly_white",
                 margin=dict(l=50, r=20, t=30, b=50),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                )
             )
             
             return temp_fig, current_temp
