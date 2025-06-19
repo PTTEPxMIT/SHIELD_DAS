@@ -242,7 +242,7 @@ class WGM701_Gauge(PressureGauge):
             error = pressure_value * 0.3
         elif 7.6e-03 < pressure_value < 75:
             error = pressure_value * 0.15
-        elif 75 < pressure_value:
+        else:
             error = pressure_value * 0.5
 
         return error
@@ -298,7 +298,7 @@ class CVM211_Gauge(PressureGauge):
             error = 0.1e-03
         elif 1e-03 < pressure_value < 400:
             error = pressure_value * 0.1
-        elif 400 < pressure_value:
+        else:
             error = pressure_value * 0.025
 
         return error
@@ -359,7 +359,7 @@ class Baratron626D_Gauge(PressureGauge):
 
         if 1 < pressure_value:
             error = pressure_value * 0.0025
-        elif pressure_value < 1:
+        else:
             error = pressure_value * 0.005
 
         return error
