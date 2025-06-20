@@ -242,7 +242,7 @@ class WGM701_Gauge(PressureGauge):
             error = pressure_value * 0.3
         elif 7.6e-03 < pressure_value < 75:
             error = pressure_value * 0.15
-        elif 75 < pressure_value:
+        else:
             error = pressure_value * 0.5
 
         return error
@@ -298,7 +298,7 @@ class CVM211_Gauge(PressureGauge):
             error = 0.1e-03
         elif 1e-03 < pressure_value < 400:
             error = pressure_value * 0.1
-        elif 400 < pressure_value:
+        else:
             error = pressure_value * 0.025
 
         return error
@@ -314,8 +314,30 @@ class Baratron626D_Gauge(PressureGauge):
         ain_channel: int = 6,
         export_filename: str = "Baratron626D_pressure_data.csv",
         gauge_location: str = "downstream",
+        full_scale_Torr: float = None,
     ):
         super().__init__(name, ain_channel, export_filename, gauge_location)
+
+        self.full_scale_Torr = full_scale_Torr
+    
+    @property
+    def full_scale_Torr(self) -> float:
+        if self._full_scale_Torr is None:
+            raise ValueError("full_scale_Torr must be set for Baratron626D_Gauge")
+        if float(self._full_scale_Torr) not in (1.0, 1000.0):
+            raise ValueError("full_scale_Torr must be either 1 or 1000 for Baratron626D_Gauge")
+        return float(self._full_scale_Torr)
+
+    @full_scale_Torr.setter
+    def full_scale_Torr(self, value):
+        try:
+            val = float(value)
+        except (TypeError, ValueError):
+            raise ValueError("full_scale_Torr must be a number (1 or 1000) for Baratron626D_Gauge")
+        if val not in (1.0, 1000.0):
+            raise ValueError("full_scale_Torr must be either 1 or 1000 for Baratron626D_Gauge")
+        self._full_scale_Torr = val
+    
 
     def voltage_to_pressure(self, voltage: float) -> float:
         """
@@ -332,13 +354,13 @@ class Baratron626D_Gauge(PressureGauge):
         pressure = 0.01 * 10 ** (2 * voltage)
 
         # Ensure pressure is within the valid range
-        if self.name == "Baratron626D_1KT":
+        if self.full_scale_Torr == 1000:
             if pressure > 1000:
                 pressure = 1000
             elif pressure < 0.5:
                 pressure = 0.5
             
-        elif self.name == "Baratron626D_1T":
+        elif self.full_scale_Torr == 1:
             if pressure > 1:
                 pressure = 1
             elif pressure < 0.0005:
@@ -359,7 +381,7 @@ class Baratron626D_Gauge(PressureGauge):
 
         if 1 < pressure_value:
             error = pressure_value * 0.0025
-        elif pressure_value < 1:
+        else:
             error = pressure_value * 0.005
 
         return error

@@ -21,18 +21,19 @@ gauge_3 = Baratron626D_Gauge(
     name="Baratron626D_1KT",
     gauge_location="upstream",
     export_filename="Baratron626D_1KT_upstream_pressure_data.csv",
+    full_scale_Torr=1000,
 )
 gauge_4 = Baratron626D_Gauge(
     name="Baratron626D_1T",
     gauge_location="downstream",
     export_filename="Baratron626D_1T_downstream_pressure_data.csv",
+    full_scale_Torr=1,
 )
 
 # Create recorder
 my_recorder = DataRecorder(
     gauges=[gauge_1, gauge_2, gauge_3, gauge_4],
-    test_mode=True,
-    record_temperature=True,
+    # test_mode=True,
 )
 
 if __name__ == "__main__":

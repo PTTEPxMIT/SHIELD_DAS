@@ -53,7 +53,7 @@ class DataPlotter:
                                 id="time-window-input",
                                 type="number",
                                 min=1,
-                                max=100,
+                                max=86400,  # Maximum time window set to 24 hours (86400 seconds)
                                 step=1,
                                 value=10,  # Default 10 seconds
                                 style={"width": "80px"}
