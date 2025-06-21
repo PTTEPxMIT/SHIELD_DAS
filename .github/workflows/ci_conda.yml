@@ -27,12 +27,18 @@ jobs:
       run: |
         pip install .[test]
     
-    - name: Install additional dependencies
+    - name: set up install additional dependencies
       shell: bash -l {0}
       run: |
         sudo apt-get install build-essential
         sudo apt-get install libusb-1.0-0-dev
         sudo apt-get install git-core
+        git clone https://github.com/labjack/exodriver.git
+        cd exodriver/ $ sudo ./install.sh
+
+    - name: Install additional dependencies
+      shell: bash -l {0}
+      run: |
         git clone https://github.com/labjack/exodriver.git
         cd exodriver/ $ sudo ./install.sh
 
