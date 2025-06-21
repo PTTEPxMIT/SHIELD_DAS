@@ -1,5 +1,4 @@
-import math
-
+import numpy as np
 import u6
 
 
@@ -148,7 +147,7 @@ def temp_c_to_mv(temp_c: float) -> float:
     mv = evaluate_poly(coeffs, temp_c)
     if extended:
         a0, a1, a2 = extended
-        mv += a0 * math.exp(a1 * (temp_c - a2) ** 2)
+        mv += a0 * np.exp(a1 * (temp_c - a2) ** 2)
     return mv
 
 
