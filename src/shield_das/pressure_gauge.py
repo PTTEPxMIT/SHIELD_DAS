@@ -1,8 +1,9 @@
-import numpy as np
-from typing import Optional
 import os
-import u6
 from datetime import datetime
+
+import numpy as np
+import u6
+
 
 class PressureGauge:
     """
@@ -13,7 +14,7 @@ class PressureGauge:
         ain_channel: The AIN channel of the gauge
         export_filename: The filename to export the data to
         gauge_location: Location of the gauge, either "upstream" or "downstream"
-    
+
     Attributes:
         name: Name of the gauge
         ain_channel: The AIN channel of the gauge
@@ -40,7 +41,7 @@ class PressureGauge:
     backup_counter: int
     measurements_since_backup: int
     backup_interval: int
-    
+
     def __init__(
         self,
         name: str,
@@ -58,7 +59,7 @@ class PressureGauge:
         self.real_timestamp_data = []
         self.pressure_data = []
         self.voltage_data = []
-        
+
         # Backup settings
         self.backup_dir = None
         self.backup_counter = 0
@@ -78,9 +79,9 @@ class PressureGauge:
     def get_ain_channel_voltage(
         self,
         labjack: u6.U6,
-        resolution_index: Optional[int] = 0,
-        gain_index: Optional[int] = 0,
-        settling_factor: Optional[int] = 0,
+        resolution_index: int | None = 0,
+        gain_index: int | None = 0,
+        settling_factor: int | None = 0,
     ) -> float:
         """
         Obtains the voltage reading from a channel of the LabJack u6 hub.
@@ -120,9 +121,10 @@ class PressureGauge:
             timestamp: The relative time of the reading (seconds since start)
         """
         real_timestamp = datetime.now()
-            
+
         if labjack is None:
-            pressure = np.random.uniform(1, 50)
+            rng = np.random.default_rng()
+            pressure = rng.uniform(1, 50)
             self.timestamp_data.append(timestamp)
             self.real_timestamp_data.append(real_timestamp)
             self.voltage_data.append("test_mode")
@@ -142,51 +144,54 @@ class PressureGauge:
         """Initialize the main export file."""
         # Create the directory if it doesn't exist
         os.makedirs(os.path.dirname(self.export_filename), exist_ok=True)
-        
+
         # Create and write the header to the file
         with open(self.export_filename, "w") as f:
             f.write("RealTimestamp,RelativeTime,Pressure (Torr),Voltage (V)\n")
-    
+
     def export_write(self):
         """Write the latest data point to the main export file."""
         if len(self.timestamp_data) > 0:
             # Get the latest data point
             idx = len(self.timestamp_data) - 1
             rel_timestamp = self.timestamp_data[idx]
-            real_timestamp = self.real_timestamp_data[idx].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            real_timestamp = self.real_timestamp_data[idx].strftime(
+                "%Y-%m-%d %H:%M:%S.%f"
+            )[:-3]
             pressure = self.pressure_data[idx]
             voltage = self.voltage_data[idx] if idx < len(self.voltage_data) else 0
-            
+
             # Write to the main export file
             with open(self.export_filename, "a") as f:
                 f.write(f"{real_timestamp},{rel_timestamp},{pressure},{voltage}\n")
-            
+
             # Increment the backup counter and check if we need to create a backup
             self.measurements_since_backup += 1
             if self.measurements_since_backup >= self.backup_interval:
                 self.create_backup()
                 self.measurements_since_backup = 0
-    
+
     def create_backup(self):
         """Create a backup file with all current data."""
         if self.backup_dir is None:
             return  # Backup not initialized
-        
+
         # Create a new backup filename with incrementing counter
         backup_filename = os.path.join(
-            self.backup_dir, 
-            f"{self.name}_backup_{self.backup_counter:05d}.csv"
+            self.backup_dir, f"{self.name}_backup_{self.backup_counter:05d}.csv"
         )
-        
+
         # Write all current data to the backup file
         with open(backup_filename, "w") as f:
             f.write("RealTimestamp,RelativeTime,Pressure (Torr),Voltage (V)\n")
             for i in range(len(self.timestamp_data)):
-                real_ts = self.real_timestamp_data[i].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                real_ts = self.real_timestamp_data[i].strftime("%Y-%m-%d %H:%M:%S.%f")[
+                    :-3
+                ]
                 rel_ts = self.timestamp_data[i]
                 voltage = self.voltage_data[i] if i < len(self.voltage_data) else 0
                 f.write(f"{real_ts},{rel_ts},{self.pressure_data[i]},{voltage}\n")
-        
+
         print(f"Created backup file: {backup_filename}")
         self.backup_counter += 1
 
@@ -247,6 +252,7 @@ class WGM701_Gauge(PressureGauge):
 
         return error
 
+
 class CVM211_Gauge(PressureGauge):
     """
     Class for the WGM701 pressure gauge.
@@ -283,7 +289,7 @@ class CVM211_Gauge(PressureGauge):
 
         return pressure
 
-    def calculate_error(self, pressure_value:float) -> float:
+    def calculate_error(self, pressure_value: float) -> float:
         """
         Calculate the error in the pressure reading.
 
@@ -293,7 +299,7 @@ class CVM211_Gauge(PressureGauge):
         Returns:
             float: The error in the pressure reading
         """
-        
+
         if 1e-04 < pressure_value < 1e-03:
             error = 0.1e-03
         elif 1e-03 < pressure_value < 400:
@@ -302,6 +308,7 @@ class CVM211_Gauge(PressureGauge):
             error = pressure_value * 0.025
 
         return error
+
 
 class Baratron626D_Gauge(PressureGauge):
     """
@@ -314,18 +321,20 @@ class Baratron626D_Gauge(PressureGauge):
         ain_channel: int = 6,
         export_filename: str = "Baratron626D_pressure_data.csv",
         gauge_location: str = "downstream",
-        full_scale_Torr: float = None,
+        full_scale_Torr: float | None = None,
     ):
         super().__init__(name, ain_channel, export_filename, gauge_location)
 
         self.full_scale_Torr = full_scale_Torr
-    
+
     @property
     def full_scale_Torr(self) -> float:
         if self._full_scale_Torr is None:
             raise ValueError("full_scale_Torr must be set for Baratron626D_Gauge")
         if float(self._full_scale_Torr) not in (1.0, 1000.0):
-            raise ValueError("full_scale_Torr must be either 1 or 1000 for Baratron626D_Gauge")
+            raise ValueError(
+                "full_scale_Torr must be either 1 or 1000 for Baratron626D_Gauge"
+            )
         return float(self._full_scale_Torr)
 
     @full_scale_Torr.setter
@@ -333,11 +342,14 @@ class Baratron626D_Gauge(PressureGauge):
         try:
             val = float(value)
         except (TypeError, ValueError):
-            raise ValueError("full_scale_Torr must be a number (1 or 1000) for Baratron626D_Gauge")
+            raise ValueError(
+                "full_scale_Torr must be a number (1 or 1000) for Baratron626D_Gauge"
+            )
         if val not in (1.0, 1000.0):
-            raise ValueError("full_scale_Torr must be either 1 or 1000 for Baratron626D_Gauge")
+            raise ValueError(
+                "full_scale_Torr must be either 1 or 1000 for Baratron626D_Gauge"
+            )
         self._full_scale_Torr = val
-    
 
     def voltage_to_pressure(self, voltage: float) -> float:
         """
@@ -359,7 +371,7 @@ class Baratron626D_Gauge(PressureGauge):
                 pressure = 1000
             elif pressure < 0.5:
                 pressure = 0.5
-            
+
         elif self.full_scale_Torr == 1:
             if pressure > 1:
                 pressure = 1
