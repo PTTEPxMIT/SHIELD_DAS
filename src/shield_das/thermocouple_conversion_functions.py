@@ -1,8 +1,10 @@
 import math
+
 import u6
 
+
 def evaluate_poly(coeffs: list[float] | tuple[float], x: float) -> float:
-    """"
+    """ "
     Evaluate a polynomial at x given the list of coefficients.
 
     The polynomial is:
@@ -17,6 +19,7 @@ def evaluate_poly(coeffs: list[float] | tuple[float], x: float) -> float:
         float: The evaluated polynomial result.
     """
     return sum(a * x**i for i, a in enumerate(coeffs))
+
 
 def volts_to_temp_constants(mv: float) -> tuple[float, ...]:
     """
@@ -39,26 +42,46 @@ def volts_to_temp_constants(mv: float) -> tuple[float, ...]:
     if mv < 0:
         # Range: -5.891 mV to 0 mV
         return (
-            0.0E0, 2.5173462E1, -1.1662878E0, -1.0833638E0,
-            -8.977354E-1, -3.7342377E-1, -8.6632643E-2,
-            -1.0450598E-2, -5.1920577E-4
+            0.0e0,
+            2.5173462e1,
+            -1.1662878e0,
+            -1.0833638e0,
+            -8.977354e-1,
+            -3.7342377e-1,
+            -8.6632643e-2,
+            -1.0450598e-2,
+            -5.1920577e-4,
         )
     elif mv < 20.644:
         # Range: 0 mV to 20.644 mV
         return (
-            0.0E0, 2.508355E1, 7.860106E-2, -2.503131E-1,
-            8.31527E-2, -1.228034E-2, 9.804036E-4,
-            -4.41303E-5, 1.057734E-6, -1.052755E-8
+            0.0e0,
+            2.508355e1,
+            7.860106e-2,
+            -2.503131e-1,
+            8.31527e-2,
+            -1.228034e-2,
+            9.804036e-4,
+            -4.41303e-5,
+            1.057734e-6,
+            -1.052755e-8,
         )
     else:
         # Range: 20.644 mV to 54.886 mV
         return (
-            -1.318058E2, 4.830222E1, -1.646031E0, 5.464731E-2,
-            -9.650715E-4, 8.802193E-6, -3.11081E-8
+            -1.318058e2,
+            4.830222e1,
+            -1.646031e0,
+            5.464731e-2,
+            -9.650715e-4,
+            8.802193e-6,
+            -3.11081e-8,
         )
 
 
-def temp_to_volts_constants(temp_c: float) -> tuple[tuple[float, ...], tuple[float, float, float] | None]:
+def temp_to_volts_constants(
+    temp_c: float,
+) -> tuple[tuple[float, ...], tuple[float, float, float] | None]:
     """
     Select the appropriate NIST ITS-90 polynomial coefficients for converting
     temperature (°C) to Type K thermocouple voltage (in millivolts).
@@ -81,19 +104,32 @@ def temp_to_volts_constants(temp_c: float) -> tuple[tuple[float, ...], tuple[flo
     if temp_c < 0:
         # Range: -270 °C to 0 °C
         return (
-            0.0E0, 0.39450128E-1, 0.236223736E-4, -0.328589068E-6,
-            -0.499048288E-8, -0.675090592E-10, -0.574103274E-12,
-            -0.310888729E-14, -0.104516094E-16, -0.198892669E-19,
-            -0.163226975E-22
+            0.0e0,
+            0.39450128e-1,
+            0.236223736e-4,
+            -0.328589068e-6,
+            -0.499048288e-8,
+            -0.675090592e-10,
+            -0.574103274e-12,
+            -0.310888729e-14,
+            -0.104516094e-16,
+            -0.198892669e-19,
+            -0.163226975e-22,
         ), None
     else:
         # Range: 0 °C to 1372 °C, with extended exponential term
         return (
-            -0.176004137E-1, 0.38921205E-1, 0.1855877E-4,
-            -0.994575929E-7, 0.318409457E-9, -0.560728449E-12,
-            0.560750591E-15, -0.3202072E-18, 0.971511472E-22,
-            -0.121047213E-25
-        ), (0.1185976E0, -0.1183432E-3, 0.1269686E3)
+            -0.176004137e-1,
+            0.38921205e-1,
+            0.1855877e-4,
+            -0.994575929e-7,
+            0.318409457e-9,
+            -0.560728449e-12,
+            0.560750591e-15,
+            -0.3202072e-18,
+            0.971511472e-22,
+            -0.121047213e-25,
+        ), (0.1185976e0, -0.1183432e-3, 0.1269686e3)
 
 
 def temp_c_to_mv(temp_c: float) -> float:
@@ -112,7 +148,7 @@ def temp_c_to_mv(temp_c: float) -> float:
     mv = evaluate_poly(coeffs, temp_c)
     if extended:
         a0, a1, a2 = extended
-        mv += a0 * math.exp(a1 * (temp_c - a2)**2)
+        mv += a0 * math.exp(a1 * (temp_c - a2) ** 2)
     return mv
 
 
@@ -132,9 +168,7 @@ def mv_to_temp_c(mv: float) -> float:
 
 
 def read_type_k_temp_diff(
-    u6_device: u6.U6, 
-    pos_channel: int = 0, 
-    gain_index: int = 3
+    u6_device: u6.U6, pos_channel: int = 0, gain_index: int = 3
 ) -> float:
     """
     Read temperature from a Type K thermocouple connected to a LabJack U6 using differential input mode.
@@ -155,7 +189,9 @@ def read_type_k_temp_diff(
     cjt_c = u6_device.getTemperature() - 273.15
 
     # Read differential thermocouple voltage (volts)
-    tc_v = u6_device.getAIN(pos_channel, resolutionIndex=12, gainIndex=gain_index, differential=True)
+    tc_v = u6_device.getAIN(
+        pos_channel, resolutionIndex=12, gainIndex=gain_index, differential=True
+    )
 
     # Convert thermocouple voltage to millivolts
     tc_mv = tc_v * 1000
