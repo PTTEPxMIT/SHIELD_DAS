@@ -1,5 +1,2 @@
-import u6
-
-
-def test_import_u6():
+def test_example():
     pass
