@@ -3,7 +3,6 @@ import dash
 from dash import dcc, html
 from dash.dependencies import Input, Output
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import dash_bootstrap_components as dbc
 import math
 import threading
@@ -63,14 +62,12 @@ class DataPlotter:
                         )
                     ], className="d-flex justify-content-center align-items-center mb-3")
                 ], width=12)
-            ]),
-            
-            # Two columns layout: Upstream (left) and Downstream (right)
+            ]),              # Three columns layout: Upstream (left), Temperature (centre) and Downstream (right)
             dbc.Row([
                 # Upstream Column (Left)
                 dbc.Col([
                     html.H3("Upstream", className="text-center text-primary mb-3"),
-                    # Upstream Gauge Cards (will be filled by callback) - in a row
+                    # Upstream Gauge Cards (will be filled by callback) in a row
                     html.Div(id="upstream-gauges", className="mb-3"),
                     # Upstream Plot
                     dbc.Card([
@@ -79,7 +76,27 @@ class DataPlotter:
                             dcc.Graph(id="upstream-plot")
                         ])
                     ])
-                ], width=6),
+                ], width=4),
+                
+                # Temperature Column (Center)
+                dbc.Col([
+                    html.H3("Temperature", className="text-center text-success mb-3"),
+                    # Temperature Card
+                    dbc.Card([
+                        dbc.CardHeader("Temperature"),
+                        dbc.CardBody([
+                            html.H3(id="current-temperature", className="text-center"),
+                            html.P("°C", className="text-center mb-0")
+                        ])
+                    ], className="border-success mb-3"),
+                    # Temperature Plot
+                    dbc.Card([
+                        dbc.CardHeader("Temperature History"),
+                        dbc.CardBody([
+                            dcc.Graph(id="temperature-plot")
+                        ])
+                    ])
+                ], width=4),
                 
                 # Downstream Column (Right)
                 dbc.Col([
@@ -93,7 +110,7 @@ class DataPlotter:
                             dcc.Graph(id="downstream-plot")
                         ])
                     ])
-                ], width=6)
+                ], width=4)
             ]),
             
             # Row for the toggle and interval
@@ -301,14 +318,15 @@ class DataPlotter:
                                     color=color,
                                     thickness=1.5,
                                     width=3
-                                )
+                                ),
                             )
-                        )
-
-            # Set x-axis limits based on data
-            if all_times:
-                x_min = min(all_times)
-                x_max = max(all_times)
+                        )            
+                        
+            # Set x-axis limits based on time window
+            if has_data:
+                # Synchronize x-axis based on current time and window
+                x_min = max(0, current_time - time_window)
+                x_max = current_time
                 
                 # Use same x range for both plots
                 for fig in [upstream_fig, downstream_fig]:
@@ -348,8 +366,8 @@ class DataPlotter:
                 )
             else:
                 # Default log scale if no data
-                downstream_fig.update_yaxes(type="log")
-
+                downstream_fig.update_yaxes(type="log")            
+                
             # Update layout for upstream plot
             upstream_fig.update_layout(
                 height=400,
@@ -357,17 +375,132 @@ class DataPlotter:
                 yaxis_title="Pressure (Torr)",
                 template="plotly_white",
                 margin=dict(l=50, r=20, t=30, b=50),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                )
             )
-            
+            # Update layout for downstream plot
             downstream_fig.update_layout(
                 height=400,
                 xaxis_title="Relative Time (s)",
                 yaxis_title="Pressure (Torr)",
                 template="plotly_white",
                 margin=dict(l=50, r=20, t=30, b=50),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                )
             )
 
-            return downstream_fig, upstream_fig
+            return downstream_fig, upstream_fig        
+        # Create temperature plot and update temperature value
+        @self.app.callback(
+            [Output("temperature-plot", "figure"),
+             Output("current-temperature", "children")],
+            [Input("interval-component", "n_intervals"),
+             Input("time-window-input", "value"),
+             Input("error-bars-toggle", "value")],
+        )
+        def update_temperature_plot(n_intervals, time_window, show_errors):
+            # Default to 10 seconds if invalid value
+            if time_window is None or time_window < 1:
+                time_window = 10
+                
+            # Create temperature figure
+            temp_fig = go.Figure()
+            
+            # Track if we have data
+            has_data = False
+            current_temp = "--"
+            
+            # Get temperature data from recorder
+            temp_data = self.recorder.temperature_data.copy()
+            temp_timestamps = self.recorder.temperature_timestamps.copy()
+            
+            # Get global time range from all data for synchronized x-axis
+            current_time = 0
+            
+            # First find the latest time point from all sources (gauges and temperature)
+            for gauge in self.recorder.gauges:
+                if gauge.timestamp_data and float(gauge.timestamp_data[-1]) > current_time:
+                    current_time = float(gauge.timestamp_data[-1])
+            
+            if temp_timestamps and len(temp_timestamps) > 0:
+                latest_temp_time = max(temp_timestamps)
+                if latest_temp_time > current_time:
+                    current_time = latest_temp_time
+                
+                has_data = True
+                
+                # Filter data based on time window
+                time_window_data = []
+                for i, t in enumerate(temp_timestamps):
+                    if current_time - t <= time_window:
+                        time_window_data.append(i)
+                
+                if time_window_data:
+                    filtered_timestamps = [temp_timestamps[i] for i in time_window_data]
+                    filtered_temps = [temp_data[i] for i in time_window_data]
+                else:
+                    # If no data in window, show the most recent points
+                    filtered_timestamps = temp_timestamps[-5:] if len(temp_timestamps) > 5 else temp_timestamps
+                    filtered_temps = temp_data[-5:] if len(temp_data) > 5 else temp_data
+                
+                # Add trace for temperature
+                temp_fig.add_trace(
+                    go.Scatter(
+                        x=filtered_timestamps,
+                        y=filtered_temps,
+                        mode="lines+markers",
+                        name="Temperature",
+                        line=dict(color="#28a745"),  # Bootstrap success color
+                        error_y=dict(
+                            type='data',
+                            # Calculate error using the specified formula
+                            array=[math.sqrt(2.2**2 + 2.0**2 + 0.5**2) for _ in filtered_temps],
+                            visible=show_errors,
+                            color="#28a745",
+                            thickness=1.5,
+                            width=3
+                        )
+                    )
+                )
+                
+                # Update current temperature display
+                if temp_data:
+                    current_temp = f"{temp_data[-1]:.1f}"
+            
+            # Set x-axis limits based on time window
+            if has_data:
+                # Synchronize x-axis with pressure plots
+                x_min = max(0, current_time - time_window)
+                x_max = current_time
+                temp_fig.update_xaxes(range=[x_min, x_max])
+            
+            # Update layout for temperature plot
+            temp_fig.update_layout(
+                height=400,
+                xaxis_title="Relative Time (s)",
+                yaxis_title="Temperature (°C)",
+                template="plotly_white",
+                margin=dict(l=50, r=20, t=30, b=50),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                )
+            )
+            
+            return temp_fig, current_temp
 
         @self.app.callback(
             [Output("start-button", "disabled"),

@@ -6,3 +6,4 @@ from .pressure_gauge import (
 )
 from .data_recorder import DataRecorder
 from .data_plotter import DataPlotter
+from .thermocouple_conversion_functions import read_type_k_temp_diff
