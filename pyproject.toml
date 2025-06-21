@@ -83,7 +83,6 @@ known-third-party = [
 section-order = [
     "future",
     "standard-library",
-    "mpi",
     "third-party",
     "first-party",
     "local-folder",
