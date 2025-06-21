@@ -10,10 +10,10 @@ authors = [
 dynamic = ["version"]
 name = "SHIELD_DAS"
 description = "SHIELD permeation rig data aquisition system"
-readme = "README/md"
+readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
-dependencies = ["labjackpython"]
+dependencies = ["LabJackPython"]
 classifiers = [
     "Natural Language :: English",
     "Topic :: Scientific/Engineering",
@@ -27,13 +27,13 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest >= 5.4.3", "pytest-cov"]
+test = ["pytest", "pytest-cov"]
 lint = ["ruff", "mypy"]
 docs = ["sphinx", "sphinx-book-theme", "sphinx-design", "matplotlib"]
 
 [project.urls]
-Homepage = "https://github.com/RemDelaporteMathurin/FESTIM"
-Issues = "https://github.com/RemDelaporteMathurin/FESTIM/issues"
+Homepage = "https://github.com/PTTEPxMIT/SHIELD_DAS"
+Issues = "https://github.com/PTTEPxMIT/SHIELD_DAS/issues"
 
 
 [tool.setuptools_scm]
