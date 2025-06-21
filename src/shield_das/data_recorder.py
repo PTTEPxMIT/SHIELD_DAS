@@ -211,7 +211,8 @@ class DataRecorder:
                 else:
                     # Simulate temperature reading in test mode
                     self.get_and_export_temperature(labjack=None)
-              # Sleep and increment time
+            
+            # Sleep and increment time
             time.sleep(0.5)
             self.elapsed_time += 0.5
             
