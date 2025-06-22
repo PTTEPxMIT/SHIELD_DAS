@@ -26,16 +26,13 @@ jobs:
       run: |
         pip install .[test]
     
-    - name: set up install additional dependencies
+    - name: Install Exodriver for LabJackPython
+      # This is necessary for the LabJackPython package to work correctly
       shell: bash -l {0}
       run: |
         sudo apt-get install build-essential
         sudo apt-get install libusb-1.0-0-dev
         sudo apt-get install git-core
-
-    - name: Install additional dependencies
-      shell: bash -l {0}
-      run: |
         git clone https://github.com/labjack/exodriver.git
         cd exodriver/
         sudo ./install.sh
