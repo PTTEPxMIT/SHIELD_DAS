@@ -4,11 +4,10 @@ import threading
 import time
 from datetime import datetime
 
-import numpy as np
 import u6
 
 from .pressure_gauge import PressureGauge
-from .thermocouple_conversion_functions import read_type_k_temp_diff
+from .thermocouple import Thermocouple
 
 
 class DataRecorder:
@@ -37,6 +36,7 @@ class DataRecorder:
     """
 
     gauges: list[PressureGauge]
+    thermocouples: list[Thermocouple]
     results_dir: str
     test_mode: bool
     record_temperature: bool = True
@@ -51,11 +51,13 @@ class DataRecorder:
     def __init__(
         self,
         gauges: list[PressureGauge],
+        thermocouples: list[Thermocouple],
         results_dir: str = "results",
         test_mode=False,
         record_temperature=True,
     ):
         self.gauges = gauges
+        self.thermocouples = thermocouples
         self.results_dir = results_dir
         self.test_mode = test_mode
         self.record_temperature = record_temperature
@@ -69,16 +71,13 @@ class DataRecorder:
         self.backup_dir = os.path.join(self.run_dir, "backup")
         os.makedirs(self.backup_dir, exist_ok=True)
 
-        # Initialise gauge exports
+        # Initialise exports
         self._initialise_gauge_exports()
+        self._initialise_thermocouple_exports()
 
         # Initialize time tracking
         self.elapsed_time = 0.0
         self.start_time = None
-
-        # Initialize temperature data storage
-        self.temperature_data = []
-        self.temperature_timestamps = []
 
     def _create_results_directory(self):
         """Creates a new directory for results based on date and run number and if
@@ -134,14 +133,13 @@ class DataRecorder:
             gauge.export_filename = os.path.join(self.run_dir, original_filename)
             gauge.initialise_export()
 
-            # Initialize backup if supported
-            if hasattr(gauge, "initialise_backup"):
-                gauge.initialise_backup(self.backup_dir)
-
-        # Initialize temperature data file if temperature recording is enabled
-        if self.record_temperature:
-            with open(os.path.join(self.run_dir, "temperature_data.csv"), "w") as f:
-                f.write("RealTimestamp,RelativeTime,Temperature (C)\n")
+    def _initialise_thermocouple_exports(self):
+        """Initialise export files for all gauges"""
+        for thermocouple in self.thermocouples:
+            # Update path and initialize export
+            original_filename = os.path.basename(thermocouple.export_filename)
+            thermocouple.export_filename = os.path.join(self.run_dir, original_filename)
+            thermocouple.initialise_export()
 
     def start(self):
         """Start recording data"""
@@ -180,6 +178,7 @@ class DataRecorder:
 
         # Initialise exports again
         self._initialise_gauge_exports()
+        self._initialise_thermocouple_exports()
 
         # Reset time
         self.elapsed_time = 0.0
@@ -217,36 +216,21 @@ class DataRecorder:
                 # Always write to file
                 gauge.export_write()
 
-            # Get and export temperature if enabled
-            if self.record_temperature:
-                if not self.test_mode:
-                    # Use LabJack for temperature reading
-                    self.get_and_export_temperature(labjack=labjack)
-                else:
-                    # Simulate temperature reading in test mode
-                    self.get_and_export_temperature(labjack=None)
+            for thermocouple in self.thermocouples:
+                try:
+                    # Get temperature data based on mode
+                    if self.test_mode:
+                        thermocouple.get_temperature(labjack=None, timestamp=timestamp)
+                    else:
+                        thermocouple.get_temperature(
+                            labjack=labjack, timestamp=timestamp
+                        )
+                except Exception as e:
+                    print(f"Error reading from thermocouple: {e}")
+
+                # Always write to file
+                thermocouple.export_write()
 
             # Sleep and increment time
             time.sleep(0.5)
             self.elapsed_time += 0.5
-
-    def get_and_export_temperature(self, labjack: u6.U6 = None):
-        """Get temperature from the thermocouple and export it"""
-
-        if labjack is None:
-            rng = np.random.default_rng()
-            temp_c = rng.uniform(25, 30)
-        else:
-            # Read temperature from the thermocouple
-            temp_c = read_type_k_temp_diff(labjack)
-
-        # Get current real timestamp
-        real_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-
-        # Store data in memory
-        self.temperature_data.append(temp_c)
-        self.temperature_timestamps.append(self.elapsed_time)
-
-        # Export temperature data with both real and relative timestamps
-        with open(os.path.join(self.run_dir, "temperature_data.csv"), "a") as f:
-            f.write(f"{real_timestamp},{self.elapsed_time:.1f},{temp_c:.2f}\n")
