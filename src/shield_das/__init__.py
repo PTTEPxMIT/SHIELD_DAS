@@ -6,4 +6,4 @@ from .pressure_gauge import (
     PressureGauge,
     WGM701_Gauge,
 )
-from .thermocouple_conversion_functions import read_type_k_temp_diff
+from .thermocouple import Thermocouple
