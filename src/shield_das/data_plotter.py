@@ -521,8 +521,8 @@ class DataPlotter:
             current_temp = "--"
 
             # Get temperature data from recorder
-            temp_data = self.recorder.temperature_data.copy()
-            temp_timestamps = self.recorder.temperature_timestamps.copy()
+            temp_data = self.recorder.thermocouples[0].measured_temperature_data.copy()
+            temp_timestamps = self.recorder.thermocouples[0].timestamp_data.copy()
 
             # Get global time range from all data for synchronized x-axis
             current_time = 0
