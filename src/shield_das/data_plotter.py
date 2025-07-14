@@ -536,7 +536,7 @@ class DataPlotter:
                     current_time = float(gauge.timestamp_data[-1])
 
             if temp_timestamps and len(temp_timestamps) > 0:
-                latest_temp_time = max(temp_timestamps)
+                latest_temp_time = float(temp_timestamps[-1])
                 if latest_temp_time > current_time:
                     current_time = latest_temp_time
 
@@ -545,7 +545,7 @@ class DataPlotter:
                 # Filter data based on time window
                 time_window_data = []
                 for i, t in enumerate(temp_timestamps):
-                    if current_time - t <= time_window:
+                    if current_time - float(t) <= time_window:
                         time_window_data.append(i)
 
                 if time_window_data:
