@@ -366,7 +366,7 @@ class Baratron626D_Gauge(PressureGauge):
             float: The pressure in Torr
         """
         # Convert voltage to pressure in Torr
-        pressure = 0.01 * 10 ** (2 * voltage)
+        pressure = voltage * (self.full_scale_Torr / 10.0)
 
         # Ensure pressure is within the valid range
         if self.full_scale_Torr == 1000:
