@@ -79,9 +79,9 @@ class PressureGauge:
     def get_ain_channel_voltage(
         self,
         labjack: u6.U6,
-        resolution_index: int | None = 0,
+        resolution_index: int | None = 8,
         gain_index: int | None = 0,
-        settling_factor: int | None = 0,
+        settling_factor: int | None = 2,
     ) -> float:
         """
         Obtains the voltage reading from a channel of the LabJack u6 hub.
