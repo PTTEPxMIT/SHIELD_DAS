@@ -313,12 +313,15 @@ class CVM211_Gauge(PressureGauge):
 class Baratron626D_Gauge(PressureGauge):
     """
     Class for the WGM701 pressure gauge.
+
+    Upstream AIN channel = 6
+    Downstream AIN channel = 4
     """
 
     def __init__(
         self,
+        ain_channel: int,
         name: str = "Baratron626D",
-        ain_channel: int = 6,
         export_filename: str = "Baratron626D_pressure_data.csv",
         gauge_location: str = "downstream",
         full_scale_Torr: float | None = None,
