@@ -79,9 +79,9 @@ class PressureGauge:
     def get_ain_channel_voltage(
         self,
         labjack: u6.U6,
-        resolution_index: int | None = 0,
+        resolution_index: int | None = 8,
         gain_index: int | None = 0,
-        settling_factor: int | None = 0,
+        settling_factor: int | None = 2,
     ) -> float:
         """
         Obtains the voltage reading from a channel of the LabJack u6 hub.
@@ -313,12 +313,15 @@ class CVM211_Gauge(PressureGauge):
 class Baratron626D_Gauge(PressureGauge):
     """
     Class for the WGM701 pressure gauge.
+
+    Upstream AIN channel = 6
+    Downstream AIN channel = 4
     """
 
     def __init__(
         self,
+        ain_channel: int,
         name: str = "Baratron626D",
-        ain_channel: int = 6,
         export_filename: str = "Baratron626D_pressure_data.csv",
         gauge_location: str = "downstream",
         full_scale_Torr: float | None = None,
@@ -363,7 +366,7 @@ class Baratron626D_Gauge(PressureGauge):
             float: The pressure in Torr
         """
         # Convert voltage to pressure in Torr
-        pressure = 0.01 * 10 ** (2 * voltage)
+        pressure = voltage * (self.full_scale_Torr / 10.0)
 
         # Ensure pressure is within the valid range
         if self.full_scale_Torr == 1000:
