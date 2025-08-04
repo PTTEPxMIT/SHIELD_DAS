@@ -267,7 +267,7 @@ def temp_to_volts_constants(
         ValueError: If the input temperature is out of the valid range.
     """
     if temp_c < -270 or temp_c > 1372:
-        raise ValueError("Temperature out of valid Type K range (-270 to 1372 °C).")
+        raise ValueError("Temperature out of valid Type K range (-270 to 1372 C).")
     if temp_c < 0:
         # Range: -270 °C to 0 °C
         return (
