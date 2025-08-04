@@ -203,7 +203,8 @@ def volts_to_temp_constants(mv: float) -> tuple[float, ...]:
     raises:
         ValueError: If the input voltage is out of the valid range.
     """
-    if mv < -5.891 or mv > 54.886:
+    # Use a small tolerance for floating-point comparison
+    if mv < -5.892 or mv > 54.887:
         raise ValueError("Voltage out of valid Type K range (-5.891 to 54.886 mV).")
     if mv < 0:
         # Range: -5.891 mV to 0 mV
