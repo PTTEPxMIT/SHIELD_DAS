@@ -234,3 +234,21 @@ class DataRecorder:
             # Sleep and increment time
             time.sleep(0.5)
             self.elapsed_time += 0.5
+
+    def run(self):
+        """Start the recorder and keep it running"""
+        self.start()
+
+        # Keep the main thread running
+        try:
+            while True:
+                time.sleep(1)
+                # Print status every 10 seconds in headless mode
+                if int(time.time()) % 10 == 0:
+                    print(
+                        f"Current time: {datetime.now()} - Recording in progress... "
+                        f"Elapsed time: {self.elapsed_time:.1f}s"
+                    )
+        except KeyboardInterrupt:
+            self.stop()
+            print("Recorder stopped")
