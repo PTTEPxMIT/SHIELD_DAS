@@ -1,10 +1,10 @@
 import math
 import threading
 import webbrowser
-import pandas as pd
 
 import dash
 import dash_bootstrap_components as dbc
+import pandas as pd
 import plotly.graph_objects as go
 from dash import dcc, html
 from dash.dependencies import Input, Output
@@ -85,23 +85,17 @@ class DataPlotter:
                         ),
                     ]
                 ),
-                # Interval component for updates (disabled since we're just showing static CSV data)
-                dcc.Interval(
-                    id="interval-component",
-                    interval=10000,  # Update every 10 seconds (not really needed for static data)
-                    n_intervals=0,
-                ),
             ],
             fluid=True,
         )
 
     def register_callbacks(self):
-        # Single callback for the main plot
+        # Single callback for the main plot - loads once when app starts
         @self.app.callback(
             Output("main-plot", "figure"),
-            [Input("interval-component", "n_intervals")],
+            [Input("main-plot", "id")],  # Triggers once when component is loaded
         )
-        def update_main_plot(n_intervals):
+        def update_main_plot(plot_id):
             # Create figure
             fig = go.Figure()
 
