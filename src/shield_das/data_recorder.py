@@ -66,14 +66,9 @@ class DataRecorder:
         self.stop_event = threading.Event()
         self.thread = None
 
-        # Create results directories and setup files
-        self.run_dir = self._create_results_directory()
-        self.backup_dir = os.path.join(self.run_dir, "backup")
-        os.makedirs(self.backup_dir, exist_ok=True)
-
-        # Initialise exports
-        self._initialise_gauge_exports()
-        self._initialise_thermocouple_exports()
+        # Initialize directory paths but don't create them yet
+        self.run_dir = None
+        self.backup_dir = None
 
         # Initialize time tracking
         self.elapsed_time = 0.0
@@ -143,6 +138,16 @@ class DataRecorder:
 
     def start(self):
         """Start recording data"""
+        # Create directories and setup files only when recording starts
+        if self.run_dir is None:
+            self.run_dir = self._create_results_directory()
+            self.backup_dir = os.path.join(self.run_dir, "backup")
+            os.makedirs(self.backup_dir, exist_ok=True)
+
+            # Initialise exports
+            self._initialise_gauge_exports()
+            self._initialise_thermocouple_exports()
+
         self.stop_event.clear()
         self.thread = threading.Thread(target=self.record_data)
         self.thread.daemon = True
@@ -153,35 +158,6 @@ class DataRecorder:
         self.stop_event.set()
         if self.thread:
             self.thread.join(timeout=2.0)
-
-    def reset(self):
-        """Reset for a new run"""
-        # Stop current recording
-        self.stop()
-
-        # Clear data
-        for gauge in self.gauges:
-            gauge.timestamp_data = []
-            gauge.pressure_data = []
-            gauge.voltage_data = []
-            if hasattr(gauge, "backup_counter"):
-                gauge.backup_counter = 0
-
-        # Clear temperature data
-        self.temperature_data = []
-        self.temperature_timestamps = []
-
-        # Create new directories
-        self.run_dir = self._create_results_directory()
-        self.backup_dir = os.path.join(self.run_dir, "backup")
-        os.makedirs(self.backup_dir, exist_ok=True)
-
-        # Initialise exports again
-        self._initialise_gauge_exports()
-        self._initialise_thermocouple_exports()
-
-        # Reset time
-        self.elapsed_time = 0.0
 
     def record_data(self):
         """Record data from all gauges"""
