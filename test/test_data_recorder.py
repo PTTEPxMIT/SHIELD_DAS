@@ -7,8 +7,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src.shield_das.data_recorder import DataRecorder
-from src.shield_das.pressure_gauge import PressureGauge
+from shield_das import DataRecorder, PressureGauge
 
 
 class TestDataRecorder:
