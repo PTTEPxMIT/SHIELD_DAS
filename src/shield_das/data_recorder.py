@@ -23,6 +23,8 @@ class DataRecorder:
         results_dir: Directory where results will be stored, defaults to "results"
         test_mode: If True, runs in test mode without actual hardware interaction,
             defaults to False
+        recording_interval: Time interval (in seconds) between recordings, defaults to
+            0.5 seconds
 
     Attributes:
         gauges: List of PressureGauge instances to record data from
@@ -30,6 +32,8 @@ class DataRecorder:
         results_dir: Directory where results will be stored, defaults to "results"
         test_mode: If True, runs in test mode without actual hardware interaction,
             defaults to False
+        recording_interval: Time interval (in seconds) between recordings, defaults to
+            0.5 seconds
         stop_event: Event to control the recording thread
         thread: Thread for recording data
         run_dir: Directory for the current run's results
@@ -41,6 +45,7 @@ class DataRecorder:
     thermocouples: list[Thermocouple]
     results_dir: str
     test_mode: bool
+    recording_interval: float
 
     stop_event: threading.Event
     thread: threading.Thread
@@ -56,11 +61,13 @@ class DataRecorder:
         thermocouples: list[Thermocouple],
         results_dir: str = "results",
         test_mode=False,
+        recording_interval: float = 0.5,
     ):
         self.gauges = gauges
         self.thermocouples = thermocouples
         self.results_dir = results_dir
         self.test_mode = test_mode
+        self.recording_interval = recording_interval
 
         # Thread control
         self.stop_event = threading.Event()
@@ -197,8 +204,8 @@ class DataRecorder:
             self._write_to_csv(real_timestamp, voltages)
 
             # Sleep and increment time
-            time.sleep(0.5)
-            self.elapsed_time += 0.5
+            time.sleep(self.recording_interval)
+            self.elapsed_time += self.recording_interval
 
     def _write_to_csv(self, real_timestamp, voltages):
         """Write timestamp and all voltages to the main CSV file"""
