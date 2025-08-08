@@ -38,7 +38,9 @@ class DataRecorder:
         thread: Thread for recording data
         run_dir: Directory for the current run's results
         backup_dir: Directory for backup files
-        elapsed_time: Time elapsed since the start of recording
+    elapsed_time: Time elapsed since the start of recording
+    backup_enabled: Whether to write time-segmented backup CSVs
+    backup_interval_sec: How often to rotate backup CSV files (seconds)
     """
 
     gauges: list[PressureGauge]
@@ -46,6 +48,8 @@ class DataRecorder:
     results_dir: str
     test_mode: bool
     recording_interval: float
+    backup_enabled: bool
+    backup_interval_sec: float
 
     stop_event: threading.Event
     thread: threading.Thread
@@ -54,6 +58,10 @@ class DataRecorder:
     elapsed_time: float
     temperature_data: list
     temperature_timestamps: list
+    _csv_header: str | None
+    _backup_current_path: str | None
+    _backup_last_roll_ts: float | None
+    _backup_counter: int
 
     def __init__(
         self,
@@ -62,12 +70,16 @@ class DataRecorder:
         results_dir: str = "results",
         test_mode=False,
         recording_interval: float = 0.5,
+        backup_enabled: bool = True,
+        backup_interval_sec: float = 5.0,
     ):
         self.gauges = gauges
         self.thermocouples = thermocouples
         self.results_dir = results_dir
         self.test_mode = test_mode
         self.recording_interval = recording_interval
+        self.backup_enabled = backup_enabled
+        self.backup_interval_sec = backup_interval_sec
 
         # Thread control
         self.stop_event = threading.Event()
@@ -79,10 +91,16 @@ class DataRecorder:
 
         # Single CSV file for all data
         self.main_csv_filename = None
+        self._csv_header = None
 
         # Initialize time tracking
         self.elapsed_time = 0.0
         self.start_time = None
+
+        # Backup rotation state
+        self._backup_current_path = None
+        self._backup_last_roll_ts = None
+        self._backup_counter = 0
 
     def _create_results_directory(self):
         """Creates a new directory for results based on date and run number and if
@@ -143,6 +161,29 @@ class DataRecorder:
         # Write header to file
         with open(self.main_csv_filename, "w") as f:
             f.write(header)
+        # Store header for reuse in backups
+        self._csv_header = header
+
+    def _initialise_backup_segment(self):
+        """Create a new backup CSV segment file and write header."""
+        if not self.backup_enabled:
+            return
+        # Ensure backup directory exists
+        os.makedirs(self.backup_dir, exist_ok=True)
+        # Use simplified naming: date (YYYYMMDD), time (HHhMM), sequential index per run
+        now = datetime.now()
+        date_part = now.strftime("%Y%m%d")
+        time_part = now.strftime("%Hh%M")
+        self._backup_counter += 1
+        filename = f"backup_segment_{date_part}_{time_part}_{self._backup_counter}.csv"
+        self._backup_current_path = os.path.join(self.backup_dir, filename)
+        # Write header
+        header = self._csv_header or ""
+        if header:
+            with open(self._backup_current_path, "w") as f:
+                f.write(header)
+        # Update rotation timestamp
+        self._backup_last_roll_ts = time.time()
 
     def start(self):
         """Start recording data"""
@@ -154,6 +195,9 @@ class DataRecorder:
 
             # Initialize the main CSV file
             self._initialise_main_csv()
+            # Initialize first backup segment
+            if self.backup_enabled:
+                self._initialise_backup_segment()
 
         self.stop_event.clear()
         self.thread = threading.Thread(target=self.record_data)
@@ -202,6 +246,16 @@ class DataRecorder:
 
             # Write all data to single CSV
             self._write_to_csv(real_timestamp, voltages)
+            # Also write to backup and rotate if needed
+            if self.backup_enabled:
+                self._write_to_backup(real_timestamp, voltages)
+                # Rotate backup file if interval elapsed
+                now_ts = time.time()
+                if (
+                    self._backup_last_roll_ts is None
+                    or (now_ts - self._backup_last_roll_ts) >= self.backup_interval_sec
+                ):
+                    self._initialise_backup_segment()
 
             # Sleep and increment time
             time.sleep(self.recording_interval)
@@ -217,6 +271,17 @@ class DataRecorder:
 
         # Write to file
         with open(self.main_csv_filename, "a") as f:
+            f.write(row)
+
+    def _write_to_backup(self, real_timestamp, voltages):
+        """Append one row to the current backup CSV segment."""
+        if not self.backup_enabled or not self._backup_current_path:
+            return
+        row = real_timestamp
+        for voltage in voltages:
+            row += f",{voltage}"
+        row += "\n"
+        with open(self._backup_current_path, "a") as f:
             f.write(row)
 
     def run(self):
