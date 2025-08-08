@@ -4,6 +4,7 @@ import threading
 import time
 from datetime import datetime
 
+import numpy as np
 import u6
 
 from .pressure_gauge import PressureGauge
@@ -18,16 +19,21 @@ class DataRecorder:
 
     Arguements:
         gauges: List of PressureGauge instances to record data from
+        thermocouples: List of Thermocouple instances to record temperature data from
         results_dir: Directory where results will be stored, defaults to "results"
         test_mode: If True, runs in test mode without actual hardware interaction,
             defaults to False
-        record_temperature: If True, records temperature data from a thermocouple,
-            defaults to True
+        recording_interval: Time interval (in seconds) between recordings, defaults to
+            0.5 seconds
 
     Attributes:
         gauges: List of PressureGauge instances to record data from
-        results_dir: Directory where results will be stored
-        test_mode: If True, runs in test mode without actual hardware interaction
+        thermocouples: List of Thermocouple instances to record temperature data from
+        results_dir: Directory where results will be stored, defaults to "results"
+        test_mode: If True, runs in test mode without actual hardware interaction,
+            defaults to False
+        recording_interval: Time interval (in seconds) between recordings, defaults to
+            0.5 seconds
         stop_event: Event to control the recording thread
         thread: Thread for recording data
         run_dir: Directory for the current run's results
@@ -39,7 +45,8 @@ class DataRecorder:
     thermocouples: list[Thermocouple]
     results_dir: str
     test_mode: bool
-    record_temperature: bool = True
+    recording_interval: float
+
     stop_event: threading.Event
     thread: threading.Thread
     run_dir: str
@@ -54,13 +61,13 @@ class DataRecorder:
         thermocouples: list[Thermocouple],
         results_dir: str = "results",
         test_mode=False,
-        record_temperature=True,
+        recording_interval: float = 0.5,
     ):
         self.gauges = gauges
         self.thermocouples = thermocouples
         self.results_dir = results_dir
         self.test_mode = test_mode
-        self.record_temperature = record_temperature
+        self.recording_interval = recording_interval
 
         # Thread control
         self.stop_event = threading.Event()
@@ -69,6 +76,9 @@ class DataRecorder:
         # Initialize directory paths but don't create them yet
         self.run_dir = None
         self.backup_dir = None
+
+        # Single CSV file for all data
+        self.main_csv_filename = None
 
         # Initialize time tracking
         self.elapsed_time = 0.0
@@ -120,21 +130,19 @@ class DataRecorder:
 
         return run_dir
 
-    def _initialise_gauge_exports(self):
-        """Initialise export files for all gauges"""
-        for gauge in self.gauges:
-            # Update path and initialize export
-            original_filename = os.path.basename(gauge.export_filename)
-            gauge.export_filename = os.path.join(self.run_dir, original_filename)
-            gauge.initialise_export()
+    def _initialise_main_csv(self):
+        """Initialize the main CSV file with all gauge data"""
+        self.main_csv_filename = os.path.join(self.run_dir, "pressure_gauge_data.csv")
 
-    def _initialise_thermocouple_exports(self):
-        """Initialise export files for all gauges"""
-        for thermocouple in self.thermocouples:
-            # Update path and initialize export
-            original_filename = os.path.basename(thermocouple.export_filename)
-            thermocouple.export_filename = os.path.join(self.run_dir, original_filename)
-            thermocouple.initialise_export()
+        # Create header with RealTimestamp and voltage columns for each gauge
+        header = "RealTimestamp"
+        for gauge in self.gauges:
+            header += f",{gauge.name}_Voltage (V)"
+        header += "\n"
+
+        # Write header to file
+        with open(self.main_csv_filename, "w") as f:
+            f.write(header)
 
     def start(self):
         """Start recording data"""
@@ -144,9 +152,8 @@ class DataRecorder:
             self.backup_dir = os.path.join(self.run_dir, "backup")
             os.makedirs(self.backup_dir, exist_ok=True)
 
-            # Initialise exports
-            self._initialise_gauge_exports()
-            self._initialise_thermocouple_exports()
+            # Initialize the main CSV file
+            self._initialise_main_csv()
 
         self.stop_event.clear()
         self.thread = threading.Thread(target=self.record_data)
@@ -177,39 +184,40 @@ class DataRecorder:
 
         # Main data collection loop
         while not self.stop_event.is_set():
-            timestamp = f"{self.elapsed_time:.1f}"
+            # Get real timestamp for this measurement
+            real_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
+            # Collect voltages from all gauges
+            voltages = []
             for gauge in self.gauges:
-                try:
-                    # Get data based on mode
-                    if self.test_mode:
-                        gauge.get_data(labjack=None, timestamp=timestamp)
-                    else:
-                        gauge.get_data(labjack=labjack, timestamp=timestamp)
-                except Exception as e:
-                    print(f"Error reading from {gauge.name}: {e}")
+                # Get voltage based on mode
+                if self.test_mode:
+                    # Generate random voltage for test mode
+                    rng = np.random.default_rng()
+                    voltage = rng.uniform(0, 10)
+                else:
+                    voltage = gauge.get_ain_channel_voltage(labjack=labjack)
 
-                # Always write to file
-                gauge.export_write()
+                voltages.append(voltage)
 
-            for thermocouple in self.thermocouples:
-                try:
-                    # Get temperature data based on mode
-                    if self.test_mode:
-                        thermocouple.get_temperature(labjack=None, timestamp=timestamp)
-                    else:
-                        thermocouple.get_temperature(
-                            labjack=labjack, timestamp=timestamp
-                        )
-                except Exception as e:
-                    print(f"Error reading from thermocouple: {e}")
-
-                # Always write to file
-                thermocouple.export_write()
+            # Write all data to single CSV
+            self._write_to_csv(real_timestamp, voltages)
 
             # Sleep and increment time
-            time.sleep(0.5)
-            self.elapsed_time += 0.5
+            time.sleep(self.recording_interval)
+            self.elapsed_time += self.recording_interval
+
+    def _write_to_csv(self, real_timestamp, voltages):
+        """Write timestamp and all voltages to the main CSV file"""
+        # Create row with timestamp and all voltages
+        row = real_timestamp
+        for voltage in voltages:
+            row += f",{voltage}"
+        row += "\n"
+
+        # Write to file
+        with open(self.main_csv_filename, "a") as f:
+            f.write(row)
 
     def run(self):
         """Start the recorder and keep it running"""
