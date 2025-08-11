@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 
 import numpy as np
+import pandas as pd
 import u6
 
 from .pressure_gauge import PressureGauge
@@ -13,9 +14,9 @@ from .thermocouple import Thermocouple
 
 class DataRecorder:
     """
-    Class to manage data recording from multiple pressure gauges.
-    This class handles the setup, start, stop, and reset of data recording,
-    as well as the management of results directories and gauge exports.
+    Class to manage data recording from multiple pressure gauges. This class handles the
+    setup, start, stop, and reset of data recording, as well as the management of
+    results directories and gauge exports.
 
     Arguements:
         gauges: List of PressureGauge instances to record data from
@@ -23,8 +24,8 @@ class DataRecorder:
         results_dir: Directory where results will be stored, defaults to "results"
         test_mode: If True, runs in test mode without actual hardware interaction,
             defaults to False
-        recording_interval: Time interval (in seconds) between recordings, defaults to
-            0.5 seconds
+        recording_interval: Time interval (seconds) between recordings, defaults to 0.5s
+        backup_interval: How often to backup dara (seconds)
 
     Attributes:
         gauges: List of PressureGauge instances to record data from
@@ -34,13 +35,12 @@ class DataRecorder:
             defaults to False
         recording_interval: Time interval (in seconds) between recordings, defaults to
             0.5 seconds
+        backup_interval: How often to rotate backup CSV files (seconds)
         stop_event: Event to control the recording thread
         thread: Thread for recording data
         run_dir: Directory for the current run's results
         backup_dir: Directory for backup files
-    elapsed_time: Time elapsed since the start of recording
-    backup_enabled: Whether to write time-segmented backup CSVs
-    backup_interval_sec: How often to rotate backup CSV files (seconds)
+        elapsed_time: Time elapsed since the start of recording
     """
 
     gauges: list[PressureGauge]
@@ -48,20 +48,13 @@ class DataRecorder:
     results_dir: str
     test_mode: bool
     recording_interval: float
-    backup_enabled: bool
-    backup_interval_sec: float
+    backup_interval: float
 
     stop_event: threading.Event
     thread: threading.Thread
     run_dir: str
     backup_dir: str
     elapsed_time: float
-    temperature_data: list
-    temperature_timestamps: list
-    _csv_header: str | None
-    _backup_current_path: str | None
-    _backup_last_roll_ts: float | None
-    _backup_counter: int
 
     def __init__(
         self,
@@ -70,37 +63,18 @@ class DataRecorder:
         results_dir: str = "results",
         test_mode=False,
         recording_interval: float = 0.5,
-        backup_enabled: bool = True,
-        backup_interval_sec: float = 5.0,
+        backup_interval: float = 5.0,
     ):
         self.gauges = gauges
         self.thermocouples = thermocouples
         self.results_dir = results_dir
         self.test_mode = test_mode
         self.recording_interval = recording_interval
-        self.backup_enabled = backup_enabled
-        self.backup_interval_sec = backup_interval_sec
+        self.backup_interval = backup_interval
 
         # Thread control
         self.stop_event = threading.Event()
         self.thread = None
-
-        # Initialize directory paths but don't create them yet
-        self.run_dir = None
-        self.backup_dir = None
-
-        # Single CSV file for all data
-        self.main_csv_filename = None
-        self._csv_header = None
-
-        # Initialize time tracking
-        self.elapsed_time = 0.0
-        self.start_time = None
-
-        # Backup rotation state
-        self._backup_current_path = None
-        self._backup_last_roll_ts = None
-        self._backup_counter = 0
 
     def _create_results_directory(self):
         """Creates a new directory for results based on date and run number and if
@@ -148,56 +122,12 @@ class DataRecorder:
 
         return run_dir
 
-    def _initialise_main_csv(self):
-        """Initialize the main CSV file with all gauge data"""
-        self.main_csv_filename = os.path.join(self.run_dir, "pressure_gauge_data.csv")
-
-        # Create header with RealTimestamp and voltage columns for each gauge
-        header = "RealTimestamp"
-        for gauge in self.gauges:
-            header += f",{gauge.name}_Voltage (V)"
-        header += "\n"
-
-        # Write header to file
-        with open(self.main_csv_filename, "w") as f:
-            f.write(header)
-        # Store header for reuse in backups
-        self._csv_header = header
-
-    def _initialise_backup_segment(self):
-        """Create a new backup CSV segment file and write header."""
-        if not self.backup_enabled:
-            return
-        # Ensure backup directory exists
-        os.makedirs(self.backup_dir, exist_ok=True)
-        # Use simplified naming: date (YYYYMMDD), time (HHhMM), sequential index per run
-        now = datetime.now()
-        date_part = now.strftime("%Y%m%d")
-        time_part = now.strftime("%Hh%M")
-        self._backup_counter += 1
-        filename = f"backup_segment_{date_part}_{time_part}_{self._backup_counter}.csv"
-        self._backup_current_path = os.path.join(self.backup_dir, filename)
-        # Write header
-        header = self._csv_header or ""
-        if header:
-            with open(self._backup_current_path, "w") as f:
-                f.write(header)
-        # Update rotation timestamp
-        self._backup_last_roll_ts = time.time()
-
     def start(self):
         """Start recording data"""
         # Create directories and setup files only when recording starts
-        if self.run_dir is None:
-            self.run_dir = self._create_results_directory()
-            self.backup_dir = os.path.join(self.run_dir, "backup")
-            os.makedirs(self.backup_dir, exist_ok=True)
-
-            # Initialize the main CSV file
-            self._initialise_main_csv()
-            # Initialize first backup segment
-            if self.backup_enabled:
-                self._initialise_backup_segment()
+        self.run_dir = self._create_results_directory()
+        self.backup_dir = os.path.join(self.run_dir, "backup")
+        os.makedirs(self.backup_dir, exist_ok=True)
 
         self.stop_event.clear()
         self.thread = threading.Thread(target=self.record_data)
@@ -211,9 +141,12 @@ class DataRecorder:
             self.thread.join(timeout=2.0)
 
     def record_data(self):
-        """Record data from all gauges"""
+        """Record data from all gauges passed to recorder"""
 
-        if not self.test_mode:
+        # If test mode, do not connect to LabJack
+        if self.test_mode:
+            labjack = None
+        else:
             try:
                 labjack = u6.U6(firstFound=True)
                 labjack.getCalibrationData()
@@ -226,63 +159,55 @@ class DataRecorder:
         self.start_time = datetime.now()
         print(f"Recording started at {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
+        time_stamp_data = []
+
         # Main data collection loop
+        n = 0
+        m = 1
         while not self.stop_event.is_set():
             # Get real timestamp for this measurement
-            real_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            time_stamp_data.append(timestamp)
 
             # Collect voltages from all gauges
-            voltages = []
             for gauge in self.gauges:
-                # Get voltage based on mode
-                if self.test_mode:
-                    # Generate random voltage for test mode
-                    rng = np.random.default_rng()
-                    voltage = rng.uniform(0, 10)
-                else:
-                    voltage = gauge.get_ain_channel_voltage(labjack=labjack)
+                gauge.record_ain_channel_voltage(labjack=labjack)
 
-                voltages.append(voltage)
+            # Prepare data row for CSV
+            pressure_gauge_data_row = {
+                "RealTimestamp": timestamp,
+                **{f"{g.name}_Voltage (V)": g.voltage_data[-1] for g in self.gauges},
+            }
 
-            # Write all data to single CSV
-            self._write_to_csv(real_timestamp, voltages)
-            # Also write to backup and rotate if needed
-            if self.backup_enabled:
-                self._write_to_backup(real_timestamp, voltages)
-                # Rotate backup file if interval elapsed
-                now_ts = time.time()
-                if (
-                    self._backup_last_roll_ts is None
-                    or (now_ts - self._backup_last_roll_ts) >= self.backup_interval_sec
-                ):
-                    self._initialise_backup_segment()
+            # Append to main CSV file
+            pd.DataFrame([pressure_gauge_data_row]).to_csv(
+                f"{self.run_dir}/pressure_gauge_data.csv",
+                mode="a",
+                header=(n == 0),
+                index=False,
+            )
+
+            n += 1
+
+            # write backup data every index_for_backup iterations
+            index_for_backup = int(self.backup_interval / self.recording_interval)
+            if n % index_for_backup == 0:
+                backup_pressure_gauge_data = {
+                    "RealTimestamp": time_stamp_data[-index_for_backup:],
+                    **{
+                        f"{g.name}_Voltage (V)": g.voltage_data[-index_for_backup:]
+                        for g in self.gauges
+                    },
+                }
+                pd.DataFrame(backup_pressure_gauge_data).to_csv(
+                    f"{self.backup_dir}/pressure_gauge_backup_data_{m}.csv",
+                    index=False,
+                )
+                m += 1
 
             # Sleep and increment time
             time.sleep(self.recording_interval)
             self.elapsed_time += self.recording_interval
-
-    def _write_to_csv(self, real_timestamp, voltages):
-        """Write timestamp and all voltages to the main CSV file"""
-        # Create row with timestamp and all voltages
-        row = real_timestamp
-        for voltage in voltages:
-            row += f",{voltage}"
-        row += "\n"
-
-        # Write to file
-        with open(self.main_csv_filename, "a") as f:
-            f.write(row)
-
-    def _write_to_backup(self, real_timestamp, voltages):
-        """Append one row to the current backup CSV segment."""
-        if not self.backup_enabled or not self._backup_current_path:
-            return
-        row = real_timestamp
-        for voltage in voltages:
-            row += f",{voltage}"
-        row += "\n"
-        with open(self._backup_current_path, "a") as f:
-            f.write(row)
 
     def run(self):
         """Start the recorder and keep it running"""
@@ -292,7 +217,7 @@ class DataRecorder:
         try:
             while True:
                 time.sleep(1)
-                # Print status every 10 seconds in headless mode
+                # Print status every 10 seconds
                 if int(time.time()) % 10 == 0:
                     print(
                         f"Current time: {datetime.now()} - Recording in progress... "
