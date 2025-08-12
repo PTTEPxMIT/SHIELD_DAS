@@ -21,11 +21,13 @@ class TestDataRecorder:
         # Create mock gauges
         self.mock_gauge1 = Mock(spec=PressureGauge)
         self.mock_gauge1.name = "TestGauge1"
-        self.mock_gauge1.get_ain_channel_voltage.return_value = 5.0
+        self.mock_gauge1.voltage_data = [5.0]  # Mock voltage data list
+        self.mock_gauge1.record_ain_channel_voltage.return_value = None
 
         self.mock_gauge2 = Mock(spec=PressureGauge)
         self.mock_gauge2.name = "TestGauge2"
-        self.mock_gauge2.get_ain_channel_voltage.return_value = 3.5
+        self.mock_gauge2.voltage_data = [3.5]  # Mock voltage data list
+        self.mock_gauge2.record_ain_channel_voltage.return_value = None
 
         # Create mock thermocouples (empty list for now)
         self.mock_thermocouples = []
@@ -56,11 +58,7 @@ class TestDataRecorder:
         assert self.recorder.test_mode is True
         assert isinstance(self.recorder.stop_event, threading.Event)
         assert self.recorder.thread is None
-        assert self.recorder.run_dir is None
-        assert self.recorder.backup_dir is None
-        assert self.recorder.main_csv_filename is None
         assert self.recorder.elapsed_time == 0.0
-        assert self.recorder.start_time is None
 
     def test_init_default_values(self):
         """Test DataRecorder initialization with default values."""
@@ -104,43 +102,46 @@ class TestDataRecorder:
         run_dir2 = normal_recorder._create_results_directory()
         assert run_dir2 != run_dir  # Should be different directories
 
-    def test_initialise_main_csv(self):
-        """Test CSV file initialization."""
-        # Set up run directory
-        self.recorder.run_dir = self.temp_dir
+    def test_csv_file_creation_on_start(self):
+        """Test that CSV file is created when recording starts."""
+        # Start recorder
+        self.recorder.start()
+        time.sleep(0.1)  # Give it time to initialize
 
-        # Initialize CSV
-        self.recorder._initialise_main_csv()
+        # Check that CSV file was created
+        expected_csv_path = os.path.join(
+            self.recorder.run_dir, "pressure_gauge_data.csv"
+        )
+        assert os.path.exists(expected_csv_path)
 
-        # Check file was created
-        expected_filename = os.path.join(self.temp_dir, "pressure_gauge_data.csv")
-        assert self.recorder.main_csv_filename == expected_filename
-        assert os.path.exists(expected_filename)
+        # Stop recorder
+        self.recorder.stop()
 
-        # Check header content
-        with open(expected_filename) as f:
-            header = f.read().strip()
+    def test_data_recording_functionality(self):
+        """Test that data recording works with the new structure."""
+        # Start recorder
+        self.recorder.start()
+        time.sleep(0.2)  # Let it record some data
 
-        expected_header = "RealTimestamp,TestGauge1_Voltage (V),TestGauge2_Voltage (V)"
-        assert header == expected_header
+        # Check that gauges were called to record data
+        assert self.mock_gauge1.record_ain_channel_voltage.called
+        assert self.mock_gauge2.record_ain_channel_voltage.called
 
-    def test_write_to_csv(self):
-        """Test writing data to CSV file."""
-        # Set up CSV file
-        self.recorder.run_dir = self.temp_dir
-        self.recorder._initialise_main_csv()
+        # Check CSV file has data
+        csv_path = os.path.join(self.recorder.run_dir, "pressure_gauge_data.csv")
+        assert os.path.exists(csv_path)
 
-        # Write test data
-        test_timestamp = "2025-08-07 14:30:00.123"
-        test_voltages = [5.0, 3.5]
-        self.recorder._write_to_csv(test_timestamp, test_voltages)
+        with open(csv_path) as f:
+            content = f.read()
+            # Should have header and at least one data row
+            lines = content.strip().split("\n")
+            assert len(lines) >= 2
+            # Check header contains gauge names
+            assert "TestGauge1_Voltage (V)" in lines[0]
+            assert "TestGauge2_Voltage (V)" in lines[0]
 
-        # Read and verify content
-        with open(self.recorder.main_csv_filename) as f:
-            lines = f.readlines()
-
-        assert len(lines) == 2  # Header + data
-        assert lines[1].strip() == "2025-08-07 14:30:00.123,5.0,3.5"
+        # Stop recorder
+        self.recorder.stop()
 
     def test_start_creates_directories_and_files(self):
         """Test that start() creates necessary directories and files."""
@@ -156,31 +157,13 @@ class TestDataRecorder:
         assert self.recorder.backup_dir is not None
         assert os.path.exists(self.recorder.backup_dir)
 
-        # Check CSV file was created
-        assert self.recorder.main_csv_filename is not None
-        assert os.path.exists(self.recorder.main_csv_filename)
+        # Check CSV file gets created when recording starts
+        csv_path = os.path.join(self.recorder.run_dir, "pressure_gauge_data.csv")
+        assert os.path.exists(csv_path)
 
         # Check thread is running
         assert self.recorder.thread is not None
         assert self.recorder.thread.is_alive()
-
-        # Stop recorder
-        self.recorder.stop()
-
-    def test_start_only_initializes_once(self):
-        """Test that start() only initializes directories once."""
-        # Start recorder first time
-        self.recorder.start()
-        time.sleep(0.1)
-        first_run_dir = self.recorder.run_dir
-
-        # Stop and start again
-        self.recorder.stop()
-        self.recorder.start()
-        time.sleep(0.1)
-
-        # Should be same directory
-        assert self.recorder.run_dir == first_run_dir
 
         # Stop recorder
         self.recorder.stop()
@@ -210,10 +193,13 @@ class TestDataRecorder:
         # Stop recording
         self.recorder.stop()
 
-        # In test mode, the gauges should not be called
-        # (random voltages are generated instead)
-        # But we can verify the CSV file has the expected structure
-        with open(self.recorder.main_csv_filename) as f:
+        # Check that gauges were called to record voltage data
+        assert self.mock_gauge1.record_ain_channel_voltage.called
+        assert self.mock_gauge2.record_ain_channel_voltage.called
+
+        # Verify the CSV file has the expected structure
+        csv_path = os.path.join(self.recorder.run_dir, "pressure_gauge_data.csv")
+        with open(csv_path) as f:
             lines = f.readlines()
 
         # Should have header + at least 1 data line
@@ -243,11 +229,6 @@ class TestDataRecorder:
         assert os.path.exists(run_dir)
         assert "run_" in os.path.basename(run_dir)
 
-        # Test CSV initialization
-        normal_recorder.run_dir = run_dir
-        normal_recorder._initialise_main_csv()
-        assert os.path.exists(normal_recorder.main_csv_filename)
-
     def test_record_data_test_mode(self):
         """Test data recording in test mode."""
         # Start recording
@@ -260,7 +241,8 @@ class TestDataRecorder:
         self.recorder.stop()
 
         # Check CSV file has data
-        with open(self.recorder.main_csv_filename) as f:
+        csv_path = os.path.join(self.recorder.run_dir, "pressure_gauge_data.csv")
+        with open(csv_path) as f:
             lines = f.readlines()
 
         # Should have header + at least 1 data line
@@ -274,11 +256,11 @@ class TestDataRecorder:
         timestamp = data_line[0]
         assert len(timestamp) == 23  # YYYY-MM-DD HH:MM:SS.mmm format
 
-        # Check voltages are numeric
+        # Check voltages are numeric (using mock data)
         voltage1 = float(data_line[1])
         voltage2 = float(data_line[2])
-        assert 0 <= voltage1 <= 10  # Random range we set
-        assert 0 <= voltage2 <= 10
+        assert voltage1 == 5.0  # From mock_gauge1.voltage_data
+        assert voltage2 == 3.5  # From mock_gauge2.voltage_data
 
     def test_run_method(self):
         """Test the run() method."""
@@ -321,37 +303,39 @@ class TestDataRecorder:
     def test_error_handling_in_recording(self):
         """Test error handling during data recording."""
         # Make one gauge raise an exception
-        self.mock_gauge1.get_ain_channel_voltage.side_effect = Exception("Test error")
+        self.mock_gauge1.record_ain_channel_voltage.side_effect = Exception(
+            "Test error"
+        )
 
-        # Start recording - this should fail due to unhandled exception
+        # Start recording - should handle the exception gracefully
         self.recorder.start()
 
-        # Let it run briefly - the thread should die due to the exception
-        time.sleep(0.05)
+        # Let it run briefly
+        time.sleep(0.15)
 
         # Stop recording
         self.recorder.stop()
 
-        # Check that the thread died due to exception
-        # In current implementation, unhandled exceptions will terminate the thread
-        assert not self.recorder.thread.is_alive()
-
-        # The CSV file might be created but may have incomplete data
-        if os.path.exists(self.recorder.main_csv_filename):
-            with open(self.recorder.main_csv_filename) as f:
-                lines = f.readlines()
-            # Should at least have the header
-            assert len(lines) >= 1
+        # Check that recording attempted to call the gauges
+        assert self.mock_gauge1.record_ain_channel_voltage.called
 
     def test_multiple_gauges_different_names(self):
         """Test CSV header generation with different gauge names."""
         # Create gauges with specific names
         gauge_a = Mock(spec=PressureGauge)
         gauge_a.name = "WGM701"
+        gauge_a.voltage_data = [1.0]
+        gauge_a.record_ain_channel_voltage.return_value = None
+
         gauge_b = Mock(spec=PressureGauge)
         gauge_b.name = "Baratron626D"
+        gauge_b.voltage_data = [2.0]
+        gauge_b.record_ain_channel_voltage.return_value = None
+
         gauge_c = Mock(spec=PressureGauge)
         gauge_c.name = "CVM211"
+        gauge_c.voltage_data = [3.0]
+        gauge_c.record_ain_channel_voltage.return_value = None
 
         recorder = DataRecorder(
             gauges=[gauge_a, gauge_b, gauge_c],
@@ -360,13 +344,15 @@ class TestDataRecorder:
             test_mode=True,
         )
 
-        # Initialize CSV
-        recorder.run_dir = self.temp_dir
-        recorder._initialise_main_csv()
+        # Start recording to create CSV file
+        recorder.start()
+        time.sleep(0.1)
+        recorder.stop()
 
         # Check header
-        with open(recorder.main_csv_filename) as f:
-            header = f.read().strip()
+        csv_path = os.path.join(recorder.run_dir, "pressure_gauge_data.csv")
+        with open(csv_path) as f:
+            header = f.readline().strip()
 
         expected = (
             "RealTimestamp,WGM701_Voltage (V),"
@@ -376,11 +362,15 @@ class TestDataRecorder:
 
     def test_csv_file_naming(self):
         """Test that CSV file is named correctly."""
-        self.recorder.run_dir = self.temp_dir
-        self.recorder._initialise_main_csv()
+        self.recorder.start()
+        time.sleep(0.1)
 
-        expected_filename = os.path.join(self.temp_dir, "pressure_gauge_data.csv")
-        assert self.recorder.main_csv_filename == expected_filename
+        expected_filename = os.path.join(
+            self.recorder.run_dir, "pressure_gauge_data.csv"
+        )
+        assert os.path.exists(expected_filename)
+
+        self.recorder.stop()
 
 
 if __name__ == "__main__":
