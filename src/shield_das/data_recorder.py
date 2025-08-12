@@ -46,6 +46,12 @@ class DataRecorder:
         run_dir: Directory for the current run's results
         backup_dir: Directory for backup files
         elapsed_time: Time elapsed since the start of recording
+        v5_close_time: Timestamp when V5 valve was closed (spacebar press 1)
+        v6_close_time: Timestamp when V6 valve was closed (spacebar press 2)
+        v7_close_time: Timestamp when V7 valve was closed (spacebar press 3)
+        v3_open_time: Timestamp when V3 valve was opened (spacebar press 4)
+        valve_event_sequence: Ordered list of valve events to track
+        current_valve_index: Current position in the valve event sequence
     """
 
     gauges: list[PressureGauge]
@@ -61,7 +67,12 @@ class DataRecorder:
     backup_dir: str
     elapsed_time: float
     v5_close_time: str | None
+    v6_close_time: str | None
+    v7_close_time: str | None
+    v3_open_time: str | None
     start_time: datetime
+    valve_event_sequence: list[str]
+    current_valve_index: int
 
     def __init__(
         self,
@@ -85,7 +96,19 @@ class DataRecorder:
 
         self.elapsed_time = 0.0
         self.v5_close_time = None
+        self.v6_close_time = None
+        self.v7_close_time = None
+        self.v3_open_time = None
         self.start_time = None
+
+        # Valve event sequence tracking
+        self.valve_event_sequence = [
+            "v5_close_time",
+            "v6_close_time",
+            "v7_close_time",
+            "v3_open_time",
+        ]
+        self.current_valve_index = 0
 
     def _create_results_directory(self):
         """Creates a new directory for results based on date and run number."""
@@ -204,47 +227,74 @@ class DataRecorder:
         return metadata_path
 
     def _monitor_keyboard(self):
-        """Monitor for spacebar press to record v5_close_time."""
+        """Monitor for spacebar press to record valve events in sequence."""
         if keyboard is None:
             print(
                 "Warning: keyboard module not available. "
-                "V5 close time monitoring disabled."
+                "Valve event time monitoring disabled."
             )
             return
 
-        print("Press SPACEBAR to record V5 close time...")
+        current_event = self.valve_event_sequence[self.current_valve_index]
+        print(f"Press SPACEBAR to record {current_event}...")
 
         def on_spacebar():
-            if self.v5_close_time is None:  # Only record the first press
-                self.v5_close_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                print(f"V5 close time recorded: {self.v5_close_time}")
-                self._update_metadata_with_v5_time()
+            if self.current_valve_index < len(self.valve_event_sequence):
+                current_event = self.valve_event_sequence[self.current_valve_index]
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                # Set the appropriate attribute
+                setattr(self, current_event, timestamp)
+
+                print(f"{current_event} recorded: {timestamp}")
+                self._update_metadata_with_valve_time(current_event, timestamp)
+
+                # Move to next event
+                self.current_valve_index += 1
+
+                # Show next event or completion message
+                if self.current_valve_index < len(self.valve_event_sequence):
+                    next_event = self.valve_event_sequence[self.current_valve_index]
+                    print(f"Next: Press SPACEBAR to record {next_event}...")
+                else:
+                    print("All valve events recorded!")
 
         # Set up keyboard listener for spacebar
         keyboard.on_press_key("space", lambda _: on_spacebar())
 
-    def _update_metadata_with_v5_time(self):
-        """Update the metadata file with the v5_close_time."""
+    def _update_metadata_with_valve_time(self, event_name: str, timestamp: str):
+        """Update the metadata file with the valve event time.
+
+        Args:
+            event_name: Name of the valve event (e.g., 'v5_close_time')
+            timestamp: Timestamp when the event occurred
+        """
         metadata_path = os.path.join(self.run_dir, "run_metadata.json")
 
         try:
             with open(metadata_path) as f:
                 metadata = json.load(f)
 
-            metadata["run_info"]["v5_close_time"] = self.v5_close_time
+            metadata["run_info"][event_name] = timestamp
 
             with open(metadata_path, "w") as f:
                 json.dump(metadata, f, indent=2)
 
-            print(f"Updated metadata with V5 close time: {self.v5_close_time}")
+            print(f"Updated metadata with {event_name}: {timestamp}")
         except Exception as e:
-            print(f"Error updating metadata with V5 close time: {e}")
+            print(f"Error updating metadata with {event_name}: {e}")
 
     def start(self):
         """Start recording data"""
-        # Record start time for v5_close_time calculation
+        # Record start time for valve event time tracking
         self.start_time = datetime.now()
-        self.v5_close_time = None  # Reset for new run
+
+        # Reset all valve events for new run
+        self.v5_close_time = None
+        self.v6_close_time = None
+        self.v7_close_time = None
+        self.v3_open_time = None
+        self.current_valve_index = 0
 
         # Create directories and setup files only when recording starts
         self.run_dir = self._create_results_directory()
@@ -254,7 +304,7 @@ class DataRecorder:
         # Create metadata file with run information
         self._create_metadata_file()
 
-        # Start keyboard monitoring for spacebar press
+        # Start keyboard monitoring for valve events
         self._monitor_keyboard()
 
         self.stop_event.clear()
