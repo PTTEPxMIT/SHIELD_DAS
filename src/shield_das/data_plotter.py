@@ -8,7 +8,7 @@ import dash
 import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.graph_objects as go
-from dash import dcc, html
+from dash import dcc, html, ALL, MATCH
 from dash.dependencies import Input, Output, State
 
 
@@ -152,6 +152,8 @@ class DataPlotter:
                 ),
                 # Hidden store to trigger plot updates
                 dcc.Store(id="datasets-store"),
+                # Hidden store for plot settings
+                dcc.Store(id="plot-settings-store", data={}),
                 # Status message for upload feedback
                 dbc.Row(
                     [
@@ -397,6 +399,13 @@ class DataPlotter:
                                                                         id="reset-settings",
                                                                         color="secondary",
                                                                         size="sm",
+                                                                        className="w-100 mb-2",
+                                                                    ),
+                                                                    dbc.Button(
+                                                                        "Apply Settings",
+                                                                        id="apply-plot-settings",
+                                                                        color="primary",
+                                                                        size="sm",
                                                                         className="w-100",
                                                                     ),
                                                                 ],
@@ -417,30 +426,155 @@ class DataPlotter:
                     ],
                     className="mt-3",
                 ),
+                # Dataset Management Card
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader("Dataset Management"),
+                                        dbc.CardBody(
+                                            [
+                                                html.Div(
+                                                    id="dataset-table-container",
+                                                    children=self.create_dataset_table(),
+                                                ),
+                                                html.Hr(),
+                                                dbc.Button(
+                                                    [
+                                                        html.I(
+                                                            className="fa fa-check me-2"
+                                                        ),
+                                                        "Apply Changes",
+                                                    ],
+                                                    id="apply-dataset-changes",
+                                                    color="success",
+                                                    size="sm",
+                                                    className="mt-2",
+                                                ),
+                                            ]
+                                        ),
+                                    ]
+                                ),
+                            ],
+                            width=12,
+                        ),
+                    ],
+                    className="mt-3",
+                ),
             ],
             fluid=True,
+        )
+
+    def create_dataset_table(self):
+        """Create a table showing all datasets with controls"""
+        if not self.datasets:
+            return html.Div("No datasets loaded", className="text-muted")
+
+        table_header = html.Thead(
+            [
+                html.Tr(
+                    [
+                        html.Th("Dataset Name", style={"width": "50%"}),
+                        html.Th("Color", style={"width": "25%"}),
+                        html.Th("Show", style={"width": "25%"}),
+                    ]
+                )
+            ]
+        )
+
+        table_rows = []
+        for i, dataset in enumerate(self.datasets):
+            row = html.Tr(
+                [
+                    html.Td(
+                        [
+                            dbc.Input(
+                                id={
+                                    "type": "dataset-name",
+                                    "index": dataset.get("id", i),
+                                },
+                                value=dataset.get("display_name", dataset["filename"]),
+                                size="sm",
+                                style={"fontSize": "12px"},
+                            )
+                        ]
+                    ),
+                    html.Td(
+                        [
+                            html.Div(
+                                style={
+                                    "width": "25px",
+                                    "height": "25px",
+                                    "backgroundColor": dataset["color"],
+                                    "border": "1px solid #ccc",
+                                    "borderRadius": "3px",
+                                    "cursor": "pointer",
+                                    "margin": "0 auto",
+                                },
+                                id=f"color-box-{dataset.get('id', i)}",
+                                title="Click to change color",
+                            )
+                        ],
+                        style={"textAlign": "center"},
+                    ),
+                    html.Td(
+                        [
+                            dbc.Checkbox(
+                                id={
+                                    "type": "show-dataset",
+                                    "index": dataset.get("id", i),
+                                },
+                                value=dataset.get("visible", True),
+                                style={"transform": "scale(1.2)"},
+                            )
+                        ],
+                        style={"textAlign": "center"},
+                    ),
+                ]
+            )
+            table_rows.append(row)
+
+        table_body = html.Tbody(table_rows)
+
+        return dbc.Table(
+            [table_header, table_body],
+            striped=True,
+            bordered=True,
+            hover=True,
+            responsive=True,
+            size="sm",
         )
 
     def register_callbacks(self):
         # Callback to handle file upload
         @self.app.callback(
-            [Output("upload-status", "children"), Output("datasets-store", "data")],
+            [
+                Output("upload-status", "children"),
+                Output("datasets-store", "data"),
+                Output("dataset-table-container", "children"),
+            ],
             [Input("upload-data", "contents")],
             [State("upload-data", "filename")],
         )
         def handle_file_upload(contents, filename):
             if contents is None:
-                return "", len(self.datasets)
+                return "", len(self.datasets), self.create_dataset_table()
 
             # Parse the uploaded file
             new_data = self.parse_uploaded_file(contents, filename)
 
             if not new_data.empty:
                 # Add the new dataset to our collection
+                dataset_id = f"dataset_{len(self.datasets) + 1}"
                 dataset = {
                     "data": new_data,
                     "filename": filename,
+                    "display_name": f"Dataset {len(self.datasets) + 1}",
                     "color": self.get_next_color(len(self.datasets)),
+                    "visible": True,
+                    "id": dataset_id,
                 }
                 self.datasets.append(dataset)
 
@@ -453,6 +587,7 @@ class DataPlotter:
                         duration=4000,
                     ),
                     len(self.datasets),
+                    self.create_dataset_table(),
                 )
             else:
                 return (
@@ -463,14 +598,15 @@ class DataPlotter:
                         duration=4000,
                     ),
                     len(self.datasets),
+                    self.create_dataset_table(),
                 )
 
         # Callback to handle clear button
         @self.app.callback(
             [
                 Output("upload-status", "children", allow_duplicate=True),
-                Output("main-plot", "figure", allow_duplicate=True),
                 Output("datasets-store", "data", allow_duplicate=True),
+                Output("dataset-table-container", "children", allow_duplicate=True),
             ],
             [Input("clear-data", "n_clicks")],
             prevent_initial_call=True,
@@ -502,169 +638,100 @@ class DataPlotter:
                         dismissable=True,
                         duration=3000,
                     ),
-                    fig,
                     0,
+                    self.create_dataset_table(),
                 )
 
-            return "", go.Figure(), len(self.datasets)
+            return "", len(self.datasets), self.create_dataset_table()
 
-        # Single callback for the main plot - updates automatically when controls change
+        # Callback for Apply Changes button in dataset management
+        @self.app.callback(
+            [
+                Output("datasets-store", "data", allow_duplicate=True),
+                Output("dataset-table-container", "children", allow_duplicate=True),
+            ],
+            [Input("apply-dataset-changes", "n_clicks")],
+            [
+                State({"type": "dataset-name", "index": ALL}, "value"),
+                State({"type": "show-dataset", "index": ALL}, "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def apply_dataset_changes(n_clicks, display_names, visibility_values):
+            if n_clicks:
+                # Update dataset properties based on form values
+                for i, dataset in enumerate(self.datasets):
+                    if i < len(display_names):
+                        dataset["display_name"] = (
+                            display_names[i] or dataset["filename"]
+                        )
+                    if i < len(visibility_values):
+                        dataset["visible"] = (
+                            visibility_values[i] if visibility_values[i] else False
+                        )
+
+                # Return updated count and table
+                return len(self.datasets), self.create_dataset_table()
+
+            return len(self.datasets), self.create_dataset_table()
+
+        # Callback for Apply Settings button in plot controls (stores settings)
+        @self.app.callback(
+            [
+                Output("plot-settings-store", "data", allow_duplicate=True),
+            ],
+            [Input("apply-plot-settings", "n_clicks")],
+            [
+                State("x-scale", "value"),
+                State("y-scale", "value"),
+                State("x-min", "value"),
+                State("x-max", "value"),
+                State("y-min", "value"),
+                State("y-max", "value"),
+                State("error-bars-toggle", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def apply_plot_settings(
+            n_clicks, x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
+        ):
+            if n_clicks:
+                # Store the plot settings
+                settings = {
+                    "x_scale": x_scale,
+                    "y_scale": y_scale,
+                    "x_min": x_min,
+                    "x_max": x_max,
+                    "y_min": y_min,
+                    "y_max": y_max,
+                    "show_error_bars": error_bars and "error_bars" in error_bars,
+                }
+                return [settings]
+            return [{}]
+
+        # Single callback for the main plot - updates when datasets or settings change
         @self.app.callback(
             Output("main-plot", "figure"),
             [
                 Input("datasets-store", "data"),
-                Input("main-plot", "id"),
-                Input("x-scale", "value"),
-                Input("y-scale", "value"),
-                Input("x-min", "value"),
-                Input("x-max", "value"),
-                Input("y-min", "value"),
-                Input("y-max", "value"),
-                Input("error-bars-toggle", "value"),
+                Input("plot-settings-store", "data"),
             ],
         )
-        def update_main_plot(
-            datasets_count,
-            plot_id,
-            x_scale,
-            y_scale,
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-            error_bars,
-        ):
-            # Create figure
-            fig = go.Figure()
+        def update_main_plot(datasets_count, plot_settings):
+            # Extract plot settings or use defaults
+            settings = plot_settings or {}
+            x_scale = settings.get("x_scale")
+            y_scale = settings.get("y_scale")
+            x_min = settings.get("x_min")
+            x_max = settings.get("x_max")
+            y_min = settings.get("y_min")
+            y_max = settings.get("y_max")
+            show_error_bars = settings.get("show_error_bars", False)
 
-            # Determine if error bars should be shown
-            show_error_bars = error_bars and "error_bars" in error_bars
-
-            # Add traces for each dataset
-            for i, dataset in enumerate(self.datasets):
-                data = dataset["data"]
-                filename = dataset["filename"]
-                color = dataset["color"]
-
-                if not data.empty:
-                    # Check if the required columns exist
-                    required_cols = ["RelativeTime", "Pressure (Torr)"]
-                    if all(col in data.columns for col in required_cols):
-                        # Extract all data from CSV
-                        time_data = data["RelativeTime"].values
-                        pressure_data = data["Pressure (Torr)"].values
-
-                        # Calculate error bars (10% of the value)
-                        if show_error_bars:
-                            error_y = pressure_data * 0.1
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=time_data,
-                                    y=pressure_data,
-                                    mode="lines+markers",
-                                    name=filename,
-                                    line=dict(color=color, width=2),
-                                    marker=dict(size=2),
-                                    error_y=dict(
-                                        type="data",
-                                        array=error_y,
-                                        visible=True,
-                                        color=color,
-                                        thickness=1,
-                                        width=2,
-                                    ),
-                                )
-                            )
-                        else:
-                            # Add trace without error bars
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=time_data,
-                                    y=pressure_data,
-                                    mode="lines+markers",
-                                    name=filename,
-                                    line=dict(color=color, width=2),
-                                    marker=dict(size=2),
-                                )
-                            )
-                        print(
-                            f"Added trace for {filename} with {len(time_data)} points"
-                        )
-                    else:
-                        print(
-                            f"Warning: {filename} missing required columns. "
-                            f"Available: {data.columns.tolist()}"
-                        )
-
-            # Configure axes based on user settings
-            # X-axis configuration
-            if x_scale == "log":
-                fig.update_xaxes(type="log")
-                # Set custom x-axis range if provided
-                if x_min is not None or x_max is not None:
-                    if (
-                        x_min is not None
-                        and x_max is not None
-                        and x_min > 0
-                        and x_max > 0
-                    ):
-                        fig.update_xaxes(range=[math.log10(x_min), math.log10(x_max)])
-            else:
-                fig.update_xaxes(type="linear")
-                # For linear scale, use defaults or custom values
-                range_min = x_min if x_min is not None else 0
-                range_max = x_max
-                if range_min is not None or range_max is not None:
-                    fig.update_xaxes(range=[range_min, range_max])
-
-            # Y-axis configuration
-            if y_scale == "log":
-                fig.update_yaxes(type="log")
-                # Set custom y-axis range if provided
-                if y_min is not None or y_max is not None:
-                    if (
-                        y_min is not None
-                        and y_max is not None
-                        and y_min > 0
-                        and y_max > 0
-                    ):
-                        fig.update_yaxes(range=[math.log10(y_min), math.log10(y_max)])
-                elif self.datasets:
-                    # Auto-scale based on data for log scale
-                    all_pressure_data = []
-                    for dataset in self.datasets:
-                        if not dataset["data"].empty:
-                            pressure_values = dataset["data"]["Pressure (Torr)"].values
-                            all_pressure_data.extend(pressure_values)
-
-                    if all_pressure_data and min(all_pressure_data) > 0:
-                        auto_y_min = min(all_pressure_data) * 0.5
-                        auto_y_max = max(all_pressure_data) * 2
-                        fig.update_yaxes(
-                            range=[math.log10(auto_y_min), math.log10(auto_y_max)]
-                        )
-            else:
-                fig.update_yaxes(type="linear")
-                # For linear scale, use defaults or custom values
-                range_min = y_min if y_min is not None else 0
-                range_max = y_max
-                if range_min is not None or range_max is not None:
-                    fig.update_yaxes(range=[range_min, range_max])
-
-            # Update layout for the plot
-            fig.update_layout(
-                height=600,
-                xaxis_title="Relative Time (s)",
-                yaxis_title="Pressure (Torr)",
-                template="plotly_white",
-                margin=dict(l=60, r=30, t=40, b=60),
-                legend=dict(
-                    orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
-                ),
-                title="Pressure vs Time",
+            print(f"Plot callback triggered with {len(self.datasets)} datasets")
+            return self._generate_plot(
+                x_scale, y_scale, x_min, x_max, y_min, y_max, show_error_bars
             )
-
-            return fig
 
         # Callback to reset plot settings
         @self.app.callback(
@@ -738,6 +805,92 @@ class DataPlotter:
                     icon = html.I(className="fas fa-chevron-up")
                 return new_state, icon
             return is_open, html.I(className="fas fa-chevron-up")
+
+    def _generate_plot(
+        self,
+        x_scale=None,
+        y_scale=None,
+        x_min=None,
+        x_max=None,
+        y_min=None,
+        y_max=None,
+        show_error_bars=None,
+    ):
+        """Generate the plot based on current dataset state and settings"""
+        fig = go.Figure()
+
+        for dataset in self.datasets:
+            # Skip invisible datasets
+            if not dataset.get("visible", True):
+                continue
+
+            data = dataset["data"]
+            display_name = dataset.get("display_name", dataset["filename"])
+            color = dataset["color"]
+
+            if not data.empty:
+                # Check if the required columns exist
+                required_cols = ["RelativeTime", "Pressure (Torr)"]
+                if all(col in data.columns for col in required_cols):
+                    # Extract all data from CSV
+                    time_data = data["RelativeTime"].values
+                    pressure_data = data["Pressure (Torr)"].values
+
+                    # Determine trace mode based on error bars setting
+                    mode = "lines+markers"
+                    error_y = None
+
+                    # Add error bars if requested and data available
+                    if show_error_bars and "Error" in data.columns:
+                        error_data = data["Error"].values
+                        error_y = dict(type="data", array=error_data, visible=True)
+
+                    fig.add_trace(
+                        go.Scatter(
+                            x=time_data,
+                            y=pressure_data,
+                            mode=mode,
+                            name=display_name,
+                            line=dict(color=color, width=2),
+                            marker=dict(size=2),
+                            error_y=error_y,
+                        )
+                    )
+
+        # Configure the layout
+        fig.update_layout(
+            height=600,
+            xaxis_title="Relative Time (s)",
+            yaxis_title="Pressure (Torr)",
+            template="plotly_white",
+            margin=dict(l=60, r=30, t=40, b=60),
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+            ),
+            title="Pressure vs Time",
+        )
+
+        # Apply axis scaling
+        x_axis_type = x_scale if x_scale else "linear"
+        y_axis_type = y_scale if y_scale else "log"
+
+        fig.update_xaxes(type=x_axis_type)
+        fig.update_yaxes(type=y_axis_type)
+
+        # Apply axis ranges if specified
+        if x_min is not None and x_max is not None:
+            fig.update_xaxes(range=[x_min, x_max])
+
+        if y_min is not None and y_max is not None:
+            if y_axis_type == "log":
+                # For log scale, use log10 of the values
+                import math
+
+                fig.update_yaxes(range=[math.log10(y_min), math.log10(y_max)])
+            else:
+                fig.update_yaxes(range=[y_min, y_max])
+
+        return fig
 
     def convert_timestamps_to_seconds(self, timestamp_strings):
         """Convert string timestamps to seconds since first timestamp"""
