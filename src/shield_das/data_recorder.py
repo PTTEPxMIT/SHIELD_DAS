@@ -201,7 +201,7 @@ class DataRecorder:
                     "gauge_location": gauge.gauge_location,
                     **(
                         {"full_scale_torr": gauge.full_scale_Torr}
-                        if type(gauge).__name__ == "Baratron626D_Gauge"
+                        if hasattr(gauge, "full_scale_Torr")
                         else {}
                     ),
                 }
@@ -241,6 +241,9 @@ class DataRecorder:
             print("CI environment detected. Keyboard monitoring disabled.")
             return
 
+        if not (0 <= self.current_valve_index < len(self.valve_event_sequence)):
+            print("Warning: current_valve_index is out of bounds. Keyboard monitoring aborted.")
+            return
         current_event = self.valve_event_sequence[self.current_valve_index]
         print(f"Press SPACEBAR to record {current_event}...")
 
