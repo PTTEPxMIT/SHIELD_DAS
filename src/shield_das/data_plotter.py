@@ -1,4 +1,5 @@
-import math
+import base64
+import io
 import threading
 import webbrowser
 
@@ -6,30 +7,33 @@ import dash
 import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.graph_objects as go
-from dash import dcc, html
-from dash.dependencies import Input, Output
+from dash import ALL, MATCH, dcc, html
+from dash.dependencies import Input, Output, State
+from dash.exceptions import PreventUpdate
 
 
 class DataPlotter:
-    def __init__(self, csv_file_path=None, port=8050):
+    def __init__(self, port=8050):
         """
-        Initialize the DataPlotter with a CSV file path.
+        Initialize the DataPlotter.
 
         Args:
-            csv_file_path: Path to the CSV file containing pressure data
             port: Port for the Dash server
         """
-        # Read the CSV data
-        self.csv_file_path = (
-            csv_file_path
-            or "results/07.15/run_5_13h56/Baratron626D_1T_downstream_pressure_data.csv"
-        )
-        self.data = self.load_csv_data()
 
         self.port = port
-        self.app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+        self.app = dash.Dash(
+            __name__,
+            external_stylesheets=[
+                dbc.themes.BOOTSTRAP,
+                "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
+            ],
+        )
         self.app_running = False
         self.server_thread = None
+
+        # Store multiple datasets - list of dictionaries with data and metadata
+        self.datasets = []
 
         # Setup the app layout
         self.app.layout = self.create_layout()
@@ -40,20 +44,85 @@ class DataPlotter:
         # Flag to track if recording has been started
         self.recording_started = False
 
-    def load_csv_data(self):
+    def parse_uploaded_file(self, contents, filename):
         """
-        Load data from the CSV file.
+        Parse uploaded CSV file content.
+
+        Args:
+            contents: Base64 encoded file content
+            filename: Name of the uploaded file
 
         Returns:
-            pandas.DataFrame: The loaded data
+            pandas.DataFrame: The parsed data or empty DataFrame on error
         """
         try:
-            df = pd.read_csv(self.csv_file_path)
-            print(f"Loaded {len(df)} data points from {self.csv_file_path}")
+            # Decode the base64 content
+            content_type, content_string = contents.split(",")
+            decoded = base64.b64decode(content_string)
+
+            # Read CSV from the decoded content
+            df = pd.read_csv(io.StringIO(decoded.decode("utf-8")))
+            print(
+                f"Successfully uploaded and parsed {filename} "
+                f"with {len(df)} data points"
+            )
             return df
         except Exception as e:
-            print(f"Error loading CSV data: {e}")
-            return pd.DataFrame()  # Return empty DataFrame on error
+            print(f"Error parsing uploaded file {filename}: {e}")
+            return pd.DataFrame()
+
+    def get_next_color(self, index):
+        """
+        Get a color for the dataset based on its index.
+
+        Args:
+            index: Index of the dataset
+
+        Returns:
+            str: Color hex code
+        """
+        colors = [
+            "#000000",  # Black
+            "#DF1AD2",  # Magenta
+            "#779BE7",  # Light Blue
+            "#49B6FF",  # Blue
+            "#254E70",  # Dark Blue
+            "#0CCA4A",  # Green
+            "#929487",  # Gray
+            "#A1B0AB",  # Light Gray
+        ]
+        return colors[index % len(colors)]
+
+    def is_valid_color(self, color):
+        """
+        Validate if a color string is a valid hex or RGB format.
+
+        Args:
+            color: Color string to validate
+
+        Returns:
+            bool: True if valid color format
+        """
+        import re
+
+        if not color:
+            return False
+
+        color = color.strip()
+
+        # Check hex format (#RGB or #RRGGBB)
+        hex_pattern = r"^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$"
+        if re.match(hex_pattern, color):
+            return True
+
+        # Check RGB format rgb(r,g,b)
+        rgb_pattern = r"^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$"
+        rgb_match = re.match(rgb_pattern, color, re.IGNORECASE)
+        if rgb_match:
+            r, g, b = map(int, rgb_match.groups())
+            return all(0 <= val <= 255 for val in [r, g, b])
+
+        return False
 
     def create_layout(self):
         return dbc.Container(
@@ -66,8 +135,65 @@ class DataPlotter:
                                 className="text-center mb-4",
                             ),
                             width=12,
-                        )
+                        ),
                     ]
+                ),
+                dbc.Row(
+                    [
+                        dbc.Col(width=8),  # Empty column for spacing
+                        dbc.Col(
+                            html.Div(
+                                [
+                                    dcc.Upload(
+                                        id="upload-data",
+                                        children=dbc.Button(
+                                            [
+                                                html.I(className="fa fa-upload me-2"),
+                                                "Upload CSV",
+                                            ],
+                                            color="primary",
+                                            size="sm",
+                                            className="me-2",
+                                        ),
+                                        style={
+                                            "display": "inline-block",
+                                        },
+                                        multiple=False,
+                                        accept=".csv",
+                                    ),
+                                    dbc.Button(
+                                        [
+                                            html.I(className="fa fa-trash me-2"),
+                                            "Clear All",
+                                        ],
+                                        id="clear-data",
+                                        color="danger",
+                                        size="sm",
+                                        style={"display": "inline-block"},
+                                    ),
+                                ],
+                                style={"textAlign": "right", "marginTop": "20px"},
+                            ),
+                            width=4,
+                        ),
+                    ],
+                    className="mb-3",
+                ),
+                # Hidden store to trigger plot updates
+                dcc.Store(id="datasets-store"),
+                # Hidden store for plot settings
+                dcc.Store(id="plot-settings-store", data={}),
+                # Status message for upload feedback (floating)
+                html.Div(
+                    id="upload-status",
+                    style={
+                        "position": "fixed",
+                        "top": "20px",
+                        "right": "20px",
+                        "zIndex": "9999",
+                        "maxWidth": "400px",
+                        "minWidth": "300px",
+                    },
                 ),
                 # Single plot for all data
                 dbc.Row(
@@ -85,62 +211,1052 @@ class DataPlotter:
                         ),
                     ]
                 ),
+                # Plot controls section
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader(
+                                            dbc.Row(
+                                                [
+                                                    dbc.Col(
+                                                        "Plot Controls",
+                                                        className="d-flex align-items-center",
+                                                    ),
+                                                    dbc.Col(
+                                                        dbc.Button(
+                                                            html.I(
+                                                                className="fas fa-chevron-up"
+                                                            ),
+                                                            id="collapse-controls-button",
+                                                            color="light",
+                                                            size="sm",
+                                                            className="ms-auto",
+                                                            style={
+                                                                "border": "1px solid #dee2e6",
+                                                                "background-color": "#f8f9fa",
+                                                                "box-shadow": "0 1px 3px rgba(0,0,0,0.1)",
+                                                                "width": "30px",
+                                                                "height": "30px",
+                                                                "padding": "0",
+                                                                "display": "flex",
+                                                                "align-items": "center",
+                                                                "justify-content": "center",
+                                                            },
+                                                        ),
+                                                        width="auto",
+                                                        className="d-flex justify-content-end",
+                                                    ),
+                                                ],
+                                                className="g-0 align-items-center",
+                                            )
+                                        ),
+                                        dbc.Collapse(
+                                            dbc.CardBody(
+                                                [
+                                                    dbc.Row(
+                                                        [
+                                                            # X-axis controls
+                                                            dbc.Col(
+                                                                [
+                                                                    html.H6(
+                                                                        "X-Axis Controls",
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Scale:"
+                                                                                    ),
+                                                                                    dbc.RadioItems(
+                                                                                        id="x-scale",
+                                                                                        options=[
+                                                                                            {
+                                                                                                "label": "Linear",
+                                                                                                "value": "linear",
+                                                                                            },
+                                                                                            {
+                                                                                                "label": "Log",
+                                                                                                "value": "log",
+                                                                                            },
+                                                                                        ],
+                                                                                        value="linear",
+                                                                                        inline=True,
+                                                                                    ),
+                                                                                ],
+                                                                                width=12,
+                                                                            ),
+                                                                        ],
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "X Min:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="x-min",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "X Max:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="x-max",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                        ]
+                                                                    ),
+                                                                ],
+                                                                width=3,
+                                                            ),
+                                                            # Y-axis controls
+                                                            dbc.Col(
+                                                                [
+                                                                    html.H6(
+                                                                        "Y-Axis Controls",
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Scale:"
+                                                                                    ),
+                                                                                    dbc.RadioItems(
+                                                                                        id="y-scale",
+                                                                                        options=[
+                                                                                            {
+                                                                                                "label": "Linear",
+                                                                                                "value": "linear",
+                                                                                            },
+                                                                                            {
+                                                                                                "label": "Log",
+                                                                                                "value": "log",
+                                                                                            },
+                                                                                        ],
+                                                                                        value="log",
+                                                                                        inline=True,
+                                                                                    ),
+                                                                                ],
+                                                                                width=12,
+                                                                            ),
+                                                                        ],
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Y Min:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="y-min",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Y Max:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="y-max",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                        ]
+                                                                    ),
+                                                                ],
+                                                                width=3,
+                                                            ),
+                                                            # Error bars and other controls
+                                                            dbc.Col(
+                                                                [
+                                                                    html.H6(
+                                                                        "Display Options",
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Checklist(
+                                                                        options=[
+                                                                            {
+                                                                                "label": "Show Error Bars (±10%)",
+                                                                                "value": "error_bars",
+                                                                            }
+                                                                        ],
+                                                                        value=[],
+                                                                        id="error-bars-toggle",
+                                                                    ),
+                                                                ],
+                                                                width=3,
+                                                            ),
+                                                            # Apply button
+                                                            dbc.Col(
+                                                                [
+                                                                    html.H6(
+                                                                        "Actions",
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Button(
+                                                                        "Reset to Auto",
+                                                                        id="reset-settings",
+                                                                        color="secondary",
+                                                                        size="sm",
+                                                                        className="w-100 mb-2",
+                                                                    ),
+                                                                ],
+                                                                width=3,
+                                                            ),
+                                                        ]
+                                                    )
+                                                ]
+                                            ),
+                                            id="collapse-controls",
+                                            is_open=True,
+                                        ),
+                                    ]
+                                ),
+                            ],
+                            width=12,
+                        ),
+                    ],
+                    className="mt-3",
+                ),
+                # Dataset Management Card
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader(
+                                            dbc.Row(
+                                                [
+                                                    dbc.Col(
+                                                        "Dataset Management",
+                                                        className="d-flex align-items-center",
+                                                    ),
+                                                    dbc.Col(
+                                                        dbc.Button(
+                                                            html.I(
+                                                                className="fas fa-chevron-up"
+                                                            ),
+                                                            id="collapse-dataset-button",
+                                                            color="light",
+                                                            size="sm",
+                                                            className="ms-auto",
+                                                            style={
+                                                                "border": "1px solid #dee2e6",
+                                                                "background-color": "#f8f9fa",
+                                                                "box-shadow": "0 1px 3px rgba(0,0,0,0.1)",
+                                                                "width": "30px",
+                                                                "height": "30px",
+                                                                "padding": "0",
+                                                                "display": "flex",
+                                                                "align-items": "center",
+                                                                "justify-content": "center",
+                                                            },
+                                                        ),
+                                                        width="auto",
+                                                        className="d-flex justify-content-end",
+                                                    ),
+                                                ],
+                                                className="g-0 align-items-center",
+                                            )
+                                        ),
+                                        dbc.Collapse(
+                                            dbc.CardBody(
+                                                [
+                                                    html.Div(
+                                                        id="dataset-table-container",
+                                                        children=self.create_dataset_table(),
+                                                    ),
+                                                ]
+                                            ),
+                                            id="collapse-dataset",
+                                            is_open=True,
+                                        ),
+                                    ]
+                                ),
+                            ],
+                            width=12,
+                        ),
+                    ],
+                    className="mt-3",
+                ),
             ],
             fluid=True,
         )
 
-    def register_callbacks(self):
-        # Single callback for the main plot - loads once when app starts
-        @self.app.callback(
-            Output("main-plot", "figure"),
-            [Input("main-plot", "id")],  # Triggers once when component is loaded
+    def create_dataset_table(self):
+        """Create a table showing all datasets with controls"""
+        if not self.datasets:
+            return html.Div("No datasets loaded", className="text-muted")
+
+        table_header = html.Thead(
+            [
+                html.Tr(
+                    [
+                        html.Th(
+                            "Dataset Name",
+                            style={"width": "50%", "fontWeight": "normal"},
+                        ),
+                        html.Th(
+                            "Color", style={"width": "25%", "fontWeight": "normal"}
+                        ),
+                        html.Th(
+                            "Display", style={"width": "25%", "fontWeight": "normal"}
+                        ),
+                    ]
+                )
+            ]
         )
-        def update_main_plot(plot_id):
-            # Create figure
-            fig = go.Figure()
 
-            # Check if we have data
-            if not self.data.empty:
-                # Extract all data from CSV
-                time_data = self.data["RelativeTime"].values
-                pressure_data = self.data["Pressure (Torr)"].values
+        table_rows = []
+        for i, dataset in enumerate(self.datasets):
+            row = html.Tr(
+                [
+                    html.Td(
+                        [
+                            dbc.Input(
+                                id={
+                                    "type": "dataset-name",
+                                    "index": dataset.get("id", i),
+                                },
+                                value=dataset.get("display_name", dataset["filename"]),
+                                size="sm",
+                                style={"fontSize": "12px"},
+                            )
+                        ]
+                    ),
+                    html.Td(
+                        [
+                            html.Div(
+                                [
+                                    # Color button that shows current color
+                                    dbc.Button(
+                                        "",
+                                        id={
+                                            "type": "color-button",
+                                            "index": dataset.get("id", i),
+                                        },
+                                        style={
+                                            "width": "30px",
+                                            "height": "30px",
+                                            "backgroundColor": dataset["color"],
+                                            "border": "2px solid #ccc",
+                                            "borderRadius": "5px",
+                                            "padding": "0",
+                                            "minWidth": "30px",
+                                        },
+                                        size="sm",
+                                    ),
+                                    # Color picker popup (hidden by default)
+                                    dbc.Popover(
+                                        [
+                                            dbc.PopoverBody(
+                                                [
+                                                    # First row - 4 colors
+                                                    html.Div(
+                                                        [
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#000000",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#000000",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#DF1AD2",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#DF1AD2",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#779BE7",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#779BE7",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#49B6FF",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#49B6FF",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                        ],
+                                                        style={
+                                                            "display": "flex",
+                                                            "flexWrap": "nowrap",
+                                                            "marginBottom": "2px",
+                                                        },
+                                                    ),
+                                                    # Second row - 4 colors
+                                                    html.Div(
+                                                        [
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#254E70",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#254E70",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#0CCA4A",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#0CCA4A",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#929487",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#929487",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#A1B0AB",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#A1B0AB",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                        ],
+                                                        style={
+                                                            "display": "flex",
+                                                            "flexWrap": "nowrap",
+                                                        },
+                                                    ),
+                                                ]
+                                            )
+                                        ],
+                                        target={
+                                            "type": "color-button",
+                                            "index": dataset.get("id", i),
+                                        },
+                                        placement="top",
+                                        is_open=False,
+                                        id={
+                                            "type": "color-popover",
+                                            "index": dataset.get("id", i),
+                                        },
+                                    ),
+                                ],
+                                style={"position": "relative"},
+                            )
+                        ],
+                        style={"textAlign": "center", "padding": "5px"},
+                    ),
+                    html.Td(
+                        [
+                            dbc.Checkbox(
+                                id={
+                                    "type": "show-dataset",
+                                    "index": dataset.get("id", i),
+                                },
+                                value=dataset.get("visible", True),
+                                style={"transform": "scale(1.2)"},
+                            )
+                        ],
+                        style={
+                            "textAlign": "center",
+                            "verticalAlign": "middle",
+                            "display": "flex",
+                            "justifyContent": "center",
+                            "alignItems": "center",
+                        },
+                    ),
+                ]
+            )
+            table_rows.append(row)
 
-                # Add trace to plot with all data
-                fig.add_trace(
-                    go.Scatter(
-                        x=time_data,
-                        y=pressure_data,
-                        mode="lines+markers",
-                        name="Pressure Data",
-                        line=dict(color="#0066cc", width=2),
-                        marker=dict(size=2),
-                    )
+        table_body = html.Tbody(table_rows)
+
+        return dbc.Table(
+            [table_header, table_body],
+            striped=True,
+            bordered=True,
+            hover=True,
+            responsive=True,
+            size="sm",
+        )
+
+    def register_callbacks(self):
+        # Callback to handle file upload
+        @self.app.callback(
+            [
+                Output("upload-status", "children"),
+                Output("datasets-store", "data"),
+                Output("dataset-table-container", "children"),
+            ],
+            [Input("upload-data", "contents")],
+            [State("upload-data", "filename")],
+        )
+        def handle_file_upload(contents, filename):
+            if contents is None:
+                return "", len(self.datasets), self.create_dataset_table()
+
+            # Parse the uploaded file
+            new_data = self.parse_uploaded_file(contents, filename)
+
+            if not new_data.empty:
+                # Add the new dataset to our collection
+                dataset_id = f"dataset_{len(self.datasets) + 1}"
+                dataset = {
+                    "data": new_data,
+                    "filename": filename,
+                    "display_name": f"Dataset {len(self.datasets) + 1}",
+                    "color": self.get_next_color(len(self.datasets)),
+                    "visible": True,
+                    "id": dataset_id,
+                }
+                self.datasets.append(dataset)
+
+                return (
+                    dbc.Alert(
+                        [
+                            html.I(className="fas fa-check-circle me-2"),
+                            f"Successfully loaded {filename} with {len(new_data)} data points. "
+                            f"Total datasets: {len(self.datasets)}",
+                        ],
+                        color="success",
+                        dismissable=True,
+                        duration=4000,
+                        style={
+                            "borderRadius": "8px",
+                            "boxShadow": "0 4px 12px rgba(0,0,0,0.15)",
+                            "border": "1px solid #d4edda",
+                        },
+                    ),
+                    len(self.datasets),
+                    self.create_dataset_table(),
+                )
+            else:
+                return (
+                    dbc.Alert(
+                        [
+                            html.I(className="fas fa-exclamation-circle me-2"),
+                            f"Failed to load {filename}. Please check the file format.",
+                        ],
+                        color="danger",
+                        dismissable=True,
+                        duration=4000,
+                        style={
+                            "borderRadius": "8px",
+                            "boxShadow": "0 4px 12px rgba(0,0,0,0.15)",
+                            "border": "1px solid #f5c6cb",
+                        },
+                    ),
+                    len(self.datasets),
+                    self.create_dataset_table(),
                 )
 
-                # Set y-axis to log scale if we have positive data
-                if len(pressure_data) > 0 and min(pressure_data) > 0:
-                    y_min = min(pressure_data) * 0.5
-                    y_max = max(pressure_data) * 2
-                    fig.update_yaxes(
-                        type="log", range=[math.log10(y_min), math.log10(y_max)]
-                    )
-                else:
-                    fig.update_yaxes(type="log")
+        # Callback to handle clear button
+        @self.app.callback(
+            [
+                Output("upload-status", "children", allow_duplicate=True),
+                Output("datasets-store", "data", allow_duplicate=True),
+                Output("dataset-table-container", "children", allow_duplicate=True),
+            ],
+            [Input("clear-data", "n_clicks")],
+            prevent_initial_call=True,
+        )
+        def clear_all_data(n_clicks):
+            if n_clicks:
+                # Clear all datasets
+                self.datasets = []
 
-            # Update layout for the plot
-            fig.update_layout(
-                height=600,
-                xaxis_title="Relative Time (s)",
-                yaxis_title="Pressure (Torr)",
-                template="plotly_white",
-                margin=dict(l=60, r=30, t=40, b=60),
-                legend=dict(
-                    orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
-                ),
-                title="Pressure vs Time",
+                # Create empty figure
+                fig = go.Figure()
+                fig.update_yaxes(type="log")
+                fig.update_layout(
+                    height=600,
+                    xaxis_title="Relative Time (s)",
+                    yaxis_title="Pressure (Torr)",
+                    template="plotly_white",
+                    margin=dict(l=60, r=30, t=40, b=60),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="center",
+                        x=0.5,
+                    ),
+                )
+
+                return (
+                    dbc.Alert(
+                        [
+                            html.I(className="fas fa-info-circle me-2"),
+                            "All data cleared",
+                        ],
+                        color="info",
+                        dismissable=True,
+                        duration=3000,
+                        style={
+                            "borderRadius": "8px",
+                            "boxShadow": "0 4px 12px rgba(0,0,0,0.15)",
+                            "border": "1px solid #bee5eb",
+                        },
+                    ),
+                    0,
+                    self.create_dataset_table(),
+                )
+
+            return "", len(self.datasets), self.create_dataset_table()
+
+        # Callback for real-time dataset management changes
+        @self.app.callback(
+            [
+                Output("datasets-store", "data", allow_duplicate=True),
+                Output("dataset-table-container", "children", allow_duplicate=True),
+            ],
+            [
+                Input({"type": "dataset-name", "index": ALL}, "value"),
+                Input({"type": "show-dataset", "index": ALL}, "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def update_dataset_changes(display_names, visibility_values):
+            # Update dataset properties based on form values
+            for i, dataset in enumerate(self.datasets):
+                if i < len(display_names):
+                    dataset["display_name"] = display_names[i] or dataset["filename"]
+                if i < len(visibility_values):
+                    dataset["visible"] = (
+                        visibility_values[i] if visibility_values[i] else False
+                    )
+
+            # Return updated count and table
+            return len(self.datasets), self.create_dataset_table()
+
+        # Callback to toggle color picker popover
+        @self.app.callback(
+            Output({"type": "color-popover", "index": MATCH}, "is_open"),
+            [Input({"type": "color-button", "index": MATCH}, "n_clicks")],
+            [State({"type": "color-popover", "index": MATCH}, "is_open")],
+            prevent_initial_call=True,
+        )
+        def toggle_color_popover(n_clicks, is_open):
+            if n_clicks:
+                return not is_open
+            return is_open
+
+        # Callback to handle color selection from popover
+        @self.app.callback(
+            [
+                Output("datasets-store", "data", allow_duplicate=True),
+                Output("dataset-table-container", "children", allow_duplicate=True),
+            ],
+            [Input({"type": "color-option", "index": ALL, "color": ALL}, "n_clicks")],
+            [State({"type": "color-option", "index": ALL, "color": ALL}, "id")],
+            prevent_initial_call=True,
+        )
+        def update_dataset_color(n_clicks_list, button_ids):
+            if not any(n_clicks_list) or not n_clicks_list:
+                raise PreventUpdate
+
+            # Find which button was clicked
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                raise PreventUpdate
+
+            # Get the triggered button's ID
+            triggered_id = ctx.triggered[0]["prop_id"]
+            # Extract the ID part (before the dot)
+            import json
+
+            id_str = triggered_id.split(".")[0]
+            button_data = json.loads(id_str)
+
+            dataset_index = button_data["index"]
+            selected_color = button_data["color"]
+
+            # Update the dataset color
+            for dataset in self.datasets:
+                if dataset.get("id", 0) == dataset_index:
+                    dataset["color"] = selected_color
+                    break
+
+            return len(self.datasets), self.create_dataset_table()
+
+        # Callback for real-time plot settings changes
+        @self.app.callback(
+            [
+                Output("plot-settings-store", "data", allow_duplicate=True),
+            ],
+            [
+                Input("x-scale", "value"),
+                Input("y-scale", "value"),
+                Input("x-min", "value"),
+                Input("x-max", "value"),
+                Input("y-min", "value"),
+                Input("y-max", "value"),
+                Input("error-bars-toggle", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def update_plot_settings(
+            x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
+        ):
+            # Store the plot settings
+            settings = {
+                "x_scale": x_scale,
+                "y_scale": y_scale,
+                "x_min": x_min,
+                "x_max": x_max,
+                "y_min": y_min,
+                "y_max": y_max,
+                "show_error_bars": error_bars and "error_bars" in error_bars,
+            }
+            return [settings]
+
+        # Single callback for the main plot - updates when datasets or settings change
+        @self.app.callback(
+            Output("main-plot", "figure"),
+            [
+                Input("datasets-store", "data"),
+                Input("plot-settings-store", "data"),
+            ],
+        )
+        def update_main_plot(datasets_count, plot_settings):
+            # Extract plot settings or use defaults
+            settings = plot_settings or {}
+            x_scale = settings.get("x_scale")
+            y_scale = settings.get("y_scale")
+            x_min = settings.get("x_min")
+            x_max = settings.get("x_max")
+            y_min = settings.get("y_min")
+            y_max = settings.get("y_max")
+            show_error_bars = settings.get("show_error_bars", False)
+
+            print(f"Plot callback triggered with {len(self.datasets)} datasets")
+            return self._generate_plot(
+                x_scale, y_scale, x_min, x_max, y_min, y_max, show_error_bars
             )
 
-            return fig
+        # Callback to reset plot settings
+        @self.app.callback(
+            [
+                Output("x-scale", "value"),
+                Output("y-scale", "value"),
+                Output("x-min", "value"),
+                Output("x-max", "value"),
+                Output("y-min", "value"),
+                Output("y-max", "value"),
+                Output("error-bars-toggle", "value"),
+            ],
+            [Input("reset-settings", "n_clicks")],
+            prevent_initial_call=True,
+        )
+        def reset_plot_settings(n_clicks):
+            if n_clicks:
+                return "linear", "log", None, None, None, None, []
+            return "linear", "log", None, None, None, None, []
+
+        # Callback to set default min values when switching to linear scale
+        @self.app.callback(
+            [
+                Output("x-min", "value", allow_duplicate=True),
+                Output("y-min", "value", allow_duplicate=True),
+            ],
+            [
+                Input("x-scale", "value"),
+                Input("y-scale", "value"),
+            ],
+            [
+                State("x-min", "value"),
+                State("y-min", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def update_default_mins(x_scale, y_scale, current_x_min, current_y_min):
+            # Set x-min to 0 when switching to linear (if currently None)
+            new_x_min = current_x_min
+            if x_scale == "linear" and current_x_min is None:
+                new_x_min = 0
+            elif x_scale == "log" and current_x_min == 0:
+                new_x_min = None
+
+            # Set y-min to 0 when switching to linear (if currently None)
+            new_y_min = current_y_min
+            if y_scale == "linear" and current_y_min is None:
+                new_y_min = 0
+            elif y_scale == "log" and current_y_min == 0:
+                new_y_min = None
+
+            return new_x_min, new_y_min
+
+        # Callback to handle collapse/expand of plot controls
+        @self.app.callback(
+            [
+                Output("collapse-controls", "is_open"),
+                Output("collapse-controls-button", "children"),
+            ],
+            [Input("collapse-controls-button", "n_clicks")],
+            [State("collapse-controls", "is_open")],
+            prevent_initial_call=True,
+        )
+        def toggle_controls_collapse(n_clicks, is_open):
+            if n_clicks:
+                new_state = not is_open
+                # Change icon based on state
+                if new_state:
+                    icon = html.I(className="fas fa-chevron-down")
+                else:
+                    icon = html.I(className="fas fa-chevron-up")
+                return new_state, icon
+            return is_open, html.I(className="fas fa-chevron-up")
+
+        # Callback to handle collapse/expand of dataset management
+        @self.app.callback(
+            [
+                Output("collapse-dataset", "is_open"),
+                Output("collapse-dataset-button", "children"),
+            ],
+            [Input("collapse-dataset-button", "n_clicks")],
+            [State("collapse-dataset", "is_open")],
+            prevent_initial_call=True,
+        )
+        def toggle_dataset_collapse(n_clicks, is_open):
+            if n_clicks:
+                new_state = not is_open
+                # Change icon based on state
+                if new_state:
+                    icon = html.I(className="fas fa-chevron-down")
+                else:
+                    icon = html.I(className="fas fa-chevron-up")
+                return new_state, icon
+            return is_open, html.I(className="fas fa-chevron-up")
+
+    def _generate_plot(
+        self,
+        x_scale=None,
+        y_scale=None,
+        x_min=None,
+        x_max=None,
+        y_min=None,
+        y_max=None,
+        show_error_bars=None,
+    ):
+        """Generate the plot based on current dataset state and settings"""
+        fig = go.Figure()
+
+        for dataset in self.datasets:
+            # Skip invisible datasets
+            if not dataset.get("visible", True):
+                continue
+
+            data = dataset["data"]
+            display_name = dataset.get("display_name", dataset["filename"])
+            color = dataset["color"]
+
+            if not data.empty:
+                # Check if the required columns exist
+                required_cols = ["RelativeTime", "Pressure (Torr)"]
+                if all(col in data.columns for col in required_cols):
+                    # Extract all data from CSV
+                    time_data = data["RelativeTime"].values
+                    pressure_data = data["Pressure (Torr)"].values
+
+                    # Determine trace mode based on error bars setting
+                    mode = "lines+markers"
+                    error_y = None
+
+                    # Add error bars if requested and data available
+                    if show_error_bars and "Error" in data.columns:
+                        error_data = data["Error"].values
+                        error_y = dict(type="data", array=error_data, visible=True)
+
+                    fig.add_trace(
+                        go.Scatter(
+                            x=time_data,
+                            y=pressure_data,
+                            mode=mode,
+                            name=display_name,
+                            line=dict(color=color, width=2),
+                            marker=dict(size=2),
+                            error_y=error_y,
+                        )
+                    )
+
+        # Configure the layout
+        fig.update_layout(
+            height=600,
+            xaxis_title="Relative Time (s)",
+            yaxis_title="Pressure (Torr)",
+            template="plotly_white",
+            margin=dict(l=60, r=30, t=40, b=60),
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
+            ),
+        )
+
+        # Apply axis scaling
+        x_axis_type = x_scale if x_scale else "linear"
+        y_axis_type = y_scale if y_scale else "log"
+
+        fig.update_xaxes(type=x_axis_type)
+        fig.update_yaxes(type=y_axis_type)
+
+        # Apply axis ranges if specified
+        if x_min is not None and x_max is not None:
+            fig.update_xaxes(range=[x_min, x_max])
+
+        if y_min is not None and y_max is not None:
+            if y_axis_type == "log":
+                # For log scale, use log10 of the values
+                import math
+
+                fig.update_yaxes(range=[math.log10(y_min), math.log10(y_max)])
+            else:
+                fig.update_yaxes(range=[y_min, y_max])
+
+        return fig
 
     def convert_timestamps_to_seconds(self, timestamp_strings):
         """Convert string timestamps to seconds since first timestamp"""
