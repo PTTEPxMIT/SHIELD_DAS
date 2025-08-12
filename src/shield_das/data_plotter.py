@@ -456,14 +456,52 @@ class DataPlotter:
                             [
                                 dbc.Card(
                                     [
-                                        dbc.CardHeader("Dataset Management"),
-                                        dbc.CardBody(
-                                            [
-                                                html.Div(
-                                                    id="dataset-table-container",
-                                                    children=self.create_dataset_table(),
-                                                ),
-                                            ]
+                                        dbc.CardHeader(
+                                            dbc.Row(
+                                                [
+                                                    dbc.Col(
+                                                        "Dataset Management",
+                                                        className="d-flex align-items-center",
+                                                    ),
+                                                    dbc.Col(
+                                                        dbc.Button(
+                                                            html.I(
+                                                                className="fas fa-chevron-up"
+                                                            ),
+                                                            id="collapse-dataset-button",
+                                                            color="light",
+                                                            size="sm",
+                                                            className="ms-auto",
+                                                            style={
+                                                                "border": "1px solid #dee2e6",
+                                                                "background-color": "#f8f9fa",
+                                                                "box-shadow": "0 1px 3px rgba(0,0,0,0.1)",
+                                                                "width": "30px",
+                                                                "height": "30px",
+                                                                "padding": "0",
+                                                                "display": "flex",
+                                                                "align-items": "center",
+                                                                "justify-content": "center",
+                                                            },
+                                                        ),
+                                                        width="auto",
+                                                        className="d-flex justify-content-end",
+                                                    ),
+                                                ],
+                                                className="g-0 align-items-center",
+                                            )
+                                        ),
+                                        dbc.Collapse(
+                                            dbc.CardBody(
+                                                [
+                                                    html.Div(
+                                                        id="dataset-table-container",
+                                                        children=self.create_dataset_table(),
+                                                    ),
+                                                ]
+                                            ),
+                                            id="collapse-dataset",
+                                            is_open=True,
                                         ),
                                     ]
                                 ),
@@ -871,7 +909,6 @@ class DataPlotter:
                         xanchor="center",
                         x=0.5,
                     ),
-                    title="Pressure vs Time",
                 )
 
                 return (
@@ -1090,6 +1127,27 @@ class DataPlotter:
                 return new_state, icon
             return is_open, html.I(className="fas fa-chevron-up")
 
+        # Callback to handle collapse/expand of dataset management
+        @self.app.callback(
+            [
+                Output("collapse-dataset", "is_open"),
+                Output("collapse-dataset-button", "children"),
+            ],
+            [Input("collapse-dataset-button", "n_clicks")],
+            [State("collapse-dataset", "is_open")],
+            prevent_initial_call=True,
+        )
+        def toggle_dataset_collapse(n_clicks, is_open):
+            if n_clicks:
+                new_state = not is_open
+                # Change icon based on state
+                if new_state:
+                    icon = html.I(className="fas fa-chevron-down")
+                else:
+                    icon = html.I(className="fas fa-chevron-up")
+                return new_state, icon
+            return is_open, html.I(className="fas fa-chevron-up")
+
     def _generate_plot(
         self,
         x_scale=None,
@@ -1151,7 +1209,6 @@ class DataPlotter:
             legend=dict(
                 orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
             ),
-            title="Pressure vs Time",
         )
 
         # Apply axis scaling
