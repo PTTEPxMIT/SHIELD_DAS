@@ -401,13 +401,6 @@ class DataPlotter:
                                                                         size="sm",
                                                                         className="w-100 mb-2",
                                                                     ),
-                                                                    dbc.Button(
-                                                                        "Apply Settings",
-                                                                        id="apply-plot-settings",
-                                                                        color="primary",
-                                                                        size="sm",
-                                                                        className="w-100",
-                                                                    ),
                                                                 ],
                                                                 width=3,
                                                             ),
@@ -439,19 +432,6 @@ class DataPlotter:
                                                 html.Div(
                                                     id="dataset-table-container",
                                                     children=self.create_dataset_table(),
-                                                ),
-                                                html.Hr(),
-                                                dbc.Button(
-                                                    [
-                                                        html.I(
-                                                            className="fa fa-check me-2"
-                                                        ),
-                                                        "Apply Changes",
-                                                    ],
-                                                    id="apply-dataset-changes",
-                                                    color="success",
-                                                    size="sm",
-                                                    className="mt-2",
                                                 ),
                                             ]
                                         ),
@@ -644,70 +624,61 @@ class DataPlotter:
 
             return "", len(self.datasets), self.create_dataset_table()
 
-        # Callback for Apply Changes button in dataset management
+        # Callback for real-time dataset management changes
         @self.app.callback(
             [
                 Output("datasets-store", "data", allow_duplicate=True),
                 Output("dataset-table-container", "children", allow_duplicate=True),
             ],
-            [Input("apply-dataset-changes", "n_clicks")],
             [
-                State({"type": "dataset-name", "index": ALL}, "value"),
-                State({"type": "show-dataset", "index": ALL}, "value"),
+                Input({"type": "dataset-name", "index": ALL}, "value"),
+                Input({"type": "show-dataset", "index": ALL}, "value"),
             ],
             prevent_initial_call=True,
         )
-        def apply_dataset_changes(n_clicks, display_names, visibility_values):
-            if n_clicks:
-                # Update dataset properties based on form values
-                for i, dataset in enumerate(self.datasets):
-                    if i < len(display_names):
-                        dataset["display_name"] = (
-                            display_names[i] or dataset["filename"]
-                        )
-                    if i < len(visibility_values):
-                        dataset["visible"] = (
-                            visibility_values[i] if visibility_values[i] else False
-                        )
+        def update_dataset_changes(display_names, visibility_values):
+            # Update dataset properties based on form values
+            for i, dataset in enumerate(self.datasets):
+                if i < len(display_names):
+                    dataset["display_name"] = display_names[i] or dataset["filename"]
+                if i < len(visibility_values):
+                    dataset["visible"] = (
+                        visibility_values[i] if visibility_values[i] else False
+                    )
 
-                # Return updated count and table
-                return len(self.datasets), self.create_dataset_table()
-
+            # Return updated count and table
             return len(self.datasets), self.create_dataset_table()
 
-        # Callback for Apply Settings button in plot controls (stores settings)
+        # Callback for real-time plot settings changes
         @self.app.callback(
             [
                 Output("plot-settings-store", "data", allow_duplicate=True),
             ],
-            [Input("apply-plot-settings", "n_clicks")],
             [
-                State("x-scale", "value"),
-                State("y-scale", "value"),
-                State("x-min", "value"),
-                State("x-max", "value"),
-                State("y-min", "value"),
-                State("y-max", "value"),
-                State("error-bars-toggle", "value"),
+                Input("x-scale", "value"),
+                Input("y-scale", "value"),
+                Input("x-min", "value"),
+                Input("x-max", "value"),
+                Input("y-min", "value"),
+                Input("y-max", "value"),
+                Input("error-bars-toggle", "value"),
             ],
             prevent_initial_call=True,
         )
-        def apply_plot_settings(
-            n_clicks, x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
+        def update_plot_settings(
+            x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
         ):
-            if n_clicks:
-                # Store the plot settings
-                settings = {
-                    "x_scale": x_scale,
-                    "y_scale": y_scale,
-                    "x_min": x_min,
-                    "x_max": x_max,
-                    "y_min": y_min,
-                    "y_max": y_max,
-                    "show_error_bars": error_bars and "error_bars" in error_bars,
-                }
-                return [settings]
-            return [{}]
+            # Store the plot settings
+            settings = {
+                "x_scale": x_scale,
+                "y_scale": y_scale,
+                "x_min": x_min,
+                "x_max": x_max,
+                "y_min": y_min,
+                "y_max": y_max,
+                "show_error_bars": error_bars and "error_bars" in error_bars,
+            }
+            return [settings]
 
         # Single callback for the main plot - updates when datasets or settings change
         @self.app.callback(
