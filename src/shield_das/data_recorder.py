@@ -8,6 +8,11 @@ from datetime import datetime
 import pandas as pd
 import u6
 
+try:
+    import keyboard
+except ImportError:
+    keyboard = None
+
 from .pressure_gauge import PressureGauge
 from .thermocouple import Thermocouple
 
@@ -55,6 +60,8 @@ class DataRecorder:
     run_dir: str
     backup_dir: str
     elapsed_time: float
+    v5_close_time: str | None
+    start_time: datetime
 
     def __init__(
         self,
@@ -77,6 +84,8 @@ class DataRecorder:
         self.thread = None
 
         self.elapsed_time = 0.0
+        self.v5_close_time = None
+        self.start_time = None
 
     def _create_results_directory(self):
         """Creates a new directory for results based on date and run number."""
@@ -194,8 +203,49 @@ class DataRecorder:
         print(f"Created metadata file: {metadata_path}")
         return metadata_path
 
+    def _monitor_keyboard(self):
+        """Monitor for spacebar press to record v5_close_time."""
+        if keyboard is None:
+            print(
+                "Warning: keyboard module not available. "
+                "V5 close time monitoring disabled."
+            )
+            return
+
+        print("Press SPACEBAR to record V5 close time...")
+
+        def on_spacebar():
+            if self.v5_close_time is None:  # Only record the first press
+                self.v5_close_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                print(f"V5 close time recorded: {self.v5_close_time}")
+                self._update_metadata_with_v5_time()
+
+        # Set up keyboard listener for spacebar
+        keyboard.on_press_key("space", lambda _: on_spacebar())
+
+    def _update_metadata_with_v5_time(self):
+        """Update the metadata file with the v5_close_time."""
+        metadata_path = os.path.join(self.run_dir, "run_metadata.json")
+
+        try:
+            with open(metadata_path) as f:
+                metadata = json.load(f)
+
+            metadata["run_info"]["v5_close_time"] = self.v5_close_time
+
+            with open(metadata_path, "w") as f:
+                json.dump(metadata, f, indent=2)
+
+            print(f"Updated metadata with V5 close time: {self.v5_close_time}")
+        except Exception as e:
+            print(f"Error updating metadata with V5 close time: {e}")
+
     def start(self):
         """Start recording data"""
+        # Record start time for v5_close_time calculation
+        self.start_time = datetime.now()
+        self.v5_close_time = None  # Reset for new run
+
         # Create directories and setup files only when recording starts
         self.run_dir = self._create_results_directory()
         self.backup_dir = os.path.join(self.run_dir, "backup")
@@ -203,6 +253,9 @@ class DataRecorder:
 
         # Create metadata file with run information
         self._create_metadata_file()
+
+        # Start keyboard monitoring for spacebar press
+        self._monitor_keyboard()
 
         self.stop_event.clear()
         self.thread = threading.Thread(target=self.record_data)
@@ -214,6 +267,10 @@ class DataRecorder:
         self.stop_event.set()
         if self.thread:
             self.thread.join(timeout=1.0)
+
+        # Clean up keyboard listeners
+        if keyboard is not None:
+            keyboard.unhook_all()
 
     def record_data(self):
         """Record data from all gauges passed to recorder"""
