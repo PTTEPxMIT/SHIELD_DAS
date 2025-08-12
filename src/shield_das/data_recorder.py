@@ -338,7 +338,8 @@ class DataRecorder:
             self.thread.join(timeout=1.0)
 
         # Clean up keyboard listeners
-        keyboard.unhook_all()
+        if not self._is_ci_environment():
+            keyboard.unhook_all()
 
     def record_data(self):
         """Record data from all gauges passed to recorder"""
