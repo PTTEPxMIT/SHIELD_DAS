@@ -10,6 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from dash import dcc, html, ALL, MATCH
 from dash.dependencies import Input, Output, State
+from dash.exceptions import PreventUpdate
 
 
 class DataPlotter:
@@ -82,18 +83,47 @@ class DataPlotter:
             str: Color hex code
         """
         colors = [
-            "#0066cc",  # Blue
-            "#ff6600",  # Orange
-            "#00cc66",  # Green
-            "#cc0066",  # Pink
-            "#6600cc",  # Purple
-            "#cc6600",  # Brown
-            "#0066ff",  # Light Blue
-            "#ff0066",  # Red
-            "#66cc00",  # Lime
-            "#6600ff",  # Indigo
+            "#000000",  # Black
+            "#DF1AD2",  # Magenta
+            "#779BE7",  # Light Blue
+            "#49B6FF",  # Blue
+            "#254E70",  # Dark Blue
+            "#0CCA4A",  # Green
+            "#929487",  # Gray
+            "#A1B0AB",  # Light Gray
         ]
         return colors[index % len(colors)]
+
+    def is_valid_color(self, color):
+        """
+        Validate if a color string is a valid hex or RGB format.
+
+        Args:
+            color: Color string to validate
+
+        Returns:
+            bool: True if valid color format
+        """
+        import re
+
+        if not color:
+            return False
+
+        color = color.strip()
+
+        # Check hex format (#RGB or #RRGGBB)
+        hex_pattern = r"^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$"
+        if re.match(hex_pattern, color):
+            return True
+
+        # Check RGB format rgb(r,g,b)
+        rgb_pattern = r"^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$"
+        rgb_match = re.match(rgb_pattern, color, re.IGNORECASE)
+        if rgb_match:
+            r, g, b = map(int, rgb_match.groups())
+            return all(0 <= val <= 255 for val in [r, g, b])
+
+        return False
 
     def create_layout(self):
         return dbc.Container(
@@ -491,20 +521,236 @@ class DataPlotter:
                     html.Td(
                         [
                             html.Div(
-                                style={
-                                    "width": "25px",
-                                    "height": "25px",
-                                    "backgroundColor": dataset["color"],
-                                    "border": "1px solid #ccc",
-                                    "borderRadius": "3px",
-                                    "cursor": "pointer",
-                                    "margin": "0 auto",
-                                },
-                                id=f"color-box-{dataset.get('id', i)}",
-                                title="Click to change color",
+                                [
+                                    # Color button that shows current color
+                                    dbc.Button(
+                                        "",
+                                        id={
+                                            "type": "color-button",
+                                            "index": dataset.get("id", i),
+                                        },
+                                        style={
+                                            "width": "30px",
+                                            "height": "30px",
+                                            "backgroundColor": dataset["color"],
+                                            "border": "2px solid #ccc",
+                                            "borderRadius": "5px",
+                                            "padding": "0",
+                                            "minWidth": "30px",
+                                        },
+                                        size="sm",
+                                    ),
+                                    # Color picker popup (hidden by default)
+                                    dbc.Popover(
+                                        [
+                                            dbc.PopoverBody(
+                                                [
+                                                    # First row - 4 colors
+                                                    html.Div(
+                                                        [
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#000000",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#000000",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#DF1AD2",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#DF1AD2",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#779BE7",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#779BE7",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#49B6FF",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#49B6FF",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                        ],
+                                                        style={
+                                                            "display": "flex",
+                                                            "flexWrap": "nowrap",
+                                                            "marginBottom": "2px",
+                                                        },
+                                                    ),
+                                                    # Second row - 4 colors
+                                                    html.Div(
+                                                        [
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#254E70",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#254E70",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#0CCA4A",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#0CCA4A",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#929487",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#929487",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                            dbc.Button(
+                                                                "",
+                                                                id={
+                                                                    "type": "color-option",
+                                                                    "index": dataset.get(
+                                                                        "id", i
+                                                                    ),
+                                                                    "color": "#A1B0AB",
+                                                                },
+                                                                style={
+                                                                    "width": "25px",
+                                                                    "height": "25px",
+                                                                    "backgroundColor": "#A1B0AB",
+                                                                    "border": "1px solid #ccc",
+                                                                    "borderRadius": "3px",
+                                                                    "margin": "2px",
+                                                                    "padding": "0",
+                                                                    "minWidth": "25px",
+                                                                },
+                                                                size="sm",
+                                                            ),
+                                                        ],
+                                                        style={
+                                                            "display": "flex",
+                                                            "flexWrap": "nowrap",
+                                                        },
+                                                    ),
+                                                ]
+                                            )
+                                        ],
+                                        target={
+                                            "type": "color-button",
+                                            "index": dataset.get("id", i),
+                                        },
+                                        placement="top",
+                                        is_open=False,
+                                        id={
+                                            "type": "color-popover",
+                                            "index": dataset.get("id", i),
+                                        },
+                                    ),
+                                ],
+                                style={"position": "relative"},
                             )
                         ],
-                        style={"textAlign": "center"},
+                        style={"textAlign": "center", "padding": "5px"},
                     ),
                     html.Td(
                         [
@@ -660,6 +906,56 @@ class DataPlotter:
                     )
 
             # Return updated count and table
+            return len(self.datasets), self.create_dataset_table()
+
+        # Callback to toggle color picker popover
+        @self.app.callback(
+            Output({"type": "color-popover", "index": MATCH}, "is_open"),
+            [Input({"type": "color-button", "index": MATCH}, "n_clicks")],
+            [State({"type": "color-popover", "index": MATCH}, "is_open")],
+            prevent_initial_call=True,
+        )
+        def toggle_color_popover(n_clicks, is_open):
+            if n_clicks:
+                return not is_open
+            return is_open
+
+        # Callback to handle color selection from popover
+        @self.app.callback(
+            [
+                Output("datasets-store", "data", allow_duplicate=True),
+                Output("dataset-table-container", "children", allow_duplicate=True),
+            ],
+            [Input({"type": "color-option", "index": ALL, "color": ALL}, "n_clicks")],
+            [State({"type": "color-option", "index": ALL, "color": ALL}, "id")],
+            prevent_initial_call=True,
+        )
+        def update_dataset_color(n_clicks_list, button_ids):
+            if not any(n_clicks_list) or not n_clicks_list:
+                raise PreventUpdate
+
+            # Find which button was clicked
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                raise PreventUpdate
+
+            # Get the triggered button's ID
+            triggered_id = ctx.triggered[0]["prop_id"]
+            # Extract the ID part (before the dot)
+            import json
+
+            id_str = triggered_id.split(".")[0]
+            button_data = json.loads(id_str)
+
+            dataset_index = button_data["index"]
+            selected_color = button_data["color"]
+
+            # Update the dataset color
+            for dataset in self.datasets:
+                if dataset.get("id", 0) == dataset_index:
+                    dataset["color"] = selected_color
+                    break
+
             return len(self.datasets), self.create_dataset_table()
 
         # Callback for real-time plot settings changes
