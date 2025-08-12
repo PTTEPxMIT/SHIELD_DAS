@@ -865,7 +865,11 @@ class DataPlotter:
                     template="plotly_white",
                     margin=dict(l=60, r=30, t=40, b=60),
                     legend=dict(
-                        orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="center",
+                        x=0.5,
                     ),
                     title="Pressure vs Time",
                 )
@@ -1145,7 +1149,7 @@ class DataPlotter:
             template="plotly_white",
             margin=dict(l=60, r=30, t=40, b=60),
             legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+                orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
             ),
             title="Pressure vs Time",
         )
