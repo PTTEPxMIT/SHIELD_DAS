@@ -247,7 +247,8 @@ class DataRecorder:
         def on_spacebar():
             if self.current_valve_index < len(self.valve_event_sequence):
                 current_event = self.valve_event_sequence[self.current_valve_index]
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                # Include milliseconds for precise timing
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
                 # Set the appropriate attribute
                 setattr(self, current_event, timestamp)

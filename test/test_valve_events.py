@@ -78,7 +78,7 @@ class TestValveEvents:
 
     def test_valve_event_sequence_progression(self):
         """Test that valve events progress through the sequence correctly."""
-        test_timestamp = "2025-08-12 15:30:00"
+        test_timestamp = "2025-08-12 15:30:00.123"  # Include milliseconds
 
         # Start the recorder first to create directories
         with patch("shield_das.data_recorder.keyboard"):
@@ -109,7 +109,7 @@ class TestValveEvents:
         with patch("shield_das.data_recorder.keyboard"):
             self.recorder.start()
 
-            test_timestamp = "2025-08-12 15:30:00"
+            test_timestamp = "2025-08-12 15:30:00.456"  # Include milliseconds
             event_name = "v5_close_time"
 
             # Update metadata with valve time
@@ -132,10 +132,10 @@ class TestValveEvents:
 
             # Record multiple valve events
             valve_times = {
-                "v5_close_time": "2025-08-12 15:30:00",
-                "v6_close_time": "2025-08-12 15:31:00",
-                "v7_close_time": "2025-08-12 15:32:00",
-                "v3_open_time": "2025-08-12 15:33:00",
+                "v5_close_time": "2025-08-12 15:30:00.123",
+                "v6_close_time": "2025-08-12 15:31:00.456",
+                "v7_close_time": "2025-08-12 15:32:00.789",
+                "v3_open_time": "2025-08-12 15:33:00.012",
             }
 
             for event_name, timestamp in valve_times.items():
@@ -222,7 +222,7 @@ class TestValveEvents:
 
             # This should not raise an exception, but should print an error message
             self.recorder._update_metadata_with_valve_time(
-                "v5_close_time", "2025-08-12 15:30:00"
+                "v5_close_time", "2025-08-12 15:30:00.999"
             )
 
             self.recorder.stop()

@@ -54,13 +54,11 @@ class TestValveEventIntegration:
 
             # Simulate valve events being recorded
             valve_times = {
-                "v5_close_time": "2025-08-12 15:30:00",
-                "v6_close_time": "2025-08-12 15:31:00",
-                "v7_close_time": "2025-08-12 15:32:00",
-                "v3_open_time": "2025-08-12 15:33:00",
-            }
-
-            # Record each valve event
+                "v5_close_time": "2025-08-12 15:30:00.123",
+                "v6_close_time": "2025-08-12 15:31:00.456",
+                "v7_close_time": "2025-08-12 15:32:00.789",
+                "v3_open_time": "2025-08-12 15:33:00.012",
+            }  # Record each valve event
             for i, (event_name, timestamp) in enumerate(valve_times.items()):
                 # Set the attribute on the recorder
                 setattr(recorder, event_name, timestamp)
@@ -110,10 +108,10 @@ class TestValveEventIntegration:
 
             # Record only first two valve events
             recorder._update_metadata_with_valve_time(
-                "v5_close_time", "2025-08-12 15:30:00"
+                "v5_close_time", "2025-08-12 15:30:00.123"
             )
             recorder._update_metadata_with_valve_time(
-                "v6_close_time", "2025-08-12 15:31:00"
+                "v6_close_time", "2025-08-12 15:31:00.456"
             )
 
             time.sleep(0.02)  # Very brief for testing
@@ -147,7 +145,7 @@ class TestValveEventIntegration:
             # First recording session
             recorder.start()
             recorder._update_metadata_with_valve_time(
-                "v5_close_time", "2025-08-12 15:30:00"
+                "v5_close_time", "2025-08-12 15:30:00.111"
             )
             time.sleep(0.02)  # Very brief for testing
             recorder.stop()
@@ -163,7 +161,7 @@ class TestValveEventIntegration:
             assert recorder.current_valve_index == 0
 
             recorder._update_metadata_with_valve_time(
-                "v5_close_time", "2025-08-12 16:30:00"
+                "v5_close_time", "2025-08-12 16:30:00.222"
             )
             time.sleep(0.02)  # Very brief for testing
             recorder.stop()
@@ -177,5 +175,10 @@ class TestValveEventIntegration:
             with open(second_metadata_path) as f:
                 second_metadata = json.load(f)
 
-            assert first_metadata["run_info"]["v5_close_time"] == "2025-08-12 15:30:00"
-            assert second_metadata["run_info"]["v5_close_time"] == "2025-08-12 16:30:00"
+            assert (
+                first_metadata["run_info"]["v5_close_time"] == "2025-08-12 15:30:00.111"
+            )
+            assert (
+                second_metadata["run_info"]["v5_close_time"]
+                == "2025-08-12 16:30:00.222"
+            )
