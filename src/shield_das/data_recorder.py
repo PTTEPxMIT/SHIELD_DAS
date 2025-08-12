@@ -274,8 +274,6 @@ class DataRecorder:
 
     def _is_ci_environment(self) -> bool:
         """Detect if we're running in a CI environment."""
-        import os
-
         # Common CI environment variables
         ci_indicators = [
             "CI",  # GitHub Actions, GitLab CI, etc.
