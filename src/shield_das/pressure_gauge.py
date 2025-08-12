@@ -1,5 +1,4 @@
 import numpy as np
-import u6
 
 
 class PressureGauge:
@@ -60,7 +59,7 @@ class PressureGauge:
 
     def record_ain_channel_voltage(
         self,
-        labjack: u6.U6 | None = None,
+        labjack=None,  # Remove type hint to avoid import issues
         resolution_index: int | None = 8,
         gain_index: int | None = 0,
         settling_factor: int | None = 2,

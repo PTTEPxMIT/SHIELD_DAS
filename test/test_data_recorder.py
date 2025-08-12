@@ -1,9 +1,10 @@
+import json
 import os
 import shutil
 import tempfile
 import threading
 import time
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -23,11 +24,15 @@ class TestDataRecorder:
         self.mock_gauge1.name = "TestGauge1"
         self.mock_gauge1.voltage_data = [5.0]  # Mock voltage data list
         self.mock_gauge1.record_ain_channel_voltage.return_value = None
+        self.mock_gauge1.ain_channel = 10
+        self.mock_gauge1.gauge_location = "downstream"
 
         self.mock_gauge2 = Mock(spec=PressureGauge)
         self.mock_gauge2.name = "TestGauge2"
         self.mock_gauge2.voltage_data = [3.5]  # Mock voltage data list
         self.mock_gauge2.record_ain_channel_voltage.return_value = None
+        self.mock_gauge2.ain_channel = 6
+        self.mock_gauge2.gauge_location = "upstream"
 
         # Create mock thermocouples (empty list for now)
         self.mock_thermocouples = []
@@ -326,16 +331,22 @@ class TestDataRecorder:
         gauge_a.name = "WGM701"
         gauge_a.voltage_data = [1.0]
         gauge_a.record_ain_channel_voltage.return_value = None
+        gauge_a.ain_channel = 10
+        gauge_a.gauge_location = "downstream"
 
         gauge_b = Mock(spec=PressureGauge)
         gauge_b.name = "Baratron626D"
         gauge_b.voltage_data = [2.0]
         gauge_b.record_ain_channel_voltage.return_value = None
+        gauge_b.ain_channel = 6
+        gauge_b.gauge_location = "downstream"
 
         gauge_c = Mock(spec=PressureGauge)
         gauge_c.name = "CVM211"
         gauge_c.voltage_data = [3.0]
         gauge_c.record_ain_channel_voltage.return_value = None
+        gauge_c.ain_channel = 4
+        gauge_c.gauge_location = "upstream"
 
         recorder = DataRecorder(
             gauges=[gauge_a, gauge_b, gauge_c],
@@ -369,6 +380,46 @@ class TestDataRecorder:
             self.recorder.run_dir, "pressure_gauge_data.csv"
         )
         assert os.path.exists(expected_filename)
+
+        self.recorder.stop()
+
+    def test_metadata_file_creation(self):
+        """Test that metadata JSON file is created with correct information."""
+        # Start recorder to trigger metadata creation
+        self.recorder.start()
+        time.sleep(0.1)
+
+        # Check that metadata file was created
+        metadata_path = os.path.join(self.recorder.run_dir, "run_metadata.json")
+        assert os.path.exists(metadata_path)
+
+        # Read and verify metadata content
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        # Verify required top-level keys
+        assert "version" in metadata
+        assert "run_info" in metadata
+        assert "gauges" in metadata
+        assert "thermocouples" in metadata
+
+        # Verify version info
+        assert isinstance(metadata["version"], str)
+        assert metadata["version"] == "1.0.0"
+
+        # Verify run_info content
+        run_info = metadata["run_info"]
+        assert "date" in run_info
+        assert "start_time" in run_info
+        assert run_info["test_mode"] is True
+        assert run_info["recording_interval_seconds"] == 0.1
+        assert run_info["backup_interval_seconds"] == 5.0
+
+        # Verify gauges information
+        gauges_info = metadata["gauges"]
+        assert len(gauges_info) == 2
+        assert gauges_info[0]["name"] == "TestGauge1"
+        assert gauges_info[1]["name"] == "TestGauge2"
 
         self.recorder.stop()
 

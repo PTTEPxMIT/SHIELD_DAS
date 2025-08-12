@@ -1,4 +1,5 @@
 import glob
+import json
 import os
 import threading
 import time
@@ -6,6 +7,11 @@ from datetime import datetime
 
 import pandas as pd
 import u6
+
+try:
+    import keyboard
+except ImportError:
+    keyboard = None
 
 from .pressure_gauge import PressureGauge
 from .thermocouple import Thermocouple
@@ -40,6 +46,12 @@ class DataRecorder:
         run_dir: Directory for the current run's results
         backup_dir: Directory for backup files
         elapsed_time: Time elapsed since the start of recording
+        v5_close_time: Timestamp when V5 valve was closed (spacebar press 1)
+        v6_close_time: Timestamp when V6 valve was closed (spacebar press 2)
+        v7_close_time: Timestamp when V7 valve was closed (spacebar press 3)
+        v3_open_time: Timestamp when V3 valve was opened (spacebar press 4)
+        valve_event_sequence: Ordered list of valve events to track
+        current_valve_index: Current position in the valve event sequence
     """
 
     gauges: list[PressureGauge]
@@ -54,6 +66,13 @@ class DataRecorder:
     run_dir: str
     backup_dir: str
     elapsed_time: float
+    v5_close_time: str | None
+    v6_close_time: str | None
+    v7_close_time: str | None
+    v3_open_time: str | None
+    start_time: datetime
+    valve_event_sequence: list[str]
+    current_valve_index: int
 
     def __init__(
         self,
@@ -76,6 +95,20 @@ class DataRecorder:
         self.thread = None
 
         self.elapsed_time = 0.0
+        self.v5_close_time = None
+        self.v6_close_time = None
+        self.v7_close_time = None
+        self.v3_open_time = None
+        self.start_time = None
+
+        # Valve event sequence tracking
+        self.valve_event_sequence = [
+            "v5_close_time",
+            "v6_close_time",
+            "v7_close_time",
+            "v3_open_time",
+        ]
+        self.current_valve_index = 0
 
     def _create_results_directory(self):
         """Creates a new directory for results based on date and run number."""
@@ -149,12 +182,163 @@ class DataRecorder:
 
         return 1 if not numbers else max(numbers) + 1
 
+    def _create_metadata_file(self):
+        """Create a JSON metadata file with run information."""
+        metadata = {
+            "version": "1.0.0",
+            "run_info": {
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "test_mode": self.test_mode,
+                "recording_interval_seconds": self.recording_interval,
+                "backup_interval_seconds": self.backup_interval,
+            },
+            "gauges": [
+                {
+                    "name": gauge.name,
+                    "type": type(gauge).__name__,
+                    "ain_channel": gauge.ain_channel,
+                    "gauge_location": gauge.gauge_location,
+                    **(
+                        {"full_scale_torr": gauge.full_scale_Torr}
+                        if hasattr(gauge, "full_scale_Torr")
+                        else {}
+                    ),
+                }
+                for gauge in self.gauges
+            ],
+            "thermocouples": [
+                {
+                    "name": (
+                        thermocouple.name
+                        if hasattr(thermocouple, "name")
+                        else f"Thermocouple_{i}"
+                    )
+                }
+                for i, thermocouple in enumerate(self.thermocouples)
+            ],
+        }
+
+        metadata_path = os.path.join(self.run_dir, "run_metadata.json")
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        print(f"Created metadata file: {metadata_path}")
+        return metadata_path
+
+    def _monitor_keyboard(self):
+        """Monitor for spacebar press to record valve events in sequence."""
+        if keyboard is None:
+            print(
+                "Warning: keyboard module not available. "
+                "Valve event time monitoring disabled."
+            )
+            return
+
+        # Detect if we're in a CI environment (not local test mode)
+        is_ci = self._is_ci_environment()
+        if is_ci:
+            print("CI environment detected. Keyboard monitoring disabled.")
+            return
+
+        if not (0 <= self.current_valve_index < len(self.valve_event_sequence)):
+            print(
+                "Warning: current_valve_index is out of bounds. "
+                "Keyboard monitoring aborted."
+            )
+            return
+        current_event = self.valve_event_sequence[self.current_valve_index]
+        print(f"Press SPACEBAR to record {current_event}...")
+
+        def on_spacebar():
+            if self.current_valve_index < len(self.valve_event_sequence):
+                current_event = self.valve_event_sequence[self.current_valve_index]
+                # Include milliseconds for precise timing
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+                # Set the appropriate attribute
+                setattr(self, current_event, timestamp)
+
+                print(f"{current_event} recorded: {timestamp}")
+                self._update_metadata_with_valve_time(current_event, timestamp)
+
+                # Move to next event
+                self.current_valve_index += 1
+
+                # Show next event or completion message
+                if self.current_valve_index < len(self.valve_event_sequence):
+                    next_event = self.valve_event_sequence[self.current_valve_index]
+                    print(f"Next: Press SPACEBAR to record {next_event}...")
+                else:
+                    print("All valve events recorded!")
+
+        # Set up keyboard listener for spacebar
+        try:
+            keyboard.on_press_key("space", lambda _: on_spacebar())
+        except (ImportError, PermissionError, OSError) as e:
+            print(f"Warning: Could not set up keyboard monitoring: {e}")
+            print("Valve event time monitoring disabled.")
+
+    def _is_ci_environment(self) -> bool:
+        """Detect if we're running in a CI environment."""
+        # Common CI environment variables
+        ci_indicators = [
+            "CI",  # GitHub Actions, GitLab CI, etc.
+            "GITHUB_ACTIONS",
+            "GITLAB_CI",
+            "TRAVIS",
+            "CIRCLECI",
+            "JENKINS_URL",
+            "BUILDKITE",
+            "TF_BUILD",  # Azure DevOps
+        ]
+
+        return any(os.getenv(var) for var in ci_indicators)
+
+    def _update_metadata_with_valve_time(self, event_name: str, timestamp: str):
+        """Update the metadata file with the valve event time.
+
+        Args:
+            event_name: Name of the valve event (e.g., 'v5_close_time')
+            timestamp: Timestamp when the event occurred
+        """
+        metadata_path = os.path.join(self.run_dir, "run_metadata.json")
+
+        try:
+            with open(metadata_path) as f:
+                metadata = json.load(f)
+
+            metadata["run_info"][event_name] = timestamp
+
+            with open(metadata_path, "w") as f:
+                json.dump(metadata, f, indent=2)
+
+            print(f"Updated metadata with {event_name}: {timestamp}")
+        except Exception as e:
+            print(f"Error updating metadata with {event_name}: {e}")
+
     def start(self):
         """Start recording data"""
+        # Record start time for valve event time tracking
+        self.start_time = datetime.now()
+
+        # Reset all valve events for new run
+        self.v5_close_time = None
+        self.v6_close_time = None
+        self.v7_close_time = None
+        self.v3_open_time = None
+        self.current_valve_index = 0
+
         # Create directories and setup files only when recording starts
         self.run_dir = self._create_results_directory()
         self.backup_dir = os.path.join(self.run_dir, "backup")
         os.makedirs(self.backup_dir, exist_ok=True)
+
+        # Create metadata file with run information
+        self._create_metadata_file()
+
+        # Start keyboard monitoring for valve events
+        self._monitor_keyboard()
 
         self.stop_event.clear()
         self.thread = threading.Thread(target=self.record_data)
@@ -166,6 +350,13 @@ class DataRecorder:
         self.stop_event.set()
         if self.thread:
             self.thread.join(timeout=1.0)
+
+        # Clean up keyboard listeners if keyboard module is available
+        if keyboard is not None:
+            try:
+                keyboard.unhook_all()
+            except Exception as e:
+                print(f"Warning: Could not clean up keyboard listeners: {e}")
 
     def record_data(self):
         """Record data from all gauges passed to recorder"""
