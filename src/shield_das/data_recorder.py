@@ -17,14 +17,14 @@ class DataRecorder:
     setup, start, stop, and reset of data recording, as well as the management of
     results directories and gauge exports.
 
-    Arguements:
+    Arguments:
         gauges: List of PressureGauge instances to record data from
         thermocouples: List of Thermocouple instances to record temperature data from
         results_dir: Directory where results will be stored, defaults to "results"
         test_mode: If True, runs in test mode without actual hardware interaction,
             defaults to False
         recording_interval: Time interval (seconds) between recordings, defaults to 0.5s
-        backup_interval: How often to backup dara (seconds)
+        backup_interval: How often to backup data (seconds)
 
     Attributes:
         gauges: List of PressureGauge instances to record data from
@@ -173,7 +173,7 @@ class DataRecorder:
         self._initialize_recording_session()
 
         # Calculate backup parameters once
-        backup_frequency = int(self.backup_interval / self.recording_interval)
+        backup_frequency = max(1, int(self.backup_interval / self.recording_interval))
 
         # Data buffers
         data_buffer = []
