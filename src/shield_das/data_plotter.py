@@ -183,15 +183,17 @@ class DataPlotter:
                 dcc.Store(id="datasets-store"),
                 # Hidden store for plot settings
                 dcc.Store(id="plot-settings-store", data={}),
-                # Status message for upload feedback
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            html.Div(id="upload-status", className="text-center"),
-                            width=12,
-                        )
-                    ],
-                    className="mb-2",
+                # Status message for upload feedback (floating)
+                html.Div(
+                    id="upload-status",
+                    style={
+                        "position": "fixed",
+                        "top": "20px",
+                        "right": "20px",
+                        "zIndex": "9999",
+                        "maxWidth": "400px",
+                        "minWidth": "300px",
+                    },
                 ),
                 # Single plot for all data
                 dbc.Row(
@@ -856,11 +858,19 @@ class DataPlotter:
 
                 return (
                     dbc.Alert(
-                        f"Successfully loaded {filename} with {len(new_data)} data points. "
-                        f"Total datasets: {len(self.datasets)}",
+                        [
+                            html.I(className="fas fa-check-circle me-2"),
+                            f"Successfully loaded {filename} with {len(new_data)} data points. "
+                            f"Total datasets: {len(self.datasets)}",
+                        ],
                         color="success",
                         dismissable=True,
                         duration=4000,
+                        style={
+                            "borderRadius": "8px",
+                            "boxShadow": "0 4px 12px rgba(0,0,0,0.15)",
+                            "border": "1px solid #d4edda",
+                        },
                     ),
                     len(self.datasets),
                     self.create_dataset_table(),
@@ -868,10 +878,18 @@ class DataPlotter:
             else:
                 return (
                     dbc.Alert(
-                        f"Failed to load {filename}. Please check the file format.",
+                        [
+                            html.I(className="fas fa-exclamation-circle me-2"),
+                            f"Failed to load {filename}. Please check the file format.",
+                        ],
                         color="danger",
                         dismissable=True,
                         duration=4000,
+                        style={
+                            "borderRadius": "8px",
+                            "boxShadow": "0 4px 12px rgba(0,0,0,0.15)",
+                            "border": "1px solid #f5c6cb",
+                        },
                     ),
                     len(self.datasets),
                     self.create_dataset_table(),
@@ -912,10 +930,18 @@ class DataPlotter:
 
                 return (
                     dbc.Alert(
-                        "All data cleared",
+                        [
+                            html.I(className="fas fa-info-circle me-2"),
+                            "All data cleared",
+                        ],
                         color="info",
                         dismissable=True,
                         duration=3000,
+                        style={
+                            "borderRadius": "8px",
+                            "boxShadow": "0 4px 12px rgba(0,0,0,0.15)",
+                            "border": "1px solid #bee5eb",
+                        },
                     ),
                     0,
                     self.create_dataset_table(),
