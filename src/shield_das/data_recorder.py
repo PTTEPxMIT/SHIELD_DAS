@@ -5,13 +5,9 @@ import threading
 import time
 from datetime import datetime
 
+import keyboard
 import pandas as pd
 import u6
-
-try:
-    import keyboard
-except ImportError:
-    keyboard = None
 
 from .pressure_gauge import PressureGauge
 from .thermocouple import Thermocouple
@@ -228,12 +224,6 @@ class DataRecorder:
 
     def _monitor_keyboard(self):
         """Monitor for spacebar press to record valve events in sequence."""
-        if keyboard is None:
-            print(
-                "Warning: keyboard module not available. "
-                "Valve event time monitoring disabled."
-            )
-            return
 
         # Detect if we're in a CI environment (not local test mode)
         is_ci = self._is_ci_environment()
@@ -247,6 +237,7 @@ class DataRecorder:
                 "Keyboard monitoring aborted."
             )
             return
+
         current_event = self.valve_event_sequence[self.current_valve_index]
         print(f"Press SPACEBAR to record {current_event}...")
 
@@ -273,11 +264,7 @@ class DataRecorder:
                     print("All valve events recorded!")
 
         # Set up keyboard listener for spacebar
-        try:
-            keyboard.on_press_key("space", lambda _: on_spacebar())
-        except (ImportError, PermissionError, OSError) as e:
-            print(f"Warning: Could not set up keyboard monitoring: {e}")
-            print("Valve event time monitoring disabled.")
+        keyboard.on_press_key("space", lambda _: on_spacebar())
 
     def _is_ci_environment(self) -> bool:
         """Detect if we're running in a CI environment."""
@@ -319,6 +306,14 @@ class DataRecorder:
 
     def start(self):
         """Start recording data"""
+        # Initialize LabJack in main thread before starting recording thread
+        labjack = self._initialize_labjack()
+
+        # check pressure gauges have unique AIN channels
+        ain_channels = [g.ain_channel for g in self.gauges]
+        if len(ain_channels) != len(set(ain_channels)):
+            raise ValueError("Error: Duplicate AIN channels detected among gauges")
+
         # Record start time for valve event time tracking
         self.start_time = datetime.now()
 
@@ -341,7 +336,8 @@ class DataRecorder:
         self._monitor_keyboard()
 
         self.stop_event.clear()
-        self.thread = threading.Thread(target=self.record_data)
+        # Pass the initialized LabJack to the recording thread
+        self.thread = threading.Thread(target=self.record_data, args=(labjack,))
         self.thread.daemon = True
         self.thread.start()
 
@@ -351,16 +347,16 @@ class DataRecorder:
         if self.thread:
             self.thread.join(timeout=1.0)
 
-        # Clean up keyboard listeners if keyboard module is available
-        if keyboard is not None:
-            try:
-                keyboard.unhook_all()
-            except Exception as e:
-                print(f"Warning: Could not clean up keyboard listeners: {e}")
+        # Clean up keyboard listeners
+        if not self._is_ci_environment():
+            keyboard.unhook_all()
 
-    def record_data(self):
-        """Record data from all gauges passed to recorder"""
-        labjack = self._initialize_labjack()
+    def record_data(self, labjack=None):
+        """Record data from all gauges passed to recorder
+
+        Args:
+            labjack: Pre-initialized LabJack device instance, or None for test mode
+        """
         self._initialize_recording_session()
 
         # Calculate backup parameters once
@@ -394,14 +390,10 @@ class DataRecorder:
         if self.test_mode:
             return None
 
-        try:
-            labjack = u6.U6(firstFound=True)
-            labjack.getCalibrationData()
-            print("LabJack connected")
-            return labjack
-        except Exception as e:
-            print(f"LabJack connection error: {e}")
-            return None
+        labjack = u6.U6(firstFound=True)
+        labjack.getCalibrationData()
+        print("LabJack connected")
+        return labjack
 
     def _initialize_recording_session(self):
         """Initialize recording session parameters."""

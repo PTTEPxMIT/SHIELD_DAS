@@ -143,7 +143,7 @@ class TestMetadata:
             gauges=[self.mock_gauge1],
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=False,  # Test non-test mode too
+            test_mode=True,
         )
 
         recorder.start()
@@ -274,8 +274,3 @@ class TestMetadata:
         assert len(gauges) == 1
         gauge = gauges[0]
         assert "full_scale_torr" not in gauge
-
-
-if __name__ == "__main__":
-    # Run tests if executed directly
-    pytest.main([__file__, "-v"])

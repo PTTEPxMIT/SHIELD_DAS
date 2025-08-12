@@ -423,7 +423,68 @@ class TestDataRecorder:
 
         self.recorder.stop()
 
+    def test_duplicate_ain_channels_raises_value_error(self):
+        """Test that duplicate AIN channels raise ValueError when starting recorder."""
+        # Create two mock gauges with the same AIN channel
+        duplicate_gauge1 = Mock(spec=PressureGauge)
+        duplicate_gauge1.name = "DuplicateGauge1"
+        duplicate_gauge1.ain_channel = 5  # Same AIN channel
+        duplicate_gauge1.gauge_location = "downstream"
+        duplicate_gauge1.voltage_data = [2.0]
+        duplicate_gauge1.record_ain_channel_voltage.return_value = None
 
-if __name__ == "__main__":
-    # Run tests if executed directly
-    pytest.main([__file__, "-v"])
+        duplicate_gauge2 = Mock(spec=PressureGauge)
+        duplicate_gauge2.name = "DuplicateGauge2"
+        duplicate_gauge2.ain_channel = 5  # Same AIN channel as gauge1
+        duplicate_gauge2.gauge_location = "upstream"
+        duplicate_gauge2.voltage_data = [3.0]
+        duplicate_gauge2.record_ain_channel_voltage.return_value = None
+
+        # Create recorder with duplicate AIN channels
+        recorder_with_duplicates = DataRecorder(
+            gauges=[duplicate_gauge1, duplicate_gauge2],
+            thermocouples=[],
+            results_dir=self.temp_dir,
+            test_mode=True,  # Use test mode to avoid LabJack initialization
+        )
+
+        # Starting the recorder should raise ValueError due to duplicate AIN channels
+        with pytest.raises(ValueError) as exc_info:
+            recorder_with_duplicates.start()
+
+        # Verify the error message
+        assert "Duplicate AIN channels detected among gauges" in str(exc_info.value)
+
+    def test_unique_ain_channels_no_error(self):
+        """Test that unique AIN channels don't raise any error."""
+        # Create two mock gauges with different AIN channels
+        unique_gauge1 = Mock(spec=PressureGauge)
+        unique_gauge1.name = "UniqueGauge1"
+        unique_gauge1.ain_channel = 7
+        unique_gauge1.gauge_location = "downstream"
+        unique_gauge1.voltage_data = [2.5]
+        unique_gauge1.record_ain_channel_voltage.return_value = None
+
+        unique_gauge2 = Mock(spec=PressureGauge)
+        unique_gauge2.name = "UniqueGauge2"
+        unique_gauge2.ain_channel = 9
+        unique_gauge2.gauge_location = "upstream"
+        unique_gauge2.voltage_data = [4.2]
+        unique_gauge2.record_ain_channel_voltage.return_value = None
+
+        # Create recorder with unique AIN channels
+        recorder_with_unique = DataRecorder(
+            gauges=[unique_gauge1, unique_gauge2],
+            thermocouples=[],
+            results_dir=self.temp_dir,
+            test_mode=True,
+        )
+
+        # Starting the recorder should not raise any error
+        try:
+            recorder_with_unique.start()
+            # Give it a moment to start
+            time.sleep(0.1)
+            recorder_with_unique.stop()
+        except ValueError:
+            pytest.fail("ValueError should not be raised for unique AIN channels")

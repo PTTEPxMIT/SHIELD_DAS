@@ -152,11 +152,18 @@ class TestValveEvents:
 
             self.recorder.stop()
 
-    def test_keyboard_monitoring_disabled_without_keyboard_module(self):
-        """Test graceful handling when keyboard module is not available."""
-        with patch("shield_das.data_recorder.keyboard", None):
-            # Should not raise an exception
+    @patch("shield_das.data_recorder.keyboard")
+    def test_keyboard_monitoring_with_keyboard_module(self, mock_keyboard):
+        """Test that keyboard monitoring works when keyboard module is available."""
+        # Mock the CI detection to return False (simulate local environment)
+        with patch.object(self.recorder, "_is_ci_environment", return_value=False):
+            # Should not raise an exception and should set up listener
             self.recorder._monitor_keyboard()
+
+            # Verify that keyboard.on_press_key was called
+            mock_keyboard.on_press_key.assert_called_once()
+            call_args = mock_keyboard.on_press_key.call_args
+            assert call_args[0][0] == "space"  # First argument should be "space"
 
     @patch("shield_das.data_recorder.keyboard")
     def test_keyboard_listener_setup(self, mock_keyboard):
@@ -187,8 +194,8 @@ class TestValveEvents:
 
             self.recorder.stop()
 
-            # Verify keyboard cleanup was still called (should be safe)
-            mock_keyboard.unhook_all.assert_called_once()
+            # Verify keyboard cleanup was NOT called in CI environment
+            mock_keyboard.unhook_all.assert_not_called()
 
     def test_valve_event_attributes_in_class(self):
         """Test that all valve event attributes are properly defined in the class."""
