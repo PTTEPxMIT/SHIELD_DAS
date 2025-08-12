@@ -456,9 +456,16 @@ class DataPlotter:
             [
                 html.Tr(
                     [
-                        html.Th("Dataset Name", style={"width": "50%"}),
-                        html.Th("Color", style={"width": "25%"}),
-                        html.Th("Show", style={"width": "25%"}),
+                        html.Th(
+                            "Dataset Name",
+                            style={"width": "50%", "fontWeight": "normal"},
+                        ),
+                        html.Th(
+                            "Color", style={"width": "25%", "fontWeight": "normal"}
+                        ),
+                        html.Th(
+                            "Display", style={"width": "25%", "fontWeight": "normal"}
+                        ),
                     ]
                 )
             ]
@@ -510,7 +517,13 @@ class DataPlotter:
                                 style={"transform": "scale(1.2)"},
                             )
                         ],
-                        style={"textAlign": "center"},
+                        style={
+                            "textAlign": "center",
+                            "verticalAlign": "middle",
+                            "display": "flex",
+                            "justifyContent": "center",
+                            "alignItems": "center",
+                        },
                     ),
                 ]
             )
