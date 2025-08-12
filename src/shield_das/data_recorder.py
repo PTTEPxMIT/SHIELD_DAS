@@ -306,6 +306,9 @@ class DataRecorder:
 
     def start(self):
         """Start recording data"""
+        # Initialize LabJack in main thread before starting recording thread
+        labjack = self._initialize_labjack()
+
         # Record start time for valve event time tracking
         self.start_time = datetime.now()
 
@@ -328,7 +331,8 @@ class DataRecorder:
         self._monitor_keyboard()
 
         self.stop_event.clear()
-        self.thread = threading.Thread(target=self.record_data)
+        # Pass the initialized LabJack to the recording thread
+        self.thread = threading.Thread(target=self.record_data, args=(labjack,))
         self.thread.daemon = True
         self.thread.start()
 
@@ -342,9 +346,12 @@ class DataRecorder:
         if not self._is_ci_environment():
             keyboard.unhook_all()
 
-    def record_data(self):
-        """Record data from all gauges passed to recorder"""
-        labjack = self._initialize_labjack()
+    def record_data(self, labjack=None):
+        """Record data from all gauges passed to recorder
+
+        Args:
+            labjack: Pre-initialized LabJack device instance, or None for test mode
+        """
         self._initialize_recording_session()
 
         # Calculate backup parameters once
@@ -378,14 +385,10 @@ class DataRecorder:
         if self.test_mode:
             return None
 
-        try:
-            labjack = u6.U6(firstFound=True)
-            labjack.getCalibrationData()
-            print("LabJack connected")
-            return labjack
-        except Exception as e:
-            print(f"LabJack connection error: {e}")
-            return None
+        labjack = u6.U6(firstFound=True)
+        labjack.getCalibrationData()
+        print("LabJack connected")
+        return labjack
 
     def _initialize_recording_session(self):
         """Initialize recording session parameters."""
