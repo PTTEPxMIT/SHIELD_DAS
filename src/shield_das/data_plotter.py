@@ -172,6 +172,207 @@ class DataPlotter:
                         ),
                     ]
                 ),
+                # Plot controls section
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader("Plot Controls"),
+                                        dbc.CardBody(
+                                            [
+                                                dbc.Row(
+                                                    [
+                                                        # X-axis controls
+                                                        dbc.Col(
+                                                            [
+                                                                html.H6(
+                                                                    "X-Axis Controls",
+                                                                    className="mb-2",
+                                                                ),
+                                                                dbc.Row(
+                                                                    [
+                                                                        dbc.Col(
+                                                                            [
+                                                                                dbc.Label(
+                                                                                    "Scale:"
+                                                                                ),
+                                                                                dbc.RadioItems(
+                                                                                    id="x-scale",
+                                                                                    options=[
+                                                                                        {
+                                                                                            "label": "Linear",
+                                                                                            "value": "linear",
+                                                                                        },
+                                                                                        {
+                                                                                            "label": "Log",
+                                                                                            "value": "log",
+                                                                                        },
+                                                                                    ],
+                                                                                    value="linear",
+                                                                                    inline=True,
+                                                                                ),
+                                                                            ],
+                                                                            width=12,
+                                                                        ),
+                                                                    ],
+                                                                    className="mb-2",
+                                                                ),
+                                                                dbc.Row(
+                                                                    [
+                                                                        dbc.Col(
+                                                                            [
+                                                                                dbc.Label(
+                                                                                    "X Min:"
+                                                                                ),
+                                                                                dbc.Input(
+                                                                                    id="x-min",
+                                                                                    type="number",
+                                                                                    placeholder="Auto",
+                                                                                    size="sm",
+                                                                                ),
+                                                                            ],
+                                                                            width=6,
+                                                                        ),
+                                                                        dbc.Col(
+                                                                            [
+                                                                                dbc.Label(
+                                                                                    "X Max:"
+                                                                                ),
+                                                                                dbc.Input(
+                                                                                    id="x-max",
+                                                                                    type="number",
+                                                                                    placeholder="Auto",
+                                                                                    size="sm",
+                                                                                ),
+                                                                            ],
+                                                                            width=6,
+                                                                        ),
+                                                                    ]
+                                                                ),
+                                                            ],
+                                                            width=3,
+                                                        ),
+                                                        # Y-axis controls
+                                                        dbc.Col(
+                                                            [
+                                                                html.H6(
+                                                                    "Y-Axis Controls",
+                                                                    className="mb-2",
+                                                                ),
+                                                                dbc.Row(
+                                                                    [
+                                                                        dbc.Col(
+                                                                            [
+                                                                                dbc.Label(
+                                                                                    "Scale:"
+                                                                                ),
+                                                                                dbc.RadioItems(
+                                                                                    id="y-scale",
+                                                                                    options=[
+                                                                                        {
+                                                                                            "label": "Linear",
+                                                                                            "value": "linear",
+                                                                                        },
+                                                                                        {
+                                                                                            "label": "Log",
+                                                                                            "value": "log",
+                                                                                        },
+                                                                                    ],
+                                                                                    value="log",
+                                                                                    inline=True,
+                                                                                ),
+                                                                            ],
+                                                                            width=12,
+                                                                        ),
+                                                                    ],
+                                                                    className="mb-2",
+                                                                ),
+                                                                dbc.Row(
+                                                                    [
+                                                                        dbc.Col(
+                                                                            [
+                                                                                dbc.Label(
+                                                                                    "Y Min:"
+                                                                                ),
+                                                                                dbc.Input(
+                                                                                    id="y-min",
+                                                                                    type="number",
+                                                                                    placeholder="Auto",
+                                                                                    size="sm",
+                                                                                ),
+                                                                            ],
+                                                                            width=6,
+                                                                        ),
+                                                                        dbc.Col(
+                                                                            [
+                                                                                dbc.Label(
+                                                                                    "Y Max:"
+                                                                                ),
+                                                                                dbc.Input(
+                                                                                    id="y-max",
+                                                                                    type="number",
+                                                                                    placeholder="Auto",
+                                                                                    size="sm",
+                                                                                ),
+                                                                            ],
+                                                                            width=6,
+                                                                        ),
+                                                                    ]
+                                                                ),
+                                                            ],
+                                                            width=3,
+                                                        ),
+                                                        # Error bars and other controls
+                                                        dbc.Col(
+                                                            [
+                                                                html.H6(
+                                                                    "Display Options",
+                                                                    className="mb-2",
+                                                                ),
+                                                                dbc.Checklist(
+                                                                    options=[
+                                                                        {
+                                                                            "label": "Show Error Bars (±10%)",
+                                                                            "value": "error_bars",
+                                                                        }
+                                                                    ],
+                                                                    value=[],
+                                                                    id="error-bars-toggle",
+                                                                ),
+                                                            ],
+                                                            width=3,
+                                                        ),
+                                                        # Apply button
+                                                        dbc.Col(
+                                                            [
+                                                                html.H6(
+                                                                    "Actions",
+                                                                    className="mb-2",
+                                                                ),
+                                                                dbc.Button(
+                                                                    "Reset to Auto",
+                                                                    id="reset-settings",
+                                                                    color="secondary",
+                                                                    size="sm",
+                                                                    className="w-100",
+                                                                ),
+                                                            ],
+                                                            width=3,
+                                                        ),
+                                                    ]
+                                                )
+                                            ]
+                                        ),
+                                    ]
+                                ),
+                            ],
+                            width=12,
+                        ),
+                    ],
+                    className="mt-3",
+                ),
             ],
             fluid=True,
         )
@@ -263,14 +464,37 @@ class DataPlotter:
 
             return "", go.Figure(), len(self.datasets)
 
-        # Single callback for the main plot - updates when data changes
+        # Single callback for the main plot - updates automatically when controls change
         @self.app.callback(
             Output("main-plot", "figure"),
-            [Input("datasets-store", "data"), Input("main-plot", "id")],
+            [
+                Input("datasets-store", "data"),
+                Input("main-plot", "id"),
+                Input("x-scale", "value"),
+                Input("y-scale", "value"),
+                Input("x-min", "value"),
+                Input("x-max", "value"),
+                Input("y-min", "value"),
+                Input("y-max", "value"),
+                Input("error-bars-toggle", "value"),
+            ],
         )
-        def update_main_plot(datasets_count, plot_id):
+        def update_main_plot(
+            datasets_count,
+            plot_id,
+            x_scale,
+            y_scale,
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            error_bars,
+        ):
             # Create figure
             fig = go.Figure()
+
+            # Determine if error bars should be shown
+            show_error_bars = error_bars and "error_bars" in error_bars
 
             # Add traces for each dataset
             for i, dataset in enumerate(self.datasets):
@@ -286,17 +510,39 @@ class DataPlotter:
                         time_data = data["RelativeTime"].values
                         pressure_data = data["Pressure (Torr)"].values
 
-                        # Add trace to plot with all data
-                        fig.add_trace(
-                            go.Scatter(
-                                x=time_data,
-                                y=pressure_data,
-                                mode="lines+markers",
-                                name=filename,
-                                line=dict(color=color, width=2),
-                                marker=dict(size=2),
+                        # Calculate error bars (10% of the value)
+                        if show_error_bars:
+                            error_y = pressure_data * 0.1
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=time_data,
+                                    y=pressure_data,
+                                    mode="lines+markers",
+                                    name=filename,
+                                    line=dict(color=color, width=2),
+                                    marker=dict(size=2),
+                                    error_y=dict(
+                                        type="data",
+                                        array=error_y,
+                                        visible=True,
+                                        color=color,
+                                        thickness=1,
+                                        width=2,
+                                    ),
+                                )
                             )
-                        )
+                        else:
+                            # Add trace without error bars
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=time_data,
+                                    y=pressure_data,
+                                    mode="lines+markers",
+                                    name=filename,
+                                    line=dict(color=color, width=2),
+                                    marker=dict(size=2),
+                                )
+                            )
                         print(
                             f"Added trace for {filename} with {len(time_data)} points"
                         )
@@ -306,26 +552,60 @@ class DataPlotter:
                             f"Available: {data.columns.tolist()}"
                         )
 
-            # Set up the plot layout
-            if self.datasets:
-                # If we have data, set y-axis to log scale
-                all_pressure_data = []
-                for dataset in self.datasets:
-                    if not dataset["data"].empty:
-                        pressure_values = dataset["data"]["Pressure (Torr)"].values
-                        all_pressure_data.extend(pressure_values)
-
-                if all_pressure_data and min(all_pressure_data) > 0:
-                    y_min = min(all_pressure_data) * 0.5
-                    y_max = max(all_pressure_data) * 2
-                    fig.update_yaxes(
-                        type="log", range=[math.log10(y_min), math.log10(y_max)]
-                    )
-                else:
-                    fig.update_yaxes(type="log")
+            # Configure axes based on user settings
+            # X-axis configuration
+            if x_scale == "log":
+                fig.update_xaxes(type="log")
+                # Set custom x-axis range if provided
+                if x_min is not None or x_max is not None:
+                    if (
+                        x_min is not None
+                        and x_max is not None
+                        and x_min > 0
+                        and x_max > 0
+                    ):
+                        fig.update_xaxes(range=[math.log10(x_min), math.log10(x_max)])
             else:
-                # Empty plot - just set log scale
+                fig.update_xaxes(type="linear")
+                # For linear scale, use defaults or custom values
+                range_min = x_min if x_min is not None else 0
+                range_max = x_max
+                if range_min is not None or range_max is not None:
+                    fig.update_xaxes(range=[range_min, range_max])
+
+            # Y-axis configuration
+            if y_scale == "log":
                 fig.update_yaxes(type="log")
+                # Set custom y-axis range if provided
+                if y_min is not None or y_max is not None:
+                    if (
+                        y_min is not None
+                        and y_max is not None
+                        and y_min > 0
+                        and y_max > 0
+                    ):
+                        fig.update_yaxes(range=[math.log10(y_min), math.log10(y_max)])
+                elif self.datasets:
+                    # Auto-scale based on data for log scale
+                    all_pressure_data = []
+                    for dataset in self.datasets:
+                        if not dataset["data"].empty:
+                            pressure_values = dataset["data"]["Pressure (Torr)"].values
+                            all_pressure_data.extend(pressure_values)
+
+                    if all_pressure_data and min(all_pressure_data) > 0:
+                        auto_y_min = min(all_pressure_data) * 0.5
+                        auto_y_max = max(all_pressure_data) * 2
+                        fig.update_yaxes(
+                            range=[math.log10(auto_y_min), math.log10(auto_y_max)]
+                        )
+            else:
+                fig.update_yaxes(type="linear")
+                # For linear scale, use defaults or custom values
+                range_min = y_min if y_min is not None else 0
+                range_max = y_max
+                if range_min is not None or range_max is not None:
+                    fig.update_yaxes(range=[range_min, range_max])
 
             # Update layout for the plot
             fig.update_layout(
@@ -341,6 +621,58 @@ class DataPlotter:
             )
 
             return fig
+
+        # Callback to reset plot settings
+        @self.app.callback(
+            [
+                Output("x-scale", "value"),
+                Output("y-scale", "value"),
+                Output("x-min", "value"),
+                Output("x-max", "value"),
+                Output("y-min", "value"),
+                Output("y-max", "value"),
+                Output("error-bars-toggle", "value"),
+            ],
+            [Input("reset-settings", "n_clicks")],
+            prevent_initial_call=True,
+        )
+        def reset_plot_settings(n_clicks):
+            if n_clicks:
+                return "linear", "log", None, None, None, None, []
+            return "linear", "log", None, None, None, None, []
+
+        # Callback to set default min values when switching to linear scale
+        @self.app.callback(
+            [
+                Output("x-min", "value", allow_duplicate=True),
+                Output("y-min", "value", allow_duplicate=True),
+            ],
+            [
+                Input("x-scale", "value"),
+                Input("y-scale", "value"),
+            ],
+            [
+                State("x-min", "value"),
+                State("y-min", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def update_default_mins(x_scale, y_scale, current_x_min, current_y_min):
+            # Set x-min to 0 when switching to linear (if currently None)
+            new_x_min = current_x_min
+            if x_scale == "linear" and current_x_min is None:
+                new_x_min = 0
+            elif x_scale == "log" and current_x_min == 0:
+                new_x_min = None
+
+            # Set y-min to 0 when switching to linear (if currently None)
+            new_y_min = current_y_min
+            if y_scale == "linear" and current_y_min is None:
+                new_y_min = 0
+            elif y_scale == "log" and current_y_min == 0:
+                new_y_min = None
+
+            return new_x_min, new_y_min
 
     def convert_timestamps_to_seconds(self, timestamp_strings):
         """Convert string timestamps to seconds since first timestamp"""
