@@ -153,6 +153,7 @@ class DataRecorder:
     def _create_metadata_file(self):
         """Create a JSON metadata file with run information."""
         metadata = {
+            "version": "1.0.0",
             "run_info": {
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -163,6 +164,7 @@ class DataRecorder:
             "gauges": [
                 {
                     "name": gauge.name,
+                    "type": type(gauge).__name__,
                     "ain_channel": gauge.ain_channel,
                     "gauge_location": gauge.gauge_location,
                 }
@@ -178,11 +180,6 @@ class DataRecorder:
                 }
                 for i, thermocouple in enumerate(self.thermocouples)
             ],
-            "system_info": {
-                "results_directory": self.results_dir,
-                "run_directory": os.path.basename(self.run_dir),
-                "backup_directory": os.path.basename(self.backup_dir),
-            },
         }
 
         metadata_path = os.path.join(self.run_dir, "run_metadata.json")
