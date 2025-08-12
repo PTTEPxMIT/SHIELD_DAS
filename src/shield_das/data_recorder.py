@@ -4,7 +4,6 @@ import threading
 import time
 from datetime import datetime
 
-import numpy as np
 import pandas as pd
 import u6
 
@@ -164,76 +163,112 @@ class DataRecorder:
         """Stop recording data"""
         self.stop_event.set()
         if self.thread:
-            self.thread.join(timeout=2.0)
+            self.thread.join(timeout=1.0)
 
     def record_data(self):
         """Record data from all gauges passed to recorder"""
+        labjack = self._initialize_labjack()
+        self._initialize_recording_session()
 
-        # If test mode, do not connect to LabJack
+        # Calculate backup parameters once
+        backup_frequency = int(self.backup_interval / self.recording_interval)
+
+        # Data buffers
+        data_buffer = []
+        measurement_count = 0
+        backup_count = 1
+
+        while not self.stop_event.is_set():
+            timestamp = self._get_current_timestamp()
+            data_row = self._collect_measurement_data(labjack, timestamp)
+            data_buffer.append(data_row)
+            measurement_count += 1
+
+            # Write individual measurement to main CSV
+            self._write_single_measurement(data_row, is_first=(measurement_count == 1))
+
+            # Handle backup if needed
+            if measurement_count % backup_frequency == 0:
+                self._write_backup_data(data_buffer[-backup_frequency:], backup_count)
+                backup_count += 1
+
+            # Control timing
+            time.sleep(self.recording_interval)
+            self.elapsed_time += self.recording_interval
+
+    def _initialize_labjack(self):
+        """Initialize LabJack connection for data recording."""
         if self.test_mode:
-            labjack = None
-        else:
-            try:
-                labjack = u6.U6(firstFound=True)
-                labjack.getCalibrationData()
-                print("LabJack connected")
-            except Exception as e:
-                print(f"LabJack connection error: {e}")
+            return None
 
-        # Start with elapsed time of 0 and record start time
+        try:
+            labjack = u6.U6(firstFound=True)
+            labjack.getCalibrationData()
+            print("LabJack connected")
+            return labjack
+        except Exception as e:
+            print(f"LabJack connection error: {e}")
+            return None
+
+    def _initialize_recording_session(self):
+        """Initialize recording session parameters."""
         self.elapsed_time = 0.0
         self.start_time = datetime.now()
         print(f"Recording started at {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-        time_stamp_data = []
+    def _get_current_timestamp(self) -> str:
+        """Get formatted timestamp for current measurement."""
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
-        # Main data collection loop
-        n = 0
-        m = 1
-        while not self.stop_event.is_set():
-            # Get real timestamp for this measurement
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            time_stamp_data.append(timestamp)
+    def _collect_measurement_data(self, labjack, timestamp: str) -> dict:
+        """Collect data from all gauges for a single measurement.
 
-            # Collect voltages from all gauges
-            for gauge in self.gauges:
-                gauge.record_ain_channel_voltage(labjack=labjack)
+        Args:
+            labjack: LabJack device instance
+            timestamp: Formatted timestamp string
 
-            # Prepare data row for CSV
-            pressure_gauge_data_row = {
-                "RealTimestamp": timestamp,
-                **{f"{g.name}_Voltage (V)": g.voltage_data[-1] for g in self.gauges},
-            }
+        Returns:
+            Dictionary containing measurement data
+        """
+        # Collect voltages from all gauges
+        for gauge in self.gauges:
+            gauge.record_ain_channel_voltage(labjack=labjack)
 
-            # Append to main CSV file
-            pd.DataFrame([pressure_gauge_data_row]).to_csv(
-                f"{self.run_dir}/pressure_gauge_data.csv",
-                mode="a",
-                header=(n == 0),
-                index=False,
-            )
+        # Prepare data row for CSV
+        return {
+            "RealTimestamp": timestamp,
+            **{f"{g.name}_Voltage (V)": g.voltage_data[-1] for g in self.gauges},
+        }
 
-            n += 1
+    def _write_single_measurement(self, data_row: dict, is_first: bool):
+        """Write a single measurement to the main CSV file.
 
-            # write backup data every index_for_backup iterations
-            index_for_backup = int(self.backup_interval / self.recording_interval)
-            if n % index_for_backup == 0:
-                backup_pressure_gauge_data = {
-                    "RealTimestamp": time_stamp_data[-index_for_backup:],
-                    **{
-                        f"{g.name}_Voltage (V)": g.voltage_data[-index_for_backup:]
-                        for g in self.gauges
-                    },
-                }
-                pd.DataFrame(backup_pressure_gauge_data).to_csv(
-                    f"{self.backup_dir}/pressure_gauge_backup_data_{m}.csv",
-                    index=False,
-                )
-                m += 1
+        Args:
+            data_row: Dictionary containing measurement data
+            is_first: Whether this is the first measurement (determines header)
+        """
+        csv_path = os.path.join(self.run_dir, "pressure_gauge_data.csv")
+        pd.DataFrame([data_row]).to_csv(
+            csv_path,
+            mode="a",
+            header=is_first,
+            index=False,
+        )
 
-            # Sleep and increment time
-            time.sleep(self.recording_interval)
-            self.elapsed_time += self.recording_interval
+    def _write_backup_data(self, recent_data: list[dict], backup_number: int):
+        """Write backup data to a separate CSV file.
+
+        Args:
+            recent_data: List of recent measurement dictionaries
+            backup_number: Sequential backup file number
+        """
+        if not recent_data:
+            return
+
+        backup_path = os.path.join(
+            self.backup_dir, f"pressure_gauge_backup_data_{backup_number}.csv"
+        )
+        pd.DataFrame(recent_data).to_csv(backup_path, index=False)
 
     def run(self):
         """Start the recorder and keep it running"""
