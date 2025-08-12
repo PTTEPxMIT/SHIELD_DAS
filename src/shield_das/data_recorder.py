@@ -77,50 +77,76 @@ class DataRecorder:
         self.thread = None
 
     def _create_results_directory(self):
-        """Creates a new directory for results based on date and run number and if
-        test_mode is enabled, it will not create directories."""
-
+        """Creates a new directory for results based on date and run number."""
         # Create main results directory
         os.makedirs(self.results_dir, exist_ok=True)
 
         # Get current date and time
         now = datetime.now()
         current_date = now.strftime("%m.%d")
-        current_time = now.strftime("%Hh%M")  # Format as HHhMM
+        current_time = now.strftime("%Hh%M")
 
         # Create date directory
         date_dir = os.path.join(self.results_dir, current_date)
         os.makedirs(date_dir, exist_ok=True)
 
-        # Use test_run for test mode, otherwise increment run number
+        # Determine directory type and message based on test mode
         if self.test_mode:
-            # Include time in test run directory
-            run_dir = os.path.join(date_dir, f"test_run_{current_time}")
-            # Remove existing directory if it exists
-            if os.path.exists(run_dir):
-                import shutil
-
-                shutil.rmtree(run_dir)
-            os.makedirs(run_dir)
-            print(f"Created test results directory: {run_dir}")
+            prefix = "test_run"
+            message = "Created test results directory"
         else:
-            # Find highest run number
-            run_dirs = glob.glob(os.path.join(date_dir, "run_*"))
-            run_numbers = [
-                int(os.path.basename(d).split("_")[1])  # Extract just the number part
-                for d in run_dirs
-                if os.path.basename(d).split("_")[1].isdigit()
-            ]
+            prefix = "run"
+            message = "Created results directory"
 
-            # Set next run number
-            next_run = 1 if not run_numbers else max(run_numbers) + 1
+        return self._create_numbered_directory(date_dir, prefix, current_time, message)
 
-            # Create run directory with time included
-            run_dir = os.path.join(date_dir, f"run_{next_run}_{current_time}")
-            os.makedirs(run_dir)
-            print(f"Created results directory: {run_dir}")
+    def _create_numbered_directory(
+        self, parent_dir: str, prefix: str, timestamp: str, success_message: str
+    ) -> str:
+        """Create a numbered directory with the given prefix and timestamp.
 
-        return run_dir
+        Args:
+            parent_dir: Parent directory where the new directory will be created
+            prefix: Directory prefix ('run' or 'test_run')
+            timestamp: Timestamp to append to directory name
+            success_message: Message to print on successful creation
+
+        Returns:
+            Path to the created directory
+        """
+        next_number = self._get_next_directory_number(parent_dir, prefix)
+        dir_path = os.path.join(parent_dir, f"{prefix}_{next_number}_{timestamp}")
+
+        os.makedirs(dir_path)
+        print(f"{success_message}: {dir_path}")
+        return dir_path
+
+    def _get_next_directory_number(self, parent_dir: str, prefix: str) -> int:
+        """Find the next available directory number for the given prefix.
+
+        Args:
+            parent_dir: The parent directory to search in
+            prefix: Directory prefix ('run' or 'test_run')
+
+        Returns:
+            Next available number for the directory
+        """
+        pattern = os.path.join(parent_dir, f"{prefix}_*")
+        dirs = glob.glob(pattern)
+        numbers = []
+
+        for dir_path in dirs:
+            basename = os.path.basename(dir_path)
+            parts = basename.split("_")
+
+            # For 'run_X_time' format, number is at index 1
+            # For 'test_run_X_time' format, number is at index 2
+            number_index = 2 if prefix == "test_run" else 1
+
+            if len(parts) > number_index and parts[number_index].isdigit():
+                numbers.append(int(parts[number_index]))
+
+        return 1 if not numbers else max(numbers) + 1
 
     def start(self):
         """Start recording data"""
