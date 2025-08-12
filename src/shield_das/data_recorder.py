@@ -1,4 +1,5 @@
 import glob
+import json
 import os
 import threading
 import time
@@ -149,12 +150,57 @@ class DataRecorder:
 
         return 1 if not numbers else max(numbers) + 1
 
+    def _create_metadata_file(self):
+        """Create a JSON metadata file with run information."""
+        metadata = {
+            "run_info": {
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "test_mode": self.test_mode,
+                "recording_interval_seconds": self.recording_interval,
+                "backup_interval_seconds": self.backup_interval,
+            },
+            "gauges": [
+                {
+                    "name": gauge.name,
+                    "ain_channel": gauge.ain_channel,
+                    "gauge_location": gauge.gauge_location,
+                }
+                for gauge in self.gauges
+            ],
+            "thermocouples": [
+                {
+                    "name": (
+                        thermocouple.name
+                        if hasattr(thermocouple, "name")
+                        else f"Thermocouple_{i}"
+                    )
+                }
+                for i, thermocouple in enumerate(self.thermocouples)
+            ],
+            "system_info": {
+                "results_directory": self.results_dir,
+                "run_directory": os.path.basename(self.run_dir),
+                "backup_directory": os.path.basename(self.backup_dir),
+            },
+        }
+
+        metadata_path = os.path.join(self.run_dir, "run_metadata.json")
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        print(f"Created metadata file: {metadata_path}")
+        return metadata_path
+
     def start(self):
         """Start recording data"""
         # Create directories and setup files only when recording starts
         self.run_dir = self._create_results_directory()
         self.backup_dir = os.path.join(self.run_dir, "backup")
         os.makedirs(self.backup_dir, exist_ok=True)
+
+        # Create metadata file with run information
+        self._create_metadata_file()
 
         self.stop_event.clear()
         self.thread = threading.Thread(target=self.record_data)
