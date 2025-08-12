@@ -1,6 +1,5 @@
 import base64
 import io
-import math
 import threading
 import webbrowser
 
@@ -8,7 +7,7 @@ import dash
 import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.graph_objects as go
-from dash import dcc, html, ALL, MATCH
+from dash import ALL, MATCH, dcc, html
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 
