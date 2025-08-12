@@ -167,6 +167,11 @@ class DataRecorder:
                     "type": type(gauge).__name__,
                     "ain_channel": gauge.ain_channel,
                     "gauge_location": gauge.gauge_location,
+                    **(
+                        {"full_scale_torr": gauge.full_scale_Torr}
+                        if type(gauge).__name__ == "Baratron626D_Gauge"
+                        else {}
+                    ),
                 }
                 for gauge in self.gauges
             ],
