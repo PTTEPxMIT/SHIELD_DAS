@@ -4,7 +4,7 @@ import shutil
 import tempfile
 import threading
 import time
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 

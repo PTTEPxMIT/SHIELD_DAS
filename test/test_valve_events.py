@@ -160,18 +160,35 @@ class TestValveEvents:
 
     @patch("shield_das.data_recorder.keyboard")
     def test_keyboard_listener_setup(self, mock_keyboard):
-        """Test that keyboard listener is properly set up."""
-        self.recorder.start()
+        """Test that keyboard listener is properly set up when not in CI."""
+        # Mock the CI detection to return False (simulate local environment)
+        with patch.object(self.recorder, "_is_ci_environment", return_value=False):
+            self.recorder.start()
 
-        # Verify that keyboard.on_press_key was called
-        mock_keyboard.on_press_key.assert_called_once()
-        call_args = mock_keyboard.on_press_key.call_args
-        assert call_args[0][0] == "space"  # First argument should be "space"
+            # Verify that keyboard.on_press_key was called
+            mock_keyboard.on_press_key.assert_called_once()
+            call_args = mock_keyboard.on_press_key.call_args
+            assert call_args[0][0] == "space"  # First argument should be "space"
 
-        self.recorder.stop()
+            self.recorder.stop()
 
-        # Verify keyboard cleanup
-        mock_keyboard.unhook_all.assert_called_once()
+            # Verify keyboard cleanup
+            mock_keyboard.unhook_all.assert_called_once()
+
+    @patch("shield_das.data_recorder.keyboard")
+    def test_keyboard_listener_disabled_in_ci(self, mock_keyboard):
+        """Test that keyboard listener is disabled in CI environment."""
+        # Mock the CI detection to return True (simulate CI environment)
+        with patch.object(self.recorder, "_is_ci_environment", return_value=True):
+            self.recorder.start()
+
+            # Verify that keyboard.on_press_key was NOT called
+            mock_keyboard.on_press_key.assert_not_called()
+
+            self.recorder.stop()
+
+            # Verify keyboard cleanup was still called (should be safe)
+            mock_keyboard.unhook_all.assert_called_once()
 
     def test_valve_event_attributes_in_class(self):
         """Test that all valve event attributes are properly defined in the class."""

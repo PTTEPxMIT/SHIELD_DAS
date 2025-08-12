@@ -235,6 +235,12 @@ class DataRecorder:
             )
             return
 
+        # Detect if we're in a CI environment (not local test mode)
+        is_ci = self._is_ci_environment()
+        if is_ci:
+            print("CI environment detected. Keyboard monitoring disabled.")
+            return
+
         current_event = self.valve_event_sequence[self.current_valve_index]
         print(f"Press SPACEBAR to record {current_event}...")
 
@@ -260,7 +266,29 @@ class DataRecorder:
                     print("All valve events recorded!")
 
         # Set up keyboard listener for spacebar
-        keyboard.on_press_key("space", lambda _: on_spacebar())
+        try:
+            keyboard.on_press_key("space", lambda _: on_spacebar())
+        except (ImportError, PermissionError, OSError) as e:
+            print(f"Warning: Could not set up keyboard monitoring: {e}")
+            print("Valve event time monitoring disabled.")
+
+    def _is_ci_environment(self) -> bool:
+        """Detect if we're running in a CI environment."""
+        import os
+
+        # Common CI environment variables
+        ci_indicators = [
+            "CI",  # GitHub Actions, GitLab CI, etc.
+            "GITHUB_ACTIONS",
+            "GITLAB_CI",
+            "TRAVIS",
+            "CIRCLECI",
+            "JENKINS_URL",
+            "BUILDKITE",
+            "TF_BUILD",  # Azure DevOps
+        ]
+
+        return any(os.getenv(var) for var in ci_indicators)
 
     def _update_metadata_with_valve_time(self, event_name: str, timestamp: str):
         """Update the metadata file with the valve event time.
@@ -318,9 +346,12 @@ class DataRecorder:
         if self.thread:
             self.thread.join(timeout=1.0)
 
-        # Clean up keyboard listeners
+        # Clean up keyboard listeners if keyboard module is available
         if keyboard is not None:
-            keyboard.unhook_all()
+            try:
+                keyboard.unhook_all()
+            except Exception as e:
+                print(f"Warning: Could not clean up keyboard listeners: {e}")
 
     def record_data(self):
         """Record data from all gauges passed to recorder"""

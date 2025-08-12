@@ -2,7 +2,6 @@ import os
 from datetime import datetime
 
 import numpy as np
-import u6
 
 
 class Thermocouple:
@@ -39,7 +38,7 @@ class Thermocouple:
 
     def get_temperature(
         self,
-        labjack: u6.U6,
+        labjack,  # Remove type hint to avoid import issues
         timestamp: float,
         ain_channel: int = 0,
         gain_index: int = 3,
