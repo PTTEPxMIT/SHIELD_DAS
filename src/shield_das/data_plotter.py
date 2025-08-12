@@ -22,7 +22,13 @@ class DataPlotter:
         """
 
         self.port = port
-        self.app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+        self.app = dash.Dash(
+            __name__,
+            external_stylesheets=[
+                dbc.themes.BOOTSTRAP,
+                "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
+            ],
+        )
         self.app_running = False
         self.server_thread = None
 
@@ -179,191 +185,229 @@ class DataPlotter:
                             [
                                 dbc.Card(
                                     [
-                                        dbc.CardHeader("Plot Controls"),
-                                        dbc.CardBody(
-                                            [
-                                                dbc.Row(
-                                                    [
-                                                        # X-axis controls
-                                                        dbc.Col(
-                                                            [
-                                                                html.H6(
-                                                                    "X-Axis Controls",
-                                                                    className="mb-2",
-                                                                ),
-                                                                dbc.Row(
-                                                                    [
-                                                                        dbc.Col(
-                                                                            [
-                                                                                dbc.Label(
-                                                                                    "Scale:"
-                                                                                ),
-                                                                                dbc.RadioItems(
-                                                                                    id="x-scale",
-                                                                                    options=[
-                                                                                        {
-                                                                                            "label": "Linear",
-                                                                                            "value": "linear",
-                                                                                        },
-                                                                                        {
-                                                                                            "label": "Log",
-                                                                                            "value": "log",
-                                                                                        },
-                                                                                    ],
-                                                                                    value="linear",
-                                                                                    inline=True,
-                                                                                ),
-                                                                            ],
-                                                                            width=12,
-                                                                        ),
-                                                                    ],
-                                                                    className="mb-2",
-                                                                ),
-                                                                dbc.Row(
-                                                                    [
-                                                                        dbc.Col(
-                                                                            [
-                                                                                dbc.Label(
-                                                                                    "X Min:"
-                                                                                ),
-                                                                                dbc.Input(
-                                                                                    id="x-min",
-                                                                                    type="number",
-                                                                                    placeholder="Auto",
-                                                                                    size="sm",
-                                                                                ),
-                                                                            ],
-                                                                            width=6,
-                                                                        ),
-                                                                        dbc.Col(
-                                                                            [
-                                                                                dbc.Label(
-                                                                                    "X Max:"
-                                                                                ),
-                                                                                dbc.Input(
-                                                                                    id="x-max",
-                                                                                    type="number",
-                                                                                    placeholder="Auto",
-                                                                                    size="sm",
-                                                                                ),
-                                                                            ],
-                                                                            width=6,
-                                                                        ),
-                                                                    ]
-                                                                ),
-                                                            ],
-                                                            width=3,
+                                        dbc.CardHeader(
+                                            dbc.Row(
+                                                [
+                                                    dbc.Col(
+                                                        "Plot Controls",
+                                                        className="d-flex align-items-center",
+                                                    ),
+                                                    dbc.Col(
+                                                        dbc.Button(
+                                                            html.I(
+                                                                className="fas fa-chevron-up"
+                                                            ),
+                                                            id="collapse-controls-button",
+                                                            color="light",
+                                                            size="sm",
+                                                            className="ms-auto",
+                                                            style={
+                                                                "border": "1px solid #dee2e6",
+                                                                "background-color": "#f8f9fa",
+                                                                "box-shadow": "0 1px 3px rgba(0,0,0,0.1)",
+                                                                "width": "30px",
+                                                                "height": "30px",
+                                                                "padding": "0",
+                                                                "display": "flex",
+                                                                "align-items": "center",
+                                                                "justify-content": "center",
+                                                            },
                                                         ),
-                                                        # Y-axis controls
-                                                        dbc.Col(
-                                                            [
-                                                                html.H6(
-                                                                    "Y-Axis Controls",
-                                                                    className="mb-2",
-                                                                ),
-                                                                dbc.Row(
-                                                                    [
-                                                                        dbc.Col(
-                                                                            [
-                                                                                dbc.Label(
-                                                                                    "Scale:"
-                                                                                ),
-                                                                                dbc.RadioItems(
-                                                                                    id="y-scale",
-                                                                                    options=[
-                                                                                        {
-                                                                                            "label": "Linear",
-                                                                                            "value": "linear",
-                                                                                        },
-                                                                                        {
-                                                                                            "label": "Log",
-                                                                                            "value": "log",
-                                                                                        },
-                                                                                    ],
-                                                                                    value="log",
-                                                                                    inline=True,
-                                                                                ),
-                                                                            ],
-                                                                            width=12,
-                                                                        ),
-                                                                    ],
-                                                                    className="mb-2",
-                                                                ),
-                                                                dbc.Row(
-                                                                    [
-                                                                        dbc.Col(
-                                                                            [
-                                                                                dbc.Label(
-                                                                                    "Y Min:"
-                                                                                ),
-                                                                                dbc.Input(
-                                                                                    id="y-min",
-                                                                                    type="number",
-                                                                                    placeholder="Auto",
-                                                                                    size="sm",
-                                                                                ),
-                                                                            ],
-                                                                            width=6,
-                                                                        ),
-                                                                        dbc.Col(
-                                                                            [
-                                                                                dbc.Label(
-                                                                                    "Y Max:"
-                                                                                ),
-                                                                                dbc.Input(
-                                                                                    id="y-max",
-                                                                                    type="number",
-                                                                                    placeholder="Auto",
-                                                                                    size="sm",
-                                                                                ),
-                                                                            ],
-                                                                            width=6,
-                                                                        ),
-                                                                    ]
-                                                                ),
-                                                            ],
-                                                            width=3,
-                                                        ),
-                                                        # Error bars and other controls
-                                                        dbc.Col(
-                                                            [
-                                                                html.H6(
-                                                                    "Display Options",
-                                                                    className="mb-2",
-                                                                ),
-                                                                dbc.Checklist(
-                                                                    options=[
-                                                                        {
-                                                                            "label": "Show Error Bars (±10%)",
-                                                                            "value": "error_bars",
-                                                                        }
-                                                                    ],
-                                                                    value=[],
-                                                                    id="error-bars-toggle",
-                                                                ),
-                                                            ],
-                                                            width=3,
-                                                        ),
-                                                        # Apply button
-                                                        dbc.Col(
-                                                            [
-                                                                html.H6(
-                                                                    "Actions",
-                                                                    className="mb-2",
-                                                                ),
-                                                                dbc.Button(
-                                                                    "Reset to Auto",
-                                                                    id="reset-settings",
-                                                                    color="secondary",
-                                                                    size="sm",
-                                                                    className="w-100",
-                                                                ),
-                                                            ],
-                                                            width=3,
-                                                        ),
-                                                    ]
-                                                )
-                                            ]
+                                                        width="auto",
+                                                        className="d-flex justify-content-end",
+                                                    ),
+                                                ],
+                                                className="g-0 align-items-center",
+                                            )
+                                        ),
+                                        dbc.Collapse(
+                                            dbc.CardBody(
+                                                [
+                                                    dbc.Row(
+                                                        [
+                                                            # X-axis controls
+                                                            dbc.Col(
+                                                                [
+                                                                    html.H6(
+                                                                        "X-Axis Controls",
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Scale:"
+                                                                                    ),
+                                                                                    dbc.RadioItems(
+                                                                                        id="x-scale",
+                                                                                        options=[
+                                                                                            {
+                                                                                                "label": "Linear",
+                                                                                                "value": "linear",
+                                                                                            },
+                                                                                            {
+                                                                                                "label": "Log",
+                                                                                                "value": "log",
+                                                                                            },
+                                                                                        ],
+                                                                                        value="linear",
+                                                                                        inline=True,
+                                                                                    ),
+                                                                                ],
+                                                                                width=12,
+                                                                            ),
+                                                                        ],
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "X Min:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="x-min",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "X Max:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="x-max",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                        ]
+                                                                    ),
+                                                                ],
+                                                                width=3,
+                                                            ),
+                                                            # Y-axis controls
+                                                            dbc.Col(
+                                                                [
+                                                                    html.H6(
+                                                                        "Y-Axis Controls",
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Scale:"
+                                                                                    ),
+                                                                                    dbc.RadioItems(
+                                                                                        id="y-scale",
+                                                                                        options=[
+                                                                                            {
+                                                                                                "label": "Linear",
+                                                                                                "value": "linear",
+                                                                                            },
+                                                                                            {
+                                                                                                "label": "Log",
+                                                                                                "value": "log",
+                                                                                            },
+                                                                                        ],
+                                                                                        value="log",
+                                                                                        inline=True,
+                                                                                    ),
+                                                                                ],
+                                                                                width=12,
+                                                                            ),
+                                                                        ],
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Y Min:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="y-min",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Y Max:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="y-max",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                        ]
+                                                                    ),
+                                                                ],
+                                                                width=3,
+                                                            ),
+                                                            # Error bars and other controls
+                                                            dbc.Col(
+                                                                [
+                                                                    html.H6(
+                                                                        "Display Options",
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Checklist(
+                                                                        options=[
+                                                                            {
+                                                                                "label": "Show Error Bars (±10%)",
+                                                                                "value": "error_bars",
+                                                                            }
+                                                                        ],
+                                                                        value=[],
+                                                                        id="error-bars-toggle",
+                                                                    ),
+                                                                ],
+                                                                width=3,
+                                                            ),
+                                                            # Apply button
+                                                            dbc.Col(
+                                                                [
+                                                                    html.H6(
+                                                                        "Actions",
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Button(
+                                                                        "Reset to Auto",
+                                                                        id="reset-settings",
+                                                                        color="secondary",
+                                                                        size="sm",
+                                                                        className="w-100",
+                                                                    ),
+                                                                ],
+                                                                width=3,
+                                                            ),
+                                                        ]
+                                                    )
+                                                ]
+                                            ),
+                                            id="collapse-controls",
+                                            is_open=True,
                                         ),
                                     ]
                                 ),
@@ -673,6 +717,27 @@ class DataPlotter:
                 new_y_min = None
 
             return new_x_min, new_y_min
+
+        # Callback to handle collapse/expand of plot controls
+        @self.app.callback(
+            [
+                Output("collapse-controls", "is_open"),
+                Output("collapse-controls-button", "children"),
+            ],
+            [Input("collapse-controls-button", "n_clicks")],
+            [State("collapse-controls", "is_open")],
+            prevent_initial_call=True,
+        )
+        def toggle_controls_collapse(n_clicks, is_open):
+            if n_clicks:
+                new_state = not is_open
+                # Change icon based on state
+                if new_state:
+                    icon = html.I(className="fas fa-chevron-down")
+                else:
+                    icon = html.I(className="fas fa-chevron-up")
+                return new_state, icon
+            return is_open, html.I(className="fas fa-chevron-up")
 
     def convert_timestamps_to_seconds(self, timestamp_strings):
         """Convert string timestamps to seconds since first timestamp"""
