@@ -309,6 +309,11 @@ class DataRecorder:
         # Initialize LabJack in main thread before starting recording thread
         labjack = self._initialize_labjack()
 
+        # check pressure gauges have unique AIN channels
+        ain_channels = [g.ain_channel for g in self.gauges]
+        if len(ain_channels) != len(set(ain_channels)):
+            raise ValueError("Error: Duplicate AIN channels detected among gauges")
+
         # Record start time for valve event time tracking
         self.start_time = datetime.now()
 
