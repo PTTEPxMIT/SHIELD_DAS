@@ -75,6 +75,8 @@ class DataRecorder:
         self.stop_event = threading.Event()
         self.thread = None
 
+        self.elapsed_time = 0.0
+
     def _create_results_directory(self):
         """Creates a new directory for results based on date and run number."""
         # Create main results directory

@@ -9,7 +9,8 @@ def test_backup_segments_created(tmp_path):
     # Setup fast recorder with backup enabled and very short interval
     gauge = Mock(spec=PressureGauge)
     gauge.name = "G1"
-    gauge.get_ain_channel_voltage.return_value = 1.23
+    gauge.voltage_data = [1.23]
+    gauge.record_ain_channel_voltage.return_value = None
 
     rec = DataRecorder(
         gauges=[gauge],
@@ -17,8 +18,7 @@ def test_backup_segments_created(tmp_path):
         results_dir=str(tmp_path),
         test_mode=True,
         recording_interval=0.05,
-        backup_enabled=True,
-        backup_interval_sec=0.1,
+        backup_interval=0.1,
     )
 
     rec.start()
@@ -46,7 +46,8 @@ def test_backup_segments_created(tmp_path):
 def test_backup_rotation(tmp_path):
     gauge = Mock(spec=PressureGauge)
     gauge.name = "G1"
-    gauge.get_ain_channel_voltage.return_value = 2.34
+    gauge.voltage_data = [2.34]
+    gauge.record_ain_channel_voltage.return_value = None
 
     rec = DataRecorder(
         gauges=[gauge],
@@ -54,8 +55,7 @@ def test_backup_rotation(tmp_path):
         results_dir=str(tmp_path),
         test_mode=True,
         recording_interval=0.02,
-        backup_enabled=True,
-        backup_interval_sec=0.06,
+        backup_interval=0.06,
     )
 
     rec.start()
