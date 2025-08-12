@@ -70,10 +70,14 @@ class TestMetadata:
             metadata = json.load(f)
 
         # Verify expected top-level keys
+        assert "version" in metadata
         assert "run_info" in metadata
         assert "gauges" in metadata
         assert "thermocouples" in metadata
-        assert "system_info" in metadata
+
+        # Verify version is present and correctly formatted
+        assert isinstance(metadata["version"], str)
+        assert "." in metadata["version"]  # Should be in format like "1.0.0"
 
     def test_metadata_run_info_content(self):
         """Test that run_info section contains correct data."""
@@ -133,8 +137,8 @@ class TestMetadata:
         assert gauges[1]["ain_channel"] == 8
         assert gauges[1]["gauge_location"] == "upstream"
 
-    def test_metadata_system_info(self):
-        """Test that system_info section contains correct data."""
+    def test_metadata_version_info(self):
+        """Test that version information is correctly included."""
         recorder = DataRecorder(
             gauges=[self.mock_gauge1],
             thermocouples=[],
@@ -150,12 +154,12 @@ class TestMetadata:
         with open(metadata_path) as f:
             metadata = json.load(f)
 
-        # Check system_info
-        system_info = metadata["system_info"]
-        assert "results_directory" in system_info
-        assert "run_directory" in system_info
-        assert "backup_directory" in system_info
-        assert system_info["results_directory"] == self.temp_dir
+        # Check version info
+        assert "version" in metadata
+        version = metadata["version"]
+        assert isinstance(version, str)
+        assert len(version.split(".")) == 3  # Should be semantic versioning (x.y.z)
+        assert version == "1.0.0"  # Current expected version
 
     def test_metadata_with_thermocouples(self):
         """Test metadata creation when thermocouples are present."""
@@ -208,6 +212,68 @@ class TestMetadata:
         # Check that it's properly indented (contains newlines and spaces)
         assert "\n" in content
         assert "  " in content  # Should have indentation
+
+    def test_metadata_baratron_full_scale_torr(self):
+        """Test that Baratron626D_Gauge includes full_scale_torr in metadata."""
+        from unittest.mock import Mock
+
+        # Create mock Baratron gauge
+        mock_baratron = Mock()
+        mock_baratron.name = "Baratron_Test"
+        mock_baratron.ain_channel = 6
+        mock_baratron.gauge_location = "downstream"
+        mock_baratron.voltage_data = [2.5]
+        mock_baratron.record_ain_channel_voltage.return_value = None
+        mock_baratron.full_scale_Torr = 1000.0
+
+        # Mock the type to return Baratron626D_Gauge
+        type(mock_baratron).__name__ = "Baratron626D_Gauge"
+
+        recorder = DataRecorder(
+            gauges=[mock_baratron],
+            thermocouples=[],
+            results_dir=self.temp_dir,
+            test_mode=True,
+        )
+
+        recorder.start()
+        time.sleep(0.1)
+        recorder.stop()
+
+        metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        # Check that the Baratron gauge has full_scale_torr
+        gauges = metadata["gauges"]
+        assert len(gauges) == 1
+        baratron_gauge = gauges[0]
+        assert baratron_gauge["type"] == "Baratron626D_Gauge"
+        assert "full_scale_torr" in baratron_gauge
+        assert baratron_gauge["full_scale_torr"] == 1000.0
+
+    def test_metadata_non_baratron_no_full_scale_torr(self):
+        """Test that non-Baratron gauges don't include full_scale_torr."""
+        recorder = DataRecorder(
+            gauges=[self.mock_gauge1],  # This is not a Baratron
+            thermocouples=[],
+            results_dir=self.temp_dir,
+            test_mode=True,
+        )
+
+        recorder.start()
+        time.sleep(0.1)
+        recorder.stop()
+
+        metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        # Check that non-Baratron gauge doesn't have full_scale_torr
+        gauges = metadata["gauges"]
+        assert len(gauges) == 1
+        gauge = gauges[0]
+        assert "full_scale_torr" not in gauge
 
 
 if __name__ == "__main__":

@@ -11,6 +11,8 @@ def test_backup_segments_created(tmp_path):
     gauge.name = "G1"
     gauge.voltage_data = [1.23]
     gauge.record_ain_channel_voltage.return_value = None
+    gauge.ain_channel = 10
+    gauge.gauge_location = "downstream"
 
     rec = DataRecorder(
         gauges=[gauge],
@@ -48,6 +50,8 @@ def test_backup_rotation(tmp_path):
     gauge.name = "G1"
     gauge.voltage_data = [2.34]
     gauge.record_ain_channel_voltage.return_value = None
+    gauge.ain_channel = 4
+    gauge.gauge_location = "upstream"
 
     rec = DataRecorder(
         gauges=[gauge],
