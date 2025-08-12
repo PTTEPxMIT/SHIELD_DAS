@@ -237,6 +237,7 @@ class DataRecorder:
                 "Keyboard monitoring aborted."
             )
             return
+
         current_event = self.valve_event_sequence[self.current_valve_index]
         print(f"Press SPACEBAR to record {current_event}...")
 
