@@ -5,13 +5,9 @@ import threading
 import time
 from datetime import datetime
 
+import keyboard
 import pandas as pd
 import u6
-
-try:
-    import keyboard
-except ImportError:
-    keyboard = None
 
 from .pressure_gauge import PressureGauge
 from .thermocouple import Thermocouple
@@ -228,12 +224,6 @@ class DataRecorder:
 
     def _monitor_keyboard(self):
         """Monitor for spacebar press to record valve events in sequence."""
-        if keyboard is None:
-            print(
-                "Warning: keyboard module not available. "
-                "Valve event time monitoring disabled."
-            )
-            return
 
         # Detect if we're in a CI environment (not local test mode)
         is_ci = self._is_ci_environment()
@@ -273,11 +263,7 @@ class DataRecorder:
                     print("All valve events recorded!")
 
         # Set up keyboard listener for spacebar
-        try:
-            keyboard.on_press_key("space", lambda _: on_spacebar())
-        except (ImportError, PermissionError, OSError) as e:
-            print(f"Warning: Could not set up keyboard monitoring: {e}")
-            print("Valve event time monitoring disabled.")
+        keyboard.on_press_key("space", lambda _: on_spacebar())
 
     def _is_ci_environment(self) -> bool:
         """Detect if we're running in a CI environment."""
@@ -351,12 +337,8 @@ class DataRecorder:
         if self.thread:
             self.thread.join(timeout=1.0)
 
-        # Clean up keyboard listeners if keyboard module is available
-        if keyboard is not None:
-            try:
-                keyboard.unhook_all()
-            except Exception as e:
-                print(f"Warning: Could not clean up keyboard listeners: {e}")
+        # Clean up keyboard listeners
+        keyboard.unhook_all()
 
     def record_data(self):
         """Record data from all gauges passed to recorder"""
