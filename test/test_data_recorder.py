@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import tempfile
@@ -369,6 +370,48 @@ class TestDataRecorder:
             self.recorder.run_dir, "pressure_gauge_data.csv"
         )
         assert os.path.exists(expected_filename)
+
+        self.recorder.stop()
+
+    def test_metadata_file_creation(self):
+        """Test that metadata JSON file is created with correct information."""
+        # Start recorder to trigger metadata creation
+        self.recorder.start()
+        time.sleep(0.1)
+
+        # Check that metadata file was created
+        metadata_path = os.path.join(self.recorder.run_dir, "run_metadata.json")
+        assert os.path.exists(metadata_path)
+
+        # Read and verify metadata content
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        # Verify required top-level keys
+        assert "run_info" in metadata
+        assert "gauges" in metadata
+        assert "thermocouples" in metadata
+        assert "system_info" in metadata
+
+        # Verify run_info content
+        run_info = metadata["run_info"]
+        assert "date" in run_info
+        assert "start_time" in run_info
+        assert run_info["test_mode"] is True
+        assert run_info["recording_interval_seconds"] == 0.1
+        assert run_info["backup_interval_seconds"] == 5.0
+
+        # Verify gauges information
+        gauges_info = metadata["gauges"]
+        assert len(gauges_info) == 2
+        assert gauges_info[0]["name"] == "TestGauge1"
+        assert gauges_info[1]["name"] == "TestGauge2"
+
+        # Verify system_info
+        system_info = metadata["system_info"]
+        assert "results_directory" in system_info
+        assert "run_directory" in system_info
+        assert "backup_directory" in system_info
 
         self.recorder.stop()
 
