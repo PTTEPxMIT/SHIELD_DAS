@@ -32,8 +32,9 @@ class DataPlotter:
         self.app_running = False
         self.server_thread = None
 
-        # Store multiple datasets - list of dictionaries with data and metadata
-        self.datasets = []
+        # Store multiple datasets - separate lists for upstream and downstream
+        self.upstream_datasets = []
+        self.downstream_datasets = []
 
         # Setup the app layout
         self.app.layout = self.create_layout()
@@ -124,6 +125,31 @@ class DataPlotter:
 
         return False
 
+    def calculate_error_bars(self, data, dataset_info=None, method="default"):
+        """
+        Calculate error bars for a dataset.
+
+        This function can be extended to support different error calculation methods
+        based on dataset type, measurement conditions, or other factors.
+
+        Args:
+            data: DataFrame containing the measurement data
+            dataset_info: Dictionary with dataset metadata (for future extensions)
+            method: Error calculation method ('default', 'percentage', 'stddev', etc.)
+
+        Returns:
+            numpy.array or None: Array of error values, or None if no error bars
+        """
+
+        if method == "default" or method == "percentage":
+            if "Pressure (Torr)" in data.columns:
+                pressure_values = data["Pressure (Torr)"].values
+                # 10% error as default
+                error_percentage = 0.10
+                return pressure_values * error_percentage
+
+        return None
+
     def create_layout(self):
         return dbc.Container(
             [
@@ -131,326 +157,22 @@ class DataPlotter:
                     [
                         dbc.Col(
                             html.H1(
-                                "SHIELD Data Visualization",
-                                className="text-center mb-4",
+                                "SHIELD Data Visualisation",
+                                className="text-center",
+                                style={
+                                    "fontSize": "3.5rem",
+                                    "fontWeight": "standard",
+                                    "marginTop": "2rem",
+                                    "marginBottom": "2rem",
+                                    "color": "#2c3e50",
+                                },
                             ),
                             width=12,
                         ),
-                    ]
-                ),
-                dbc.Row(
-                    [
-                        dbc.Col(width=8),  # Empty column for spacing
-                        dbc.Col(
-                            html.Div(
-                                [
-                                    dcc.Upload(
-                                        id="upload-data",
-                                        children=dbc.Button(
-                                            [
-                                                html.I(className="fa fa-upload me-2"),
-                                                "Upload CSV",
-                                            ],
-                                            color="primary",
-                                            size="sm",
-                                            className="me-2",
-                                        ),
-                                        style={
-                                            "display": "inline-block",
-                                        },
-                                        multiple=False,
-                                        accept=".csv",
-                                    ),
-                                    dbc.Button(
-                                        [
-                                            html.I(className="fa fa-trash me-2"),
-                                            "Clear All",
-                                        ],
-                                        id="clear-data",
-                                        color="danger",
-                                        size="sm",
-                                        style={"display": "inline-block"},
-                                    ),
-                                ],
-                                style={"textAlign": "right", "marginTop": "20px"},
-                            ),
-                            width=4,
-                        ),
                     ],
-                    className="mb-3",
+                    className="mb-4",
                 ),
-                # Hidden store to trigger plot updates
-                dcc.Store(id="datasets-store"),
-                # Hidden store for plot settings
-                dcc.Store(id="plot-settings-store", data={}),
-                # Status message for upload feedback (floating)
-                html.Div(
-                    id="upload-status",
-                    style={
-                        "position": "fixed",
-                        "top": "20px",
-                        "right": "20px",
-                        "zIndex": "9999",
-                        "maxWidth": "400px",
-                        "minWidth": "300px",
-                    },
-                ),
-                # Single plot for all data
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            [
-                                dbc.Card(
-                                    [
-                                        dbc.CardHeader("Pressure Data"),
-                                        dbc.CardBody([dcc.Graph(id="main-plot")]),
-                                    ]
-                                ),
-                            ],
-                            width=12,
-                        ),
-                    ]
-                ),
-                # Plot controls section
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            [
-                                dbc.Card(
-                                    [
-                                        dbc.CardHeader(
-                                            dbc.Row(
-                                                [
-                                                    dbc.Col(
-                                                        "Plot Controls",
-                                                        className="d-flex align-items-center",
-                                                    ),
-                                                    dbc.Col(
-                                                        dbc.Button(
-                                                            html.I(
-                                                                className="fas fa-chevron-up"
-                                                            ),
-                                                            id="collapse-controls-button",
-                                                            color="light",
-                                                            size="sm",
-                                                            className="ms-auto",
-                                                            style={
-                                                                "border": "1px solid #dee2e6",
-                                                                "background-color": "#f8f9fa",
-                                                                "box-shadow": "0 1px 3px rgba(0,0,0,0.1)",
-                                                                "width": "30px",
-                                                                "height": "30px",
-                                                                "padding": "0",
-                                                                "display": "flex",
-                                                                "align-items": "center",
-                                                                "justify-content": "center",
-                                                            },
-                                                        ),
-                                                        width="auto",
-                                                        className="d-flex justify-content-end",
-                                                    ),
-                                                ],
-                                                className="g-0 align-items-center",
-                                            )
-                                        ),
-                                        dbc.Collapse(
-                                            dbc.CardBody(
-                                                [
-                                                    dbc.Row(
-                                                        [
-                                                            # X-axis controls
-                                                            dbc.Col(
-                                                                [
-                                                                    html.H6(
-                                                                        "X-Axis Controls",
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Scale:"
-                                                                                    ),
-                                                                                    dbc.RadioItems(
-                                                                                        id="x-scale",
-                                                                                        options=[
-                                                                                            {
-                                                                                                "label": "Linear",
-                                                                                                "value": "linear",
-                                                                                            },
-                                                                                            {
-                                                                                                "label": "Log",
-                                                                                                "value": "log",
-                                                                                            },
-                                                                                        ],
-                                                                                        value="linear",
-                                                                                        inline=True,
-                                                                                    ),
-                                                                                ],
-                                                                                width=12,
-                                                                            ),
-                                                                        ],
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "X Min:"
-                                                                                    ),
-                                                                                    dbc.Input(
-                                                                                        id="x-min",
-                                                                                        type="number",
-                                                                                        placeholder="Auto",
-                                                                                        size="sm",
-                                                                                    ),
-                                                                                ],
-                                                                                width=6,
-                                                                            ),
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "X Max:"
-                                                                                    ),
-                                                                                    dbc.Input(
-                                                                                        id="x-max",
-                                                                                        type="number",
-                                                                                        placeholder="Auto",
-                                                                                        size="sm",
-                                                                                    ),
-                                                                                ],
-                                                                                width=6,
-                                                                            ),
-                                                                        ]
-                                                                    ),
-                                                                ],
-                                                                width=3,
-                                                            ),
-                                                            # Y-axis controls
-                                                            dbc.Col(
-                                                                [
-                                                                    html.H6(
-                                                                        "Y-Axis Controls",
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Scale:"
-                                                                                    ),
-                                                                                    dbc.RadioItems(
-                                                                                        id="y-scale",
-                                                                                        options=[
-                                                                                            {
-                                                                                                "label": "Linear",
-                                                                                                "value": "linear",
-                                                                                            },
-                                                                                            {
-                                                                                                "label": "Log",
-                                                                                                "value": "log",
-                                                                                            },
-                                                                                        ],
-                                                                                        value="log",
-                                                                                        inline=True,
-                                                                                    ),
-                                                                                ],
-                                                                                width=12,
-                                                                            ),
-                                                                        ],
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Y Min:"
-                                                                                    ),
-                                                                                    dbc.Input(
-                                                                                        id="y-min",
-                                                                                        type="number",
-                                                                                        placeholder="Auto",
-                                                                                        size="sm",
-                                                                                    ),
-                                                                                ],
-                                                                                width=6,
-                                                                            ),
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Y Max:"
-                                                                                    ),
-                                                                                    dbc.Input(
-                                                                                        id="y-max",
-                                                                                        type="number",
-                                                                                        placeholder="Auto",
-                                                                                        size="sm",
-                                                                                    ),
-                                                                                ],
-                                                                                width=6,
-                                                                            ),
-                                                                        ]
-                                                                    ),
-                                                                ],
-                                                                width=3,
-                                                            ),
-                                                            # Error bars and other controls
-                                                            dbc.Col(
-                                                                [
-                                                                    html.H6(
-                                                                        "Display Options",
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Checklist(
-                                                                        options=[
-                                                                            {
-                                                                                "label": "Show Error Bars (±10%)",
-                                                                                "value": "error_bars",
-                                                                            }
-                                                                        ],
-                                                                        value=[],
-                                                                        id="error-bars-toggle",
-                                                                    ),
-                                                                ],
-                                                                width=3,
-                                                            ),
-                                                            # Apply button
-                                                            dbc.Col(
-                                                                [
-                                                                    html.H6(
-                                                                        "Actions",
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Button(
-                                                                        "Reset to Auto",
-                                                                        id="reset-settings",
-                                                                        color="secondary",
-                                                                        size="sm",
-                                                                        className="w-100 mb-2",
-                                                                    ),
-                                                                ],
-                                                                width=3,
-                                                            ),
-                                                        ]
-                                                    )
-                                                ]
-                                            ),
-                                            id="collapse-controls",
-                                            is_open=True,
-                                        ),
-                                    ]
-                                ),
-                            ],
-                            width=12,
-                        ),
-                    ],
-                    className="mt-3",
-                ),
-                # Dataset Management Card
+                # Dataset Management Card at the top
                 dbc.Row(
                     [
                         dbc.Col(
@@ -495,6 +217,60 @@ class DataPlotter:
                                         dbc.Collapse(
                                             dbc.CardBody(
                                                 [
+                                                    # Upload and Clear buttons
+                                                    dbc.Row(
+                                                        [
+                                                            dbc.Col(
+                                                                [
+                                                                    html.Div(
+                                                                        [
+                                                                            dcc.Upload(
+                                                                                id="upload-data",
+                                                                                children=dbc.Button(
+                                                                                    [
+                                                                                        html.I(
+                                                                                            className="fa fa-upload me-2"
+                                                                                        ),
+                                                                                        "Upload CSV",
+                                                                                    ],
+                                                                                    color="primary",
+                                                                                    size="sm",
+                                                                                ),
+                                                                                style={
+                                                                                    "display": "inline-block",
+                                                                                    "marginRight": "10px",
+                                                                                },
+                                                                                multiple=False,
+                                                                                accept=".csv",
+                                                                            ),
+                                                                            dbc.Button(
+                                                                                [
+                                                                                    html.I(
+                                                                                        className="fa fa-trash me-2"
+                                                                                    ),
+                                                                                    "Clear All",
+                                                                                ],
+                                                                                id="clear-data",
+                                                                                color="danger",
+                                                                                size="sm",
+                                                                            ),
+                                                                        ],
+                                                                        style={
+                                                                            "display": "flex",
+                                                                            "gap": "10px",
+                                                                            "alignItems": "center",
+                                                                        },
+                                                                    )
+                                                                ],
+                                                                width=12,
+                                                                style={
+                                                                    "textAlign": "left",
+                                                                    "marginBottom": "15px",
+                                                                },
+                                                            ),
+                                                        ]
+                                                    ),
+                                                    # Dataset table
                                                     html.Div(
                                                         id="dataset-table-container",
                                                         children=self.create_dataset_table(),
@@ -510,6 +286,482 @@ class DataPlotter:
                             width=12,
                         ),
                     ],
+                    className="mb-3",
+                ),
+                # Hidden store to trigger plot updates
+                dcc.Store(id="datasets-store"),
+                # Hidden stores for plot settings
+                dcc.Store(id="upstream-settings-store", data={}),
+                dcc.Store(id="downstream-settings-store", data={}),
+                # Status message for upload feedback (floating)
+                html.Div(
+                    id="upload-status",
+                    style={
+                        "position": "fixed",
+                        "top": "20px",
+                        "right": "20px",
+                        "zIndex": "9999",
+                        "maxWidth": "400px",
+                        "minWidth": "300px",
+                    },
+                ),
+                # Dual plots for upstream and downstream pressure
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader("Upstream Pressure"),
+                                        dbc.CardBody([dcc.Graph(id="upstream-plot")]),
+                                    ]
+                                ),
+                            ],
+                            width=6,
+                        ),
+                        dbc.Col(
+                            [
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader("Downstream Pressure"),
+                                        dbc.CardBody([dcc.Graph(id="downstream-plot")]),
+                                    ]
+                                ),
+                            ],
+                            width=6,
+                        ),
+                    ]
+                ),
+                # Plot controls section - Dual controls for upstream and downstream
+                dbc.Row(
+                    [
+                        # Upstream Plot Controls
+                        dbc.Col(
+                            [
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader(
+                                            dbc.Row(
+                                                [
+                                                    dbc.Col(
+                                                        "Upstream Plot Controls",
+                                                        className="d-flex align-items-center",
+                                                    ),
+                                                    dbc.Col(
+                                                        dbc.Button(
+                                                            html.I(
+                                                                className="fas fa-chevron-up"
+                                                            ),
+                                                            id="collapse-upstream-controls-button",
+                                                            color="light",
+                                                            size="sm",
+                                                            className="ms-auto",
+                                                            style={
+                                                                "border": "1px solid #dee2e6",
+                                                                "background-color": "#f8f9fa",
+                                                                "box-shadow": "0 1px 3px rgba(0,0,0,0.1)",
+                                                                "width": "30px",
+                                                                "height": "30px",
+                                                                "padding": "0",
+                                                                "display": "flex",
+                                                                "align-items": "center",
+                                                                "justify-content": "center",
+                                                            },
+                                                        ),
+                                                        width="auto",
+                                                        className="d-flex justify-content-end",
+                                                    ),
+                                                ],
+                                                className="g-0 align-items-center",
+                                            )
+                                        ),
+                                        dbc.Collapse(
+                                            dbc.CardBody(
+                                                [
+                                                    dbc.Row(
+                                                        [
+                                                            # X-axis controls
+                                                            dbc.Col(
+                                                                [
+                                                                    html.H6(
+                                                                        "X-Axis",
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Scale:"
+                                                                                    ),
+                                                                                    dbc.RadioItems(
+                                                                                        id="upstream-x-scale",
+                                                                                        options=[
+                                                                                            {
+                                                                                                "label": "Linear",
+                                                                                                "value": "linear",
+                                                                                            },
+                                                                                            {
+                                                                                                "label": "Log",
+                                                                                                "value": "log",
+                                                                                            },
+                                                                                        ],
+                                                                                        value="linear",
+                                                                                        inline=True,
+                                                                                    ),
+                                                                                ],
+                                                                                width=12,
+                                                                            ),
+                                                                        ],
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Min:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="upstream-x-min",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Max:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="upstream-x-max",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                        ]
+                                                                    ),
+                                                                ],
+                                                                width=6,
+                                                            ),
+                                                            # Y-axis controls
+                                                            dbc.Col(
+                                                                [
+                                                                    html.H6(
+                                                                        "Y-Axis",
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Scale:"
+                                                                                    ),
+                                                                                    dbc.RadioItems(
+                                                                                        id="upstream-y-scale",
+                                                                                        options=[
+                                                                                            {
+                                                                                                "label": "Linear",
+                                                                                                "value": "linear",
+                                                                                            },
+                                                                                            {
+                                                                                                "label": "Log",
+                                                                                                "value": "log",
+                                                                                            },
+                                                                                        ],
+                                                                                        value="linear",
+                                                                                        inline=True,
+                                                                                    ),
+                                                                                ],
+                                                                                width=12,
+                                                                            ),
+                                                                        ],
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Min:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="upstream-y-min",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Max:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="upstream-y-max",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                        ]
+                                                                    ),
+                                                                    # Error bars checkbox
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Checkbox(
+                                                                                        id="upstream-error-bars",
+                                                                                        label="Show Error Bars",
+                                                                                        value=False,
+                                                                                    ),
+                                                                                ],
+                                                                                width=12,
+                                                                            ),
+                                                                        ],
+                                                                        className="mb-2",
+                                                                    ),
+                                                                ],
+                                                                width=6,
+                                                            ),
+                                                        ]
+                                                    )
+                                                ]
+                                            ),
+                                            id="collapse-upstream-controls",
+                                            is_open=False,
+                                        ),
+                                    ]
+                                ),
+                            ],
+                            width=6,
+                        ),
+                        # Downstream Plot Controls
+                        dbc.Col(
+                            [
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader(
+                                            dbc.Row(
+                                                [
+                                                    dbc.Col(
+                                                        "Downstream Plot Controls",
+                                                        className="d-flex align-items-center",
+                                                    ),
+                                                    dbc.Col(
+                                                        dbc.Button(
+                                                            html.I(
+                                                                className="fas fa-chevron-up"
+                                                            ),
+                                                            id="collapse-downstream-controls-button",
+                                                            color="light",
+                                                            size="sm",
+                                                            className="ms-auto",
+                                                            style={
+                                                                "border": "1px solid #dee2e6",
+                                                                "background-color": "#f8f9fa",
+                                                                "box-shadow": "0 1px 3px rgba(0,0,0,0.1)",
+                                                                "width": "30px",
+                                                                "height": "30px",
+                                                                "padding": "0",
+                                                                "display": "flex",
+                                                                "align-items": "center",
+                                                                "justify-content": "center",
+                                                            },
+                                                        ),
+                                                        width="auto",
+                                                        className="d-flex justify-content-end",
+                                                    ),
+                                                ],
+                                                className="g-0 align-items-center",
+                                            )
+                                        ),
+                                        dbc.Collapse(
+                                            dbc.CardBody(
+                                                [
+                                                    dbc.Row(
+                                                        [
+                                                            # X-axis controls
+                                                            dbc.Col(
+                                                                [
+                                                                    html.H6(
+                                                                        "X-Axis",
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Scale:"
+                                                                                    ),
+                                                                                    dbc.RadioItems(
+                                                                                        id="downstream-x-scale",
+                                                                                        options=[
+                                                                                            {
+                                                                                                "label": "Linear",
+                                                                                                "value": "linear",
+                                                                                            },
+                                                                                            {
+                                                                                                "label": "Log",
+                                                                                                "value": "log",
+                                                                                            },
+                                                                                        ],
+                                                                                        value="linear",
+                                                                                        inline=True,
+                                                                                    ),
+                                                                                ],
+                                                                                width=12,
+                                                                            ),
+                                                                        ],
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Min:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="downstream-x-min",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Max:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="downstream-x-max",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                        ]
+                                                                    ),
+                                                                ],
+                                                                width=6,
+                                                            ),
+                                                            # Y-axis controls
+                                                            dbc.Col(
+                                                                [
+                                                                    html.H6(
+                                                                        "Y-Axis",
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Scale:"
+                                                                                    ),
+                                                                                    dbc.RadioItems(
+                                                                                        id="downstream-y-scale",
+                                                                                        options=[
+                                                                                            {
+                                                                                                "label": "Linear",
+                                                                                                "value": "linear",
+                                                                                            },
+                                                                                            {
+                                                                                                "label": "Log",
+                                                                                                "value": "log",
+                                                                                            },
+                                                                                        ],
+                                                                                        value="linear",
+                                                                                        inline=True,
+                                                                                    ),
+                                                                                ],
+                                                                                width=12,
+                                                                            ),
+                                                                        ],
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Min:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="downstream-y-min",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Label(
+                                                                                        "Max:"
+                                                                                    ),
+                                                                                    dbc.Input(
+                                                                                        id="downstream-y-max",
+                                                                                        type="number",
+                                                                                        placeholder="Auto",
+                                                                                        size="sm",
+                                                                                    ),
+                                                                                ],
+                                                                                width=6,
+                                                                            ),
+                                                                        ]
+                                                                    ),
+                                                                    # Error bars checkbox
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Checkbox(
+                                                                                        id="downstream-error-bars",
+                                                                                        label="Show Error Bars",
+                                                                                        value=False,
+                                                                                    ),
+                                                                                ],
+                                                                                width=12,
+                                                                            ),
+                                                                        ],
+                                                                        className="mb-2",
+                                                                    ),
+                                                                ],
+                                                                width=6,
+                                                            ),
+                                                        ]
+                                                    )
+                                                ]
+                                            ),
+                                            id="collapse-downstream-controls",
+                                            is_open=False,
+                                        ),
+                                    ]
+                                ),
+                            ],
+                            width=6,
+                        ),
+                    ],
                     className="mt-3",
                 ),
             ],
@@ -518,7 +770,8 @@ class DataPlotter:
 
     def create_dataset_table(self):
         """Create a table showing all datasets with controls"""
-        if not self.datasets:
+        all_datasets = self.upstream_datasets + self.downstream_datasets
+        if not all_datasets:
             return html.Div("No datasets loaded", className="text-muted")
 
         table_header = html.Thead(
@@ -541,7 +794,7 @@ class DataPlotter:
         )
 
         table_rows = []
-        for i, dataset in enumerate(self.datasets):
+        for i, dataset in enumerate(all_datasets):
             row = html.Tr(
                 [
                     html.Td(
@@ -838,30 +1091,50 @@ class DataPlotter:
         )
         def handle_file_upload(contents, filename):
             if contents is None:
-                return "", len(self.datasets), self.create_dataset_table()
+                return (
+                    "",
+                    len(self.upstream_datasets) + len(self.downstream_datasets),
+                    self.create_dataset_table(),
+                )
 
             # Parse the uploaded file
             new_data = self.parse_uploaded_file(contents, filename)
 
             if not new_data.empty:
-                # Add the new dataset to our collection
-                dataset_id = f"dataset_{len(self.datasets) + 1}"
+                # Determine which plot to add to: first upload goes to upstream, second to downstream
+                total_datasets = len(self.upstream_datasets) + len(
+                    self.downstream_datasets
+                )
+
+                if total_datasets % 2 == 0:  # Even number = upstream (0, 2, 4, ...)
+                    target_datasets = self.upstream_datasets
+                    plot_type = "Upstream"
+                    dataset_id = f"upstream_dataset_{len(self.upstream_datasets) + 1}"
+                    color = self.get_next_color(len(self.upstream_datasets))
+                else:  # Odd number = downstream (1, 3, 5, ...)
+                    target_datasets = self.downstream_datasets
+                    plot_type = "Downstream"
+                    dataset_id = (
+                        f"downstream_dataset_{len(self.downstream_datasets) + 1}"
+                    )
+                    color = self.get_next_color(len(self.downstream_datasets))
+
                 dataset = {
                     "data": new_data,
                     "filename": filename,
-                    "display_name": f"Dataset {len(self.datasets) + 1}",
-                    "color": self.get_next_color(len(self.datasets)),
+                    "display_name": f"{plot_type} Dataset {len(target_datasets) + 1}",
+                    "color": color,
                     "visible": True,
                     "id": dataset_id,
                 }
-                self.datasets.append(dataset)
+                target_datasets.append(dataset)
 
                 return (
                     dbc.Alert(
                         [
                             html.I(className="fas fa-check-circle me-2"),
-                            f"Successfully loaded {filename} with {len(new_data)} data points. "
-                            f"Total datasets: {len(self.datasets)}",
+                            f"Successfully loaded {filename} to {plot_type} plot with {len(new_data)} data points. "
+                            f"Total datasets: {len(self.upstream_datasets) + len(self.downstream_datasets)}",
                         ],
                         color="success",
                         dismissable=True,
@@ -872,7 +1145,7 @@ class DataPlotter:
                             "border": "1px solid #d4edda",
                         },
                     ),
-                    len(self.datasets),
+                    len(self.upstream_datasets) + len(self.downstream_datasets),
                     self.create_dataset_table(),
                 )
             else:
@@ -908,7 +1181,8 @@ class DataPlotter:
         def clear_all_data(n_clicks):
             if n_clicks:
                 # Clear all datasets
-                self.datasets = []
+                self.upstream_datasets = []
+                self.downstream_datasets = []
 
                 # Create empty figure
                 fig = go.Figure()
@@ -947,7 +1221,11 @@ class DataPlotter:
                     self.create_dataset_table(),
                 )
 
-            return "", len(self.datasets), self.create_dataset_table()
+            return (
+                "",
+                len(self.upstream_datasets) + len(self.downstream_datasets),
+                self.create_dataset_table(),
+            )
 
         # Callback for real-time dataset management changes
         @self.app.callback(
@@ -963,7 +1241,8 @@ class DataPlotter:
         )
         def update_dataset_changes(display_names, visibility_values):
             # Update dataset properties based on form values
-            for i, dataset in enumerate(self.datasets):
+            all_datasets = self.upstream_datasets + self.downstream_datasets
+            for i, dataset in enumerate(all_datasets):
                 if i < len(display_names):
                     dataset["display_name"] = display_names[i] or dataset["filename"]
                 if i < len(visibility_values):
@@ -972,7 +1251,9 @@ class DataPlotter:
                     )
 
             # Return updated count and table
-            return len(self.datasets), self.create_dataset_table()
+            return len(self.upstream_datasets) + len(
+                self.downstream_datasets
+            ), self.create_dataset_table()
 
         # Callback to toggle color picker popover
         @self.app.callback(
@@ -1017,33 +1298,36 @@ class DataPlotter:
             selected_color = button_data["color"]
 
             # Update the dataset color
-            for dataset in self.datasets:
+            all_datasets = self.upstream_datasets + self.downstream_datasets
+            for dataset in all_datasets:
                 if dataset.get("id", 0) == dataset_index:
                     dataset["color"] = selected_color
                     break
 
-            return len(self.datasets), self.create_dataset_table()
+            return len(self.upstream_datasets) + len(
+                self.downstream_datasets
+            ), self.create_dataset_table()
 
-        # Callback for real-time plot settings changes
+        # Callback for upstream plot settings changes
         @self.app.callback(
             [
-                Output("plot-settings-store", "data", allow_duplicate=True),
+                Output("upstream-settings-store", "data", allow_duplicate=True),
             ],
             [
-                Input("x-scale", "value"),
-                Input("y-scale", "value"),
-                Input("x-min", "value"),
-                Input("x-max", "value"),
-                Input("y-min", "value"),
-                Input("y-max", "value"),
-                Input("error-bars-toggle", "value"),
+                Input("upstream-x-scale", "value"),
+                Input("upstream-y-scale", "value"),
+                Input("upstream-x-min", "value"),
+                Input("upstream-x-max", "value"),
+                Input("upstream-y-min", "value"),
+                Input("upstream-y-max", "value"),
+                Input("upstream-error-bars", "value"),
             ],
             prevent_initial_call=True,
         )
-        def update_plot_settings(
+        def update_upstream_plot_settings(
             x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
         ):
-            # Store the plot settings
+            # Store the upstream plot settings
             settings = {
                 "x_scale": x_scale,
                 "y_scale": y_scale,
@@ -1051,20 +1335,51 @@ class DataPlotter:
                 "x_max": x_max,
                 "y_min": y_min,
                 "y_max": y_max,
-                "show_error_bars": error_bars and "error_bars" in error_bars,
+                "error_bars": error_bars,
             }
             return [settings]
 
-        # Single callback for the main plot - updates when datasets or settings change
+        # Callback for downstream plot settings changes
         @self.app.callback(
-            Output("main-plot", "figure"),
+            [
+                Output("downstream-settings-store", "data", allow_duplicate=True),
+            ],
+            [
+                Input("downstream-x-scale", "value"),
+                Input("downstream-y-scale", "value"),
+                Input("downstream-x-min", "value"),
+                Input("downstream-x-max", "value"),
+                Input("downstream-y-min", "value"),
+                Input("downstream-y-max", "value"),
+                Input("downstream-error-bars", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def update_downstream_plot_settings(
+            x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
+        ):
+            # Store the downstream plot settings
+            settings = {
+                "x_scale": x_scale,
+                "y_scale": y_scale,
+                "x_min": x_min,
+                "x_max": x_max,
+                "y_min": y_min,
+                "y_max": y_max,
+                "error_bars": error_bars,
+            }
+            return [settings]
+
+        # Callbacks for the upstream and downstream plots
+        @self.app.callback(
+            Output("upstream-plot", "figure"),
             [
                 Input("datasets-store", "data"),
-                Input("plot-settings-store", "data"),
+                Input("upstream-settings-store", "data"),
             ],
         )
-        def update_main_plot(datasets_count, plot_settings):
-            # Extract plot settings or use defaults
+        def update_upstream_plot(datasets_count, plot_settings):
+            # Extract upstream plot settings or use defaults
             settings = plot_settings or {}
             x_scale = settings.get("x_scale")
             y_scale = settings.get("y_scale")
@@ -1072,76 +1387,70 @@ class DataPlotter:
             x_max = settings.get("x_max")
             y_min = settings.get("y_min")
             y_max = settings.get("y_max")
-            show_error_bars = settings.get("show_error_bars", False)
+            error_bars = settings.get("error_bars")
 
-            print(f"Plot callback triggered with {len(self.datasets)} datasets")
-            return self._generate_plot(
-                x_scale, y_scale, x_min, x_max, y_min, y_max, show_error_bars
+            print(f"Upstream plot callback with {len(self.upstream_datasets)} datasets")
+            return self._generate_upstream_plot(
+                x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
             )
 
-        # Callback to reset plot settings
+        @self.app.callback(
+            Output("downstream-plot", "figure"),
+            [
+                Input("datasets-store", "data"),
+                Input("downstream-settings-store", "data"),
+            ],
+        )
+        def update_downstream_plot(datasets_count, plot_settings):
+            # Extract downstream plot settings or use defaults
+            settings = plot_settings or {}
+            x_scale = settings.get("x_scale")
+            y_scale = settings.get("y_scale")
+            x_min = settings.get("x_min")
+            x_max = settings.get("x_max")
+            y_min = settings.get("y_min")
+            y_max = settings.get("y_max")
+            error_bars = settings.get("error_bars")
+
+            print(
+                f"Downstream plot callback with {len(self.downstream_datasets)} datasets"
+            )
+            return self._generate_downstream_plot(
+                x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
+            )
+
+        # Callbacks to handle collapse/expand of upstream plot controls
         @self.app.callback(
             [
-                Output("x-scale", "value"),
-                Output("y-scale", "value"),
-                Output("x-min", "value"),
-                Output("x-max", "value"),
-                Output("y-min", "value"),
-                Output("y-max", "value"),
-                Output("error-bars-toggle", "value"),
+                Output("collapse-upstream-controls", "is_open"),
+                Output("collapse-upstream-controls-button", "children"),
             ],
-            [Input("reset-settings", "n_clicks")],
+            [Input("collapse-upstream-controls-button", "n_clicks")],
+            [State("collapse-upstream-controls", "is_open")],
             prevent_initial_call=True,
         )
-        def reset_plot_settings(n_clicks):
+        def toggle_upstream_controls_collapse(n_clicks, is_open):
             if n_clicks:
-                return "linear", "log", None, None, None, None, []
-            return "linear", "log", None, None, None, None, []
+                new_state = not is_open
+                # Change icon based on state
+                if new_state:
+                    icon = html.I(className="fas fa-chevron-down")
+                else:
+                    icon = html.I(className="fas fa-chevron-up")
+                return new_state, icon
+            return is_open, html.I(className="fas fa-chevron-up")
 
-        # Callback to set default min values when switching to linear scale
+        # Callbacks to handle collapse/expand of downstream plot controls
         @self.app.callback(
             [
-                Output("x-min", "value", allow_duplicate=True),
-                Output("y-min", "value", allow_duplicate=True),
+                Output("collapse-downstream-controls", "is_open"),
+                Output("collapse-downstream-controls-button", "children"),
             ],
-            [
-                Input("x-scale", "value"),
-                Input("y-scale", "value"),
-            ],
-            [
-                State("x-min", "value"),
-                State("y-min", "value"),
-            ],
+            [Input("collapse-downstream-controls-button", "n_clicks")],
+            [State("collapse-downstream-controls", "is_open")],
             prevent_initial_call=True,
         )
-        def update_default_mins(x_scale, y_scale, current_x_min, current_y_min):
-            # Set x-min to 0 when switching to linear (if currently None)
-            new_x_min = current_x_min
-            if x_scale == "linear" and current_x_min is None:
-                new_x_min = 0
-            elif x_scale == "log" and current_x_min == 0:
-                new_x_min = None
-
-            # Set y-min to 0 when switching to linear (if currently None)
-            new_y_min = current_y_min
-            if y_scale == "linear" and current_y_min is None:
-                new_y_min = 0
-            elif y_scale == "log" and current_y_min == 0:
-                new_y_min = None
-
-            return new_x_min, new_y_min
-
-        # Callback to handle collapse/expand of plot controls
-        @self.app.callback(
-            [
-                Output("collapse-controls", "is_open"),
-                Output("collapse-controls-button", "children"),
-            ],
-            [Input("collapse-controls-button", "n_clicks")],
-            [State("collapse-controls", "is_open")],
-            prevent_initial_call=True,
-        )
-        def toggle_controls_collapse(n_clicks, is_open):
+        def toggle_downstream_controls_collapse(n_clicks, is_open):
             if n_clicks:
                 new_state = not is_open
                 # Change icon based on state
@@ -1186,7 +1495,7 @@ class DataPlotter:
         """Generate the plot based on current dataset state and settings"""
         fig = go.Figure()
 
-        for dataset in self.datasets:
+        for dataset in self.upstream_datasets + self.downstream_datasets:
             # Skip invisible datasets
             if not dataset.get("visible", True):
                 continue
@@ -1227,6 +1536,185 @@ class DataPlotter:
         # Configure the layout
         fig.update_layout(
             height=600,
+            xaxis_title="Relative Time (s)",
+            yaxis_title="Pressure (Torr)",
+            template="plotly_white",
+            margin=dict(l=60, r=30, t=40, b=60),
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
+            ),
+        )
+
+        # Apply axis scaling
+        x_axis_type = x_scale if x_scale else "linear"
+        y_axis_type = y_scale if y_scale else "log"
+
+        fig.update_xaxes(type=x_axis_type)
+        fig.update_yaxes(type=y_axis_type)
+
+        # Apply axis ranges if specified
+        if x_min is not None and x_max is not None:
+            fig.update_xaxes(range=[x_min, x_max])
+
+        if y_min is not None and y_max is not None:
+            if y_axis_type == "log":
+                # For log scale, use log10 of the values
+                import math
+
+                fig.update_yaxes(range=[math.log10(y_min), math.log10(y_max)])
+            else:
+                fig.update_yaxes(range=[y_min, y_max])
+
+        return fig
+
+    def _generate_upstream_plot(
+        self,
+        x_scale=None,
+        y_scale=None,
+        x_min=None,
+        x_max=None,
+        y_min=None,
+        y_max=None,
+        error_bars=None,
+    ):
+        """Generate the upstream pressure plot"""
+        fig = go.Figure()
+
+        for dataset in self.upstream_datasets:
+            # Skip invisible datasets
+            if not dataset.get("visible", True):
+                continue
+
+            data = dataset["data"]
+            display_name = dataset.get("display_name", dataset["filename"])
+            color = dataset["color"]
+
+            if not data.empty:
+                # Check if the required columns exist for upstream
+                required_cols = ["RelativeTime", "Pressure (Torr)"]
+                if all(col in data.columns for col in required_cols):
+                    # Extract all data from CSV
+                    time_data = data["RelativeTime"].values
+                    pressure_data = data["Pressure (Torr)"].values
+
+                    # Create the trace based on error bars setting
+                    trace_kwargs = {
+                        "x": time_data,
+                        "y": pressure_data,
+                        "mode": "lines+markers",
+                        "name": display_name,
+                        "line": dict(color=color, width=2),
+                        "marker": dict(size=2),
+                    }
+
+                    # Add error bars if enabled
+                    if error_bars:
+                        error_values = self.calculate_error_bars(data, dataset)
+                        if error_values is not None:
+                            trace_kwargs["error_y"] = dict(
+                                type="data",
+                                array=error_values,
+                                visible=True,
+                                color=color,
+                                thickness=1.5,
+                                width=3,
+                            )
+
+                    fig.add_trace(go.Scatter(**trace_kwargs))
+
+        # Configure the layout
+        fig.update_layout(
+            height=500,
+            xaxis_title="Relative Time (s)",
+            yaxis_title="Pressure (Torr)",
+            template="plotly_white",
+            margin=dict(l=60, r=30, t=40, b=60),
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
+            ),
+        )
+
+        # Apply axis scaling
+        x_axis_type = x_scale if x_scale else "linear"
+        y_axis_type = y_scale if y_scale else "log"
+
+        fig.update_xaxes(type=x_axis_type)
+        fig.update_yaxes(type=y_axis_type)
+
+        # Apply axis ranges if specified
+        if x_min is not None and x_max is not None:
+            fig.update_xaxes(range=[x_min, x_max])
+
+        if y_min is not None and y_max is not None:
+            if y_axis_type == "log":
+                # For log scale, use log10 of the values
+                import math
+
+                fig.update_yaxes(range=[math.log10(y_min), math.log10(y_max)])
+            else:
+                fig.update_yaxes(range=[y_min, y_max])
+
+        return fig
+
+    def _generate_downstream_plot(
+        self,
+        x_scale=None,
+        y_scale=None,
+        x_min=None,
+        x_max=None,
+        y_min=None,
+        y_max=None,
+        error_bars=None,
+    ):
+        """Generate the downstream pressure plot"""
+        fig = go.Figure()
+
+        for dataset in self.downstream_datasets:
+            # Skip invisible datasets
+            if not dataset.get("visible", True):
+                continue
+
+            data = dataset["data"]
+            display_name = dataset.get("display_name", dataset["filename"])
+            color = dataset["color"]
+
+            if not data.empty:
+                # Check if the required columns exist for downstream
+                # For now, using same data but could be different columns
+                required_cols = ["RelativeTime", "Pressure (Torr)"]
+                if all(col in data.columns for col in required_cols):
+                    # Extract all data from CSV
+                    time_data = data["RelativeTime"].values
+                    pressure_data = data["Pressure (Torr)"].values
+
+                    # Create the trace based on error bars setting
+                    trace_kwargs = {
+                        "x": time_data,
+                        "y": pressure_data,
+                        "mode": "lines+markers",
+                        "name": display_name,
+                        "line": dict(color=color, width=2),
+                        "marker": dict(size=2),
+                    }
+
+                    # Add error bars if enabled
+                    if error_bars:
+                        error_values = self.calculate_error_bars(data, dataset)
+                        if error_values is not None:
+                            trace_kwargs["error_y"] = dict(
+                                type="data",
+                                array=error_values,
+                                visible=True,
+                                color=color,
+                                thickness=1.5,
+                                width=3,
+                            )
+
+                    fig.add_trace(go.Scatter(**trace_kwargs))
+
+        # Configure the layout
+        fig.update_layout(
+            height=500,
             xaxis_title="Relative Time (s)",
             yaxis_title="Pressure (Torr)",
             template="plotly_white",
