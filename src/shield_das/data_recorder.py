@@ -188,6 +188,7 @@ class DataRecorder:
                 "test_mode": self.test_mode,
                 "recording_interval_seconds": self.recording_interval,
                 "backup_interval_seconds": self.backup_interval,
+                "data_filename": "pressure_gauge_data.csv",
             },
             "gauges": [
                 {
