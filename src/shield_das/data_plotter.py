@@ -158,11 +158,19 @@ class DataPlotter:
                         dbc.Col(
                             html.H1(
                                 "SHIELD Data Visualisation",
-                                className="text-center mb-6",
+                                className="text-center",
+                                style={
+                                    "fontSize": "3.5rem",
+                                    "fontWeight": "standard",
+                                    "marginTop": "2rem",
+                                    "marginBottom": "2rem",
+                                    "color": "#2c3e50",
+                                },
                             ),
                             width=12,
                         ),
-                    ]
+                    ],
+                    className="mb-4",
                 ),
                 # Dataset Management Card at the top
                 dbc.Row(
