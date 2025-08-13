@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 import threading
 import webbrowser
 
@@ -44,6 +45,279 @@ class DataPlotter:
 
         # Flag to track if recording has been started
         self.recording_started = False
+
+    def parse_folder_upload(self, files_list, filenames_list):
+        """
+        Parse uploaded folder containing CSV and JSON files.
+
+        Args:
+            files_list: List of base64 encoded file contents
+            filenames_list: List of corresponding filenames
+
+        Returns:
+            dict: Dictionary containing parsed data and metadata
+        """
+        result = {
+            "pressure_data": None,
+            "metadata": None,
+            "success": False,
+            "error": None,
+        }
+
+        try:
+            csv_data = None
+            json_data = None
+
+            for contents, filename in zip(files_list, filenames_list):
+                if filename.lower() == "pressure_gauge_data.csv":
+                    csv_data = self.parse_csv_file(contents, filename)
+                elif filename.lower() == "run_metadata.json":
+                    json_data = self.parse_json_file(contents, filename)
+
+            if csv_data is not None and not csv_data.empty:
+                result["pressure_data"] = csv_data
+                result["metadata"] = json_data  # Can be None if no JSON found
+                result["success"] = True
+                print(f"Successfully processed folder with {len(csv_data)} data points")
+            else:
+                result["error"] = "No valid pressure_gauge_data.csv file found"
+
+        except Exception as e:
+            result["error"] = f"Error processing folder upload: {str(e)}"
+            print(result["error"])
+
+        return result
+
+    def parse_csv_file(self, contents, filename):
+        """
+        Parse CSV file content specifically for pressure gauge data.
+
+        Args:
+            contents: Base64 encoded file content
+            filename: Name of the CSV file
+
+        Returns:
+            pandas.DataFrame: The parsed pressure data
+        """
+        try:
+            # Decode the base64 content
+            content_type, content_string = contents.split(",")
+            decoded = base64.b64decode(content_string)
+
+            # Read CSV from the decoded content
+            df = pd.read_csv(io.StringIO(decoded.decode("utf-8")))
+
+            # Validate expected columns (realtime + 4 voltage columns)
+            if len(df.columns) < 5:
+                print(
+                    f"Warning: Expected 5 columns (realtime + 4 voltages), got {len(df.columns)}"
+                )
+
+            print(
+                f"Successfully parsed {filename} with {len(df)} rows and {len(df.columns)} columns"
+            )
+            return df
+
+        except Exception as e:
+            print(f"Error parsing CSV file {filename}: {e}")
+            return pd.DataFrame()
+
+    def parse_json_file(self, contents, filename):
+        """
+        Parse JSON file content for run metadata.
+
+        Args:
+            contents: Base64 encoded file content
+            filename: Name of the JSON file
+
+        Returns:
+            dict: The parsed metadata or None on error
+        """
+        try:
+            # Decode the base64 content
+            content_type, content_string = contents.split(",")
+            decoded = base64.b64decode(content_string)
+
+            # Parse JSON from the decoded content
+            metadata = json.loads(decoded.decode("utf-8"))
+            print(f"Successfully parsed metadata from {filename}")
+            return metadata
+
+        except Exception as e:
+            print(f"Error parsing JSON file {filename}: {e}")
+            return None
+
+    def _determine_gauge_locations(self, voltage_columns, metadata):
+        """
+        Determine gauge locations for each voltage column based on metadata.
+
+        Args:
+            voltage_columns: List of column names from CSV (e.g., ['PG1_Voltage (V)', 'PG2_Voltage (V)'])
+            metadata: Dictionary containing gauge information
+
+        Returns:
+            Dictionary mapping column names to locations ('upstream'/'downstream')
+        """
+        gauge_locations = {}
+
+        # Get gauges from metadata
+        gauges = metadata.get("gauges", [])
+        if not gauges:
+            print("Warning: No gauges found in metadata, defaulting all to upstream")
+            return {col: "upstream" for col in voltage_columns}
+
+        print(f"Found {len(gauges)} gauges in metadata")
+
+        # Process each voltage column
+        for col in voltage_columns:
+            # Extract gauge name by removing "_Voltage (V)" suffix
+            if col.endswith("_Voltage (V)"):
+                gauge_name = col.replace("_Voltage (V)", "")
+                print(f"Extracted gauge name '{gauge_name}' from column '{col}'")
+
+                # Find matching gauge in metadata
+                matches = [g for g in gauges if g.get("name") == gauge_name]
+
+                if len(matches) == 0:
+                    print(
+                        f"Warning: No gauge found for '{gauge_name}', defaulting to upstream"
+                    )
+                    gauge_locations[col] = "upstream"
+                elif len(matches) > 1:
+                    print(
+                        f"Error: Multiple gauges found for '{gauge_name}', using first match"
+                    )
+                    gauge_locations[col] = matches[0].get("gauge_location", "upstream")
+                else:
+                    # Single match found
+                    location = matches[0].get("gauge_location", "upstream")
+                    print(f"Gauge '{gauge_name}' assigned to {location}")
+                    gauge_locations[col] = location
+            else:
+                print(
+                    f"Warning: Column '{col}' doesn't match expected format, defaulting to upstream"
+                )
+                gauge_locations[col] = "upstream"
+
+        return gauge_locations
+
+    def parse_csv_with_metadata(self, contents, filename):
+        """
+        Parse uploaded CSV file and automatically look for JSON metadata.
+        JSON is parsed first to get version information for processing decisions.
+
+        Args:
+            contents: Base64 encoded file content
+            filename: Name of the uploaded CSV file
+
+        Returns:
+            dict: Dictionary containing parsed data, metadata, and processing info
+        """
+        result = {
+            "data": None,
+            "metadata": None,
+            "success": False,
+            "error": None,
+            "filename": filename,
+            "version": None,
+        }
+
+        try:
+            # First, try to find and parse JSON metadata in the same directory
+            # Since we're in a web upload context, we can't directly access the file system
+            # We'll need to implement a way to upload both files or read from a known location
+
+            # For now, let's try to construct the expected JSON path and read it
+            # This assumes the CSV is being uploaded from a specific directory structure
+            base_name = filename.replace(".csv", "")
+            expected_json_name = "run_metadata.json"
+            print(f"Looking for metadata file: {expected_json_name}")
+
+            # Try to read the JSON metadata from the same directory
+            # Note: This is a simplified approach - in production you might want
+            # to upload both files or have a different workflow
+            import os
+
+            metadata = None
+
+            # Check if we can find the JSON file in common locations
+            possible_paths = [
+                f"results/08.12/test_run_4_11h05/run_metadata.json",  # Known test location
+                f"run_metadata.json",  # Same directory
+                expected_json_name,
+            ]
+
+            for json_path in possible_paths:
+                try:
+                    if os.path.exists(json_path):
+                        with open(json_path, "r") as f:
+                            metadata = json.load(f)
+                        print(f"Successfully loaded metadata from {json_path}")
+                        break
+                except Exception as e:
+                    print(f"Could not read {json_path}: {e}")
+                    continue
+
+            if metadata is None:
+                # Fallback to basic metadata if JSON not found
+                print("Warning: Could not find run_metadata.json, using basic metadata")
+                metadata = {
+                    "version": "1.0",
+                    "run_info": {"test_mode": True},
+                    "gauges": [],  # Empty gauges list
+                }
+
+            # Parse the version first (as requested)
+            version = metadata.get("version", "1.0")
+            result["version"] = version
+            result["metadata"] = metadata
+            print(f"Processing with version: {version}")
+
+            # Now decode and parse the CSV content
+            content_type, content_string = contents.split(",")
+            decoded = base64.b64decode(content_string)
+
+            # Read CSV from the decoded content
+            df = pd.read_csv(io.StringIO(decoded.decode("utf-8")))
+
+            if df.empty:
+                result["error"] = "CSV file is empty"
+                return result
+
+            # Validate we have at least 2 columns (time + at least 1 voltage)
+            if len(df.columns) < 2:
+                result["error"] = f"Expected at least 2 columns, got {len(df.columns)}"
+                return result
+
+            # Process voltage columns and validate against metadata
+            voltage_columns = list(df.columns[1:])  # All columns except first (time)
+            gauge_locations = self._determine_gauge_locations(voltage_columns, metadata)
+
+            result["data"] = df
+            result["success"] = True
+
+            # Update metadata with actual CSV information and gauge locations
+            result["metadata"].update(
+                {
+                    "csv_columns": list(df.columns),
+                    "rows": len(df),
+                    "time_column": df.columns[0],
+                    "voltage_columns": voltage_columns,
+                    "gauge_locations": gauge_locations,
+                }
+            )
+
+            print(
+                f"Successfully parsed {filename} with {len(df)} rows and {len(df.columns)} columns"
+            )
+            print(f"Columns: {list(df.columns)}")
+            print(f"Version-based processing: {version}")
+
+        except Exception as e:
+            result["error"] = f"Error parsing file {filename}: {e!s}"
+            print(result["error"])
+
+        return result
 
     def parse_uploaded_file(self, contents, filename):
         """
@@ -312,7 +586,7 @@ class DataPlotter:
                             [
                                 dbc.Card(
                                     [
-                                        dbc.CardHeader("Upstream Pressure"),
+                                        dbc.CardHeader("Voltage Measurements"),
                                         dbc.CardBody([dcc.Graph(id="upstream-plot")]),
                                     ]
                                 ),
@@ -323,7 +597,7 @@ class DataPlotter:
                             [
                                 dbc.Card(
                                     [
-                                        dbc.CardHeader("Downstream Pressure"),
+                                        dbc.CardHeader("Additional Data"),
                                         dbc.CardBody([dcc.Graph(id="downstream-plot")]),
                                     ]
                                 ),
@@ -1079,7 +1353,7 @@ class DataPlotter:
         )
 
     def register_callbacks(self):
-        # Callback to handle file upload
+        # Callback to handle folder upload (multiple files)
         @self.app.callback(
             [
                 Output("upload-status", "children"),
@@ -1089,7 +1363,7 @@ class DataPlotter:
             [Input("upload-data", "contents")],
             [State("upload-data", "filename")],
         )
-        def handle_file_upload(contents, filename):
+        def handle_csv_upload(contents, filename):
             if contents is None:
                 return (
                     "",
@@ -1097,74 +1371,116 @@ class DataPlotter:
                     self.create_dataset_table(),
                 )
 
-            # Parse the uploaded file
-            new_data = self.parse_uploaded_file(contents, filename)
+            # Handle single CSV file upload with automatic JSON detection
+            if isinstance(contents, str) and isinstance(filename, str):
+                # Parse CSV with metadata (JSON parsed first for version info)
+                result = self.parse_csv_with_metadata(contents, filename)
 
-            if not new_data.empty:
-                # Determine which plot to add to: first upload goes to upstream, second to downstream
-                total_datasets = len(self.upstream_datasets) + len(
-                    self.downstream_datasets
-                )
+                if result["success"] and result["data"] is not None:
+                    df = result["data"]
+                    metadata = result["metadata"]
+                    version = result["version"]
+                    gauge_locations = metadata.get("gauge_locations", {})
 
-                if total_datasets % 2 == 0:  # Even number = upstream (0, 2, 4, ...)
-                    target_datasets = self.upstream_datasets
-                    plot_type = "Upstream"
-                    dataset_id = f"upstream_dataset_{len(self.upstream_datasets) + 1}"
-                    color = self.get_next_color(len(self.upstream_datasets))
-                else:  # Odd number = downstream (1, 3, 5, ...)
-                    target_datasets = self.downstream_datasets
-                    plot_type = "Downstream"
-                    dataset_id = (
-                        f"downstream_dataset_{len(self.downstream_datasets) + 1}"
+                    # Create dataset name from metadata
+                    dataset_name = metadata.get(
+                        "run_name", filename.replace(".csv", "")
                     )
-                    color = self.get_next_color(len(self.downstream_datasets))
 
-                dataset = {
-                    "data": new_data,
-                    "filename": filename,
-                    "display_name": f"{plot_type} Dataset {len(target_datasets) + 1}",
-                    "color": color,
-                    "visible": True,
-                    "id": dataset_id,
-                }
-                target_datasets.append(dataset)
+                    # Now we'll create one dataset but track gauge locations for plotting
+                    voltage_columns = metadata.get(
+                        "voltage_columns", list(df.columns[1:])
+                    )
 
-                return (
-                    dbc.Alert(
-                        [
-                            html.I(className="fas fa-check-circle me-2"),
-                            f"Successfully loaded {filename} to {plot_type} plot with {len(new_data)} data points. "
-                            f"Total datasets: {len(self.upstream_datasets) + len(self.downstream_datasets)}",
-                        ],
-                        color="success",
-                        dismissable=True,
-                        duration=4000,
-                        style={
-                            "borderRadius": "8px",
-                            "boxShadow": "0 4px 12px rgba(0,0,0,0.15)",
-                            "border": "1px solid #d4edda",
-                        },
-                    ),
-                    len(self.upstream_datasets) + len(self.downstream_datasets),
-                    self.create_dataset_table(),
-                )
+                    # Separate columns by location for reference
+                    upstream_columns = [
+                        col
+                        for col in voltage_columns
+                        if gauge_locations.get(col, "upstream") == "upstream"
+                    ]
+                    downstream_columns = [
+                        col
+                        for col in voltage_columns
+                        if gauge_locations.get(col, "upstream") == "downstream"
+                    ]
+
+                    print(f"DEBUG: Upstream columns: {upstream_columns}")
+                    print(f"DEBUG: Downstream columns: {downstream_columns}")
+
+                    # Create single dataset with all data but include location info
+                    dataset_id = f"voltage_dataset_{len(self.upstream_datasets) + 1}"
+                    color = self.get_next_color(len(self.upstream_datasets))
+
+                    dataset = {
+                        "data": df,
+                        "metadata": metadata,
+                        "filename": filename,
+                        "display_name": dataset_name,
+                        "color": color,
+                        "visible": True,
+                        "id": dataset_id,
+                        "data_type": "voltage_measurements",
+                        "version": version,
+                        "gauge_locations": gauge_locations,
+                        "upstream_columns": upstream_columns,
+                        "downstream_columns": downstream_columns,
+                    }
+
+                    # Add to upstream datasets (we'll handle plotting logic elsewhere)
+                    self.upstream_datasets.append(dataset)
+
+                    print(
+                        f"DEBUG: Added single dataset with {len(voltage_columns)} columns"
+                    )
+                    print(f"DEBUG: Total datasets: {len(self.upstream_datasets)}")
+                    print(f"DEBUG: Dataset data shape: {df.shape}")
+
+                    return (
+                        dbc.Alert(
+                            [
+                                html.I(className="fas fa-check-circle me-2"),
+                                f"Successfully loaded {dataset_name} (v{version}) with {len(df)} data points. "
+                                f"Upstream: {len(upstream_columns)} gauges, Downstream: {len(downstream_columns)} gauges",
+                            ],
+                            color="success",
+                            dismissable=True,
+                            duration=5000,
+                            style={
+                                "borderRadius": "8px",
+                                "boxShadow": "0 4px 12px rgba(0,0,0,0.15)",
+                                "border": "1px solid #d4edda",
+                            },
+                        ),
+                        len(self.upstream_datasets) + len(self.downstream_datasets),
+                        self.create_dataset_table(),
+                    )
+                else:
+                    error_msg = result.get("error", "Unknown error processing CSV file")
+                    return (
+                        dbc.Alert(
+                            [
+                                html.I(className="fas fa-exclamation-triangle me-2"),
+                                f"Error: {error_msg}",
+                            ],
+                            color="danger",
+                            dismissable=True,
+                            duration=5000,
+                        ),
+                        len(self.upstream_datasets) + len(self.downstream_datasets),
+                        self.create_dataset_table(),
+                    )
             else:
                 return (
                     dbc.Alert(
                         [
-                            html.I(className="fas fa-exclamation-circle me-2"),
-                            f"Failed to load {filename}. Please check the file format.",
+                            html.I(className="fas fa-info-circle me-2"),
+                            "Please upload a single CSV file.",
                         ],
-                        color="danger",
+                        color="info",
                         dismissable=True,
                         duration=4000,
-                        style={
-                            "borderRadius": "8px",
-                            "boxShadow": "0 4px 12px rgba(0,0,0,0.15)",
-                            "border": "1px solid #f5c6cb",
-                        },
                     ),
-                    len(self.datasets),
+                    len(self.upstream_datasets) + len(self.downstream_datasets),
                     self.create_dataset_table(),
                 )
 
@@ -1505,39 +1821,80 @@ class DataPlotter:
             color = dataset["color"]
 
             if not data.empty:
-                # Check if the required columns exist
-                required_cols = ["RelativeTime", "Pressure (Torr)"]
-                if all(col in data.columns for col in required_cols):
-                    # Extract all data from CSV
-                    time_data = data["RelativeTime"].values
-                    pressure_data = data["Pressure (Torr)"].values
+                # Check dataset type and handle accordingly
+                data_type = dataset.get("data_type", "pressure")
 
-                    # Determine trace mode based on error bars setting
-                    mode = "lines+markers"
-                    error_y = None
+                if data_type == "voltage_measurements":
+                    # Handle voltage data - plot all voltage columns
+                    time_column = data.columns[0]  # First column is time
+                    voltage_columns = data.columns[1:]  # Rest are voltage columns
 
-                    # Add error bars if requested and data available
-                    if show_error_bars and "Error" in data.columns:
-                        error_data = data["Error"].values
-                        error_y = dict(type="data", array=error_data, visible=True)
+                    if len(voltage_columns) > 0:
+                        time_data = data[time_column].values
 
-                    fig.add_trace(
-                        go.Scatter(
-                            x=time_data,
-                            y=pressure_data,
-                            mode=mode,
-                            name=display_name,
-                            line=dict(color=color, width=2),
-                            marker=dict(size=2),
-                            error_y=error_y,
+                        # Plot each voltage column as a separate trace
+                        for i, voltage_col in enumerate(voltage_columns):
+                            voltage_data = data[voltage_col].values
+
+                            # Create unique trace name
+                            trace_name = f"{display_name} - {voltage_col}"
+
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=time_data,
+                                    y=voltage_data,
+                                    mode="lines+markers",
+                                    name=trace_name,
+                                    line=dict(color=color, width=2),
+                                    marker=dict(size=2),
+                                )
+                            )
+                else:
+                    # Handle pressure data (legacy)
+                    required_cols = ["RelativeTime", "Pressure (Torr)"]
+                    if all(col in data.columns for col in required_cols):
+                        # Extract all data from CSV
+                        time_data = data["RelativeTime"].values
+                        pressure_data = data["Pressure (Torr)"].values
+
+                        # Determine trace mode based on error bars setting
+                        mode = "lines+markers"
+                        error_y = None
+
+                        # Add error bars if requested and data available
+                        if show_error_bars and "Error" in data.columns:
+                            error_data = data["Error"].values
+                            error_y = dict(type="data", array=error_data, visible=True)
+
+                        fig.add_trace(
+                            go.Scatter(
+                                x=time_data,
+                                y=pressure_data,
+                                mode=mode,
+                                name=display_name,
+                                line=dict(color=color, width=2),
+                                marker=dict(size=2),
+                                error_y=error_y,
+                            )
                         )
-                    )
 
-        # Configure the layout
+        # Configure the layout - detect data type for appropriate labels
+        has_voltage_data = any(
+            dataset.get("data_type") == "voltage_measurements"
+            for dataset in self.upstream_datasets + self.downstream_datasets
+        )
+
+        if has_voltage_data:
+            y_title = "Voltage (V)"
+            default_y_scale = "linear"
+        else:
+            y_title = "Pressure (Torr)"
+            default_y_scale = "log"
+
         fig.update_layout(
             height=600,
             xaxis_title="Relative Time (s)",
-            yaxis_title="Pressure (Torr)",
+            yaxis_title=y_title,
             template="plotly_white",
             margin=dict(l=60, r=30, t=40, b=60),
             legend=dict(
@@ -1547,7 +1904,7 @@ class DataPlotter:
 
         # Apply axis scaling
         x_axis_type = x_scale if x_scale else "linear"
-        y_axis_type = y_scale if y_scale else "log"
+        y_axis_type = y_scale if y_scale else default_y_scale
 
         fig.update_xaxes(type=x_axis_type)
         fig.update_yaxes(type=y_axis_type)
@@ -1577,66 +1934,178 @@ class DataPlotter:
         y_max=None,
         error_bars=None,
     ):
-        """Generate the upstream pressure plot"""
+        """Generate the voltage measurements plot"""
+        print(
+            f"DEBUG: _generate_upstream_plot called with {len(self.upstream_datasets)} datasets"
+        )
         fig = go.Figure()
 
         for dataset in self.upstream_datasets:
+            print(
+                f"DEBUG: Processing dataset: {dataset.get('display_name', 'Unknown')}"
+            )
+            print(f"DEBUG: Dataset visible: {dataset.get('visible', True)}")
+            print(f"DEBUG: Dataset data_type: {dataset.get('data_type', 'pressure')}")
+
             # Skip invisible datasets
             if not dataset.get("visible", True):
+                print("DEBUG: Skipping invisible dataset")
                 continue
 
             data = dataset["data"]
             display_name = dataset.get("display_name", dataset["filename"])
             color = dataset["color"]
+            data_type = dataset.get("data_type", "pressure")
+
+            print(f"DEBUG: Data shape: {data.shape}")
+            print(f"DEBUG: Data columns: {list(data.columns)}")
 
             if not data.empty:
-                # Check if the required columns exist for upstream
-                required_cols = ["RelativeTime", "Pressure (Torr)"]
-                if all(col in data.columns for col in required_cols):
-                    # Extract all data from CSV
-                    time_data = data["RelativeTime"].values
-                    pressure_data = data["Pressure (Torr)"].values
+                if data_type == "voltage_measurements":
+                    # Handle voltage data - plot only upstream columns for upstream plot
+                    time_col = data.columns[0]  # First column should be realtime
 
-                    # Create the trace based on error bars setting
-                    trace_kwargs = {
-                        "x": time_data,
-                        "y": pressure_data,
-                        "mode": "lines+markers",
-                        "name": display_name,
-                        "line": dict(color=color, width=2),
-                        "marker": dict(size=2),
-                    }
+                    # Get upstream columns for this dataset
+                    upstream_columns = dataset.get("upstream_columns", [])
+                    voltage_cols = upstream_columns  # Only plot upstream columns
 
-                    # Add error bars if enabled
-                    if error_bars:
-                        error_values = self.calculate_error_bars(data, dataset)
-                        if error_values is not None:
-                            trace_kwargs["error_y"] = dict(
-                                type="data",
-                                array=error_values,
-                                visible=True,
-                                color=color,
-                                thickness=1.5,
-                                width=3,
+                    print(f"DEBUG: Upstream columns to plot: {voltage_cols}")
+
+                    # Define colors for voltage channels
+                    channel_colors = [
+                        "#FF6B6B",  # Red
+                        "#4ECDC4",  # Teal
+                        "#45B7D1",  # Blue
+                        "#96CEB4",  # Green
+                        "#FFD93D",  # Yellow
+                        "#FF8A80",  # Light Red
+                        "#A7FFEB",  # Light Teal
+                        "#B3E5FC",  # Light Blue
+                    ]
+
+                    for i, voltage_col in enumerate(voltage_cols):
+                        if voltage_col in data.columns:
+                            time_data_raw = data[time_col].values
+                            voltage_data = data[voltage_col].values
+
+                            # Convert timestamp strings to numeric values
+                            if len(time_data_raw) > 0 and isinstance(
+                                time_data_raw[0], str
+                            ):
+                                # Parse timestamps and convert to seconds from start
+                                import pandas as pd
+
+                                time_series = pd.to_datetime(time_data_raw)
+                                start_time = time_series[
+                                    0
+                                ]  # Use indexing instead of iloc
+                                time_data = (
+                                    (time_series - start_time).total_seconds().values
+                                )
+                            else:
+                                time_data = time_data_raw
+
+                            print(f"DEBUG: Adding trace for {voltage_col}")
+                            print(f"DEBUG: Time data length: {len(time_data)}")
+                            print(f"DEBUG: Voltage data length: {len(voltage_data)}")
+                            print(
+                                f"DEBUG: Time data range: {time_data.min()} to {time_data.max()}"
+                            )
+                            print(
+                                f"DEBUG: Voltage data range: {voltage_data.min()} to {voltage_data.max()}"
                             )
 
-                    fig.add_trace(go.Scatter(**trace_kwargs))
+                            # Create trace for each voltage channel
+                            trace_kwargs = {
+                                "x": time_data,
+                                "y": voltage_data,
+                                "mode": "lines+markers",
+                                "name": f"{display_name} - {voltage_col}",
+                                "line": dict(
+                                    color=channel_colors[i % len(channel_colors)],
+                                    width=2,
+                                ),
+                                "marker": dict(size=2),
+                            }
 
-        # Configure the layout
-        fig.update_layout(
-            height=500,
-            xaxis_title="Relative Time (s)",
-            yaxis_title="Pressure (Torr)",
-            template="plotly_white",
-            margin=dict(l=60, r=30, t=40, b=60),
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
-            ),
-        )
+                            # Add error bars if enabled
+                            if error_bars:
+                                trace_kwargs["error_y"] = dict(
+                                    type="constant",
+                                    value=voltage_data.std() * 0.1,  # 10% of std dev
+                                    visible=True,
+                                )
+
+                            fig.add_trace(go.Scatter(**trace_kwargs))
+                            print(f"DEBUG: Successfully added trace for {voltage_col}")
+
+                else:
+                    # Handle legacy pressure data format
+                    required_cols = ["RelativeTime", "Pressure (Torr)"]
+                    if all(col in data.columns for col in required_cols):
+                        time_data = data["RelativeTime"].values
+                        pressure_data = data["Pressure (Torr)"].values
+
+                        trace_kwargs = {
+                            "x": time_data,
+                            "y": pressure_data,
+                            "mode": "lines+markers",
+                            "name": display_name,
+                            "line": dict(color=color, width=2),
+                            "marker": dict(size=2),
+                        }
+
+                        # Add error bars if enabled for pressure data
+                        if error_bars:
+                            error_values = self.calculate_error_bars(data, dataset)
+                            if error_values is not None:
+                                trace_kwargs["error_y"] = dict(
+                                    type="data",
+                                    array=error_values,
+                                    visible=True,
+                                    color=color,
+                                    thickness=1.5,
+                                    width=3,
+                                )
+
+                        fig.add_trace(go.Scatter(**trace_kwargs))
+
+        # Configure the layout based on data type
+        if any(
+            ds.get("data_type") == "voltage_measurements"
+            for ds in self.upstream_datasets
+        ):
+            # Voltage data layout
+            fig.update_layout(
+                height=500,
+                xaxis_title="Time",
+                yaxis_title="Voltage (V)",
+                template="plotly_white",
+                margin=dict(l=60, r=30, t=40, b=60),
+                legend=dict(
+                    orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
+                ),
+            )
+            # Default to linear scale for voltage data
+            default_y_scale = "linear"
+        else:
+            # Pressure data layout
+            fig.update_layout(
+                height=500,
+                xaxis_title="Relative Time (s)",
+                yaxis_title="Pressure (Torr)",
+                template="plotly_white",
+                margin=dict(l=60, r=30, t=40, b=60),
+                legend=dict(
+                    orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
+                ),
+            )
+            # Default to log scale for pressure data
+            default_y_scale = "log"
 
         # Apply axis scaling
         x_axis_type = x_scale if x_scale else "linear"
-        y_axis_type = y_scale if y_scale else "log"
+        y_axis_type = y_scale if y_scale else default_y_scale
 
         fig.update_xaxes(type=x_axis_type)
         fig.update_yaxes(type=y_axis_type)
@@ -1666,10 +2135,11 @@ class DataPlotter:
         y_max=None,
         error_bars=None,
     ):
-        """Generate the downstream pressure plot"""
+        """Generate the downstream voltage plot"""
         fig = go.Figure()
 
-        for dataset in self.downstream_datasets:
+        # Look through all datasets for ones with downstream columns
+        for dataset in self.upstream_datasets:
             # Skip invisible datasets
             if not dataset.get("visible", True):
                 continue
@@ -1677,40 +2147,119 @@ class DataPlotter:
             data = dataset["data"]
             display_name = dataset.get("display_name", dataset["filename"])
             color = dataset["color"]
+            data_type = dataset.get("data_type", "pressure")
+
+            print(f"DEBUG: Downstream - checking dataset: {display_name}")
+            print(f"DEBUG: Data shape: {data.shape}")
+            print(f"DEBUG: Data columns: {list(data.columns)}")
 
             if not data.empty:
-                # Check if the required columns exist for downstream
-                # For now, using same data but could be different columns
-                required_cols = ["RelativeTime", "Pressure (Torr)"]
-                if all(col in data.columns for col in required_cols):
-                    # Extract all data from CSV
-                    time_data = data["RelativeTime"].values
-                    pressure_data = data["Pressure (Torr)"].values
+                if data_type == "voltage_measurements":
+                    # Handle voltage data - plot only downstream columns
+                    time_col = data.columns[0]  # First column should be realtime
 
-                    # Create the trace based on error bars setting
-                    trace_kwargs = {
-                        "x": time_data,
-                        "y": pressure_data,
-                        "mode": "lines+markers",
-                        "name": display_name,
-                        "line": dict(color=color, width=2),
-                        "marker": dict(size=2),
-                    }
+                    # Get downstream columns for this dataset
+                    downstream_columns = dataset.get("downstream_columns", [])
+                    voltage_cols = downstream_columns  # Only plot downstream columns
 
-                    # Add error bars if enabled
-                    if error_bars:
-                        error_values = self.calculate_error_bars(data, dataset)
-                        if error_values is not None:
-                            trace_kwargs["error_y"] = dict(
-                                type="data",
-                                array=error_values,
-                                visible=True,
-                                color=color,
-                                thickness=1.5,
-                                width=3,
-                            )
+                    print(f"DEBUG: Downstream columns to plot: {voltage_cols}")
 
-                    fig.add_trace(go.Scatter(**trace_kwargs))
+                    # Define colors for voltage channels
+                    channel_colors = [
+                        "#FF6B6B",  # Red
+                        "#4ECDC4",  # Teal
+                        "#45B7D1",  # Blue
+                        "#96CEB4",  # Green
+                        "#FFD93D",  # Yellow
+                        "#FF8A80",  # Light Red
+                        "#A7FFEB",  # Light Teal
+                        "#B3E5FC",  # Light Blue
+                    ]
+
+                    for i, voltage_col in enumerate(voltage_cols):
+                        if voltage_col in data.columns:
+                            time_data_raw = data[time_col].values
+                            voltage_data = data[voltage_col].values
+
+                            # Convert timestamp strings to numeric values
+                            if len(time_data_raw) > 0 and isinstance(
+                                time_data_raw[0], str
+                            ):
+                                # Parse timestamps and convert to seconds from start
+                                import pandas as pd
+
+                                time_series = pd.to_datetime(time_data_raw)
+                                start_time = time_series[0]
+                                time_data = (
+                                    (time_series - start_time).total_seconds().values
+                                )
+                            else:
+                                time_data = time_data_raw
+
+                            print(f"DEBUG: Adding downstream trace for {voltage_col}")
+                            print(f"DEBUG: Time data length: {len(time_data)}")
+                            print(f"DEBUG: Voltage data length: {len(voltage_data)}")
+
+                            # Create trace for each voltage channel
+                            trace_kwargs = {
+                                "x": time_data,
+                                "y": voltage_data,
+                                "mode": "lines+markers",
+                                "name": f"{display_name} - {voltage_col}",
+                                "line": dict(
+                                    color=channel_colors[i % len(channel_colors)],
+                                    width=2,
+                                ),
+                                "marker": dict(size=2),
+                            }
+
+                            # Add error bars if enabled
+                            if error_bars:
+                                trace_kwargs["error_y"] = dict(
+                                    type="constant",
+                                    value=voltage_data.std() * 0.1,  # 10% of std dev
+                                    visible=True,
+                                    color=channel_colors[i % len(channel_colors)],
+                                    thickness=1.5,
+                                    width=3,
+                                )
+
+                            fig.add_trace(go.Scatter(**trace_kwargs))
+                        else:
+                            print(f"DEBUG: Column {voltage_col} not found in data")
+
+                else:
+                    # Handle pressure data (legacy code)
+                    required_cols = ["RelativeTime", "Pressure (Torr)"]
+                    if all(col in data.columns for col in required_cols):
+                        # Extract all data from CSV
+                        time_data = data["RelativeTime"].values
+                        pressure_data = data["Pressure (Torr)"].values
+
+                        # Create the trace based on error bars setting
+                        trace_kwargs = {
+                            "x": time_data,
+                            "y": pressure_data,
+                            "mode": "lines+markers",
+                            "name": display_name,
+                            "line": dict(color=color, width=2),
+                            "marker": dict(size=2),
+                        }
+
+                        # Add error bars if enabled
+                        if error_bars:
+                            error_values = self.calculate_error_bars(data, dataset)
+                            if error_values is not None:
+                                trace_kwargs["error_y"] = dict(
+                                    type="data",
+                                    array=error_values,
+                                    visible=True,
+                                    color=color,
+                                    thickness=1.5,
+                                    width=3,
+                                )
+
+                        fig.add_trace(go.Scatter(**trace_kwargs))
 
         # Configure the layout
         fig.update_layout(
@@ -1769,3 +2318,8 @@ class DataPlotter:
     def stop(self):
         """Stop the data plotter (CSV mode - nothing to stop)"""
         pass
+
+
+if __name__ == "__main__":
+    plotter = DataPlotter()
+    plotter.start()
