@@ -1972,12 +1972,19 @@ class DataPlotter:
                             else:
                                 time_data = time_data_raw
 
+                            # Extract gauge name from voltage column (remove "_Voltage (V)" suffix)
+                            gauge_name = (
+                                voltage_col.replace("_Voltage (V)", "")
+                                if voltage_col.endswith("_Voltage (V)")
+                                else voltage_col
+                            )
+
                             # Create trace for each voltage channel
                             trace_kwargs = {
                                 "x": time_data,
                                 "y": voltage_data,
                                 "mode": "lines+markers",
-                                "name": f"{display_name} - {voltage_col}",
+                                "name": gauge_name,
                                 "line": dict(
                                     color=channel_colors[i % len(channel_colors)],
                                     width=2,
@@ -2146,12 +2153,19 @@ class DataPlotter:
                             else:
                                 time_data = time_data_raw
 
+                            # Extract gauge name from voltage column (remove "_Voltage (V)" suffix)
+                            gauge_name = (
+                                voltage_col.replace("_Voltage (V)", "")
+                                if voltage_col.endswith("_Voltage (V)")
+                                else voltage_col
+                            )
+
                             # Create trace for each voltage channel
                             trace_kwargs = {
                                 "x": time_data,
                                 "y": voltage_data,
                                 "mode": "lines+markers",
-                                "name": f"{display_name} - {voltage_col}",
+                                "name": gauge_name,
                                 "line": dict(
                                     color=channel_colors[i % len(channel_colors)],
                                     width=2,
