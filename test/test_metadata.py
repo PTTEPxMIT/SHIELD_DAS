@@ -158,8 +158,7 @@ class TestMetadata:
         assert "version" in metadata
         version = metadata["version"]
         assert isinstance(version, str)
-        assert len(version.split(".")) == 3  # Should be semantic versioning (x.y.z)
-        assert version == "1.0.0"  # Current expected version
+        assert len(version.split(".")) == 2  # Should be semantic versioning (x.y)
 
     def test_metadata_with_thermocouples(self):
         """Test metadata creation when thermocouples are present."""

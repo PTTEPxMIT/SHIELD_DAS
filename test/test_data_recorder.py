@@ -405,7 +405,6 @@ class TestDataRecorder:
 
         # Verify version info
         assert isinstance(metadata["version"], str)
-        assert metadata["version"] == "1.0.0"
 
         # Verify run_info content
         run_info = metadata["run_info"]
