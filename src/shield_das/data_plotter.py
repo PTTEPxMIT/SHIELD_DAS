@@ -157,50 +157,125 @@ class DataPlotter:
                     [
                         dbc.Col(
                             html.H1(
-                                "SHIELD Data Visualization",
-                                className="text-center mb-4",
+                                "SHIELD Data Visualisation",
+                                className="text-center mb-6",
                             ),
                             width=12,
                         ),
                     ]
                 ),
+                # Dataset Management Card at the top
                 dbc.Row(
                     [
-                        dbc.Col(width=8),  # Empty column for spacing
                         dbc.Col(
-                            html.Div(
-                                [
-                                    dcc.Upload(
-                                        id="upload-data",
-                                        children=dbc.Button(
-                                            [
-                                                html.I(className="fa fa-upload me-2"),
-                                                "Upload CSV",
-                                            ],
-                                            color="primary",
-                                            size="sm",
-                                            className="me-2",
+                            [
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader(
+                                            dbc.Row(
+                                                [
+                                                    dbc.Col(
+                                                        "Dataset Management",
+                                                        className="d-flex align-items-center",
+                                                    ),
+                                                    dbc.Col(
+                                                        dbc.Button(
+                                                            html.I(
+                                                                className="fas fa-chevron-up"
+                                                            ),
+                                                            id="collapse-dataset-button",
+                                                            color="light",
+                                                            size="sm",
+                                                            className="ms-auto",
+                                                            style={
+                                                                "border": "1px solid #dee2e6",
+                                                                "background-color": "#f8f9fa",
+                                                                "box-shadow": "0 1px 3px rgba(0,0,0,0.1)",
+                                                                "width": "30px",
+                                                                "height": "30px",
+                                                                "padding": "0",
+                                                                "display": "flex",
+                                                                "align-items": "center",
+                                                                "justify-content": "center",
+                                                            },
+                                                        ),
+                                                        width="auto",
+                                                        className="d-flex justify-content-end",
+                                                    ),
+                                                ],
+                                                className="g-0 align-items-center",
+                                            )
                                         ),
-                                        style={
-                                            "display": "inline-block",
-                                        },
-                                        multiple=False,
-                                        accept=".csv",
-                                    ),
-                                    dbc.Button(
-                                        [
-                                            html.I(className="fa fa-trash me-2"),
-                                            "Clear All",
-                                        ],
-                                        id="clear-data",
-                                        color="danger",
-                                        size="sm",
-                                        style={"display": "inline-block"},
-                                    ),
-                                ],
-                                style={"textAlign": "right", "marginTop": "20px"},
-                            ),
-                            width=4,
+                                        dbc.Collapse(
+                                            dbc.CardBody(
+                                                [
+                                                    # Upload and Clear buttons
+                                                    dbc.Row(
+                                                        [
+                                                            dbc.Col(
+                                                                [
+                                                                    html.Div(
+                                                                        [
+                                                                            dcc.Upload(
+                                                                                id="upload-data",
+                                                                                children=dbc.Button(
+                                                                                    [
+                                                                                        html.I(
+                                                                                            className="fa fa-upload me-2"
+                                                                                        ),
+                                                                                        "Upload CSV",
+                                                                                    ],
+                                                                                    color="primary",
+                                                                                    size="sm",
+                                                                                ),
+                                                                                style={
+                                                                                    "display": "inline-block",
+                                                                                    "marginRight": "10px",
+                                                                                },
+                                                                                multiple=False,
+                                                                                accept=".csv",
+                                                                            ),
+                                                                            dbc.Button(
+                                                                                [
+                                                                                    html.I(
+                                                                                        className="fa fa-trash me-2"
+                                                                                    ),
+                                                                                    "Clear All",
+                                                                                ],
+                                                                                id="clear-data",
+                                                                                color="danger",
+                                                                                size="sm",
+                                                                            ),
+                                                                        ],
+                                                                        style={
+                                                                            "display": "flex",
+                                                                            "gap": "10px",
+                                                                            "alignItems": "center",
+                                                                        },
+                                                                    )
+                                                                ],
+                                                                width=12,
+                                                                style={
+                                                                    "textAlign": "left",
+                                                                    "marginBottom": "15px",
+                                                                },
+                                                            ),
+                                                        ]
+                                                    ),
+                                                    # Dataset table
+                                                    html.Div(
+                                                        id="dataset-table-container",
+                                                        children=self.create_dataset_table(),
+                                                    ),
+                                                ]
+                                            ),
+                                            id="collapse-dataset",
+                                            is_open=True,
+                                        ),
+                                    ]
+                                ),
+                            ],
+                            width=12,
                         ),
                     ],
                     className="mb-3",
@@ -677,68 +752,6 @@ class DataPlotter:
                                 ),
                             ],
                             width=6,
-                        ),
-                    ],
-                    className="mt-3",
-                ),
-                # Dataset Management Card
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            [
-                                dbc.Card(
-                                    [
-                                        dbc.CardHeader(
-                                            dbc.Row(
-                                                [
-                                                    dbc.Col(
-                                                        "Dataset Management",
-                                                        className="d-flex align-items-center",
-                                                    ),
-                                                    dbc.Col(
-                                                        dbc.Button(
-                                                            html.I(
-                                                                className="fas fa-chevron-up"
-                                                            ),
-                                                            id="collapse-dataset-button",
-                                                            color="light",
-                                                            size="sm",
-                                                            className="ms-auto",
-                                                            style={
-                                                                "border": "1px solid #dee2e6",
-                                                                "background-color": "#f8f9fa",
-                                                                "box-shadow": "0 1px 3px rgba(0,0,0,0.1)",
-                                                                "width": "30px",
-                                                                "height": "30px",
-                                                                "padding": "0",
-                                                                "display": "flex",
-                                                                "align-items": "center",
-                                                                "justify-content": "center",
-                                                            },
-                                                        ),
-                                                        width="auto",
-                                                        className="d-flex justify-content-end",
-                                                    ),
-                                                ],
-                                                className="g-0 align-items-center",
-                                            )
-                                        ),
-                                        dbc.Collapse(
-                                            dbc.CardBody(
-                                                [
-                                                    html.Div(
-                                                        id="dataset-table-container",
-                                                        children=self.create_dataset_table(),
-                                                    ),
-                                                ]
-                                            ),
-                                            id="collapse-dataset",
-                                            is_open=True,
-                                        ),
-                                    ]
-                                ),
-                            ],
-                            width=12,
                         ),
                     ],
                     className="mt-3",
