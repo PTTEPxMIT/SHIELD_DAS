@@ -166,14 +166,11 @@ class DataPlotter:
             print("Warning: No gauges found in metadata, defaulting all to upstream")
             return {col: "upstream" for col in voltage_columns}
 
-        print(f"Found {len(gauges)} gauges in metadata")
-
         # Process each voltage column
         for col in voltage_columns:
             # Extract gauge name by removing "_Voltage (V)" suffix
             if col.endswith("_Voltage (V)"):
                 gauge_name = col.replace("_Voltage (V)", "")
-                print(f"Extracted gauge name '{gauge_name}' from column '{col}'")
 
                 # Find matching gauge in metadata
                 matches = [g for g in gauges if g.get("name") == gauge_name]
@@ -191,7 +188,6 @@ class DataPlotter:
                 else:
                     # Single match found
                     location = matches[0].get("gauge_location", "upstream")
-                    print(f"Gauge '{gauge_name}' assigned to {location}")
                     gauge_locations[col] = location
             else:
                 print(
@@ -229,9 +225,7 @@ class DataPlotter:
 
             # For now, let's try to construct the expected JSON path and read it
             # This assumes the CSV is being uploaded from a specific directory structure
-            base_name = filename.replace(".csv", "")
             expected_json_name = "run_metadata.json"
-            print(f"Looking for metadata file: {expected_json_name}")
 
             # Try to read the JSON metadata from the same directory
             # Note: This is a simplified approach - in production you might want
@@ -250,12 +244,10 @@ class DataPlotter:
             for json_path in possible_paths:
                 try:
                     if os.path.exists(json_path):
-                        with open(json_path, "r") as f:
+                        with open(json_path) as f:
                             metadata = json.load(f)
-                        print(f"Successfully loaded metadata from {json_path}")
                         break
-                except Exception as e:
-                    print(f"Could not read {json_path}: {e}")
+                except Exception:
                     continue
 
             if metadata is None:
@@ -271,7 +263,6 @@ class DataPlotter:
             version = metadata.get("version", "1.0")
             result["version"] = version
             result["metadata"] = metadata
-            print(f"Processing with version: {version}")
 
             # Now decode and parse the CSV content
             content_type, content_string = contents.split(",")
@@ -1404,9 +1395,6 @@ class DataPlotter:
                         if gauge_locations.get(col, "upstream") == "downstream"
                     ]
 
-                    print(f"DEBUG: Upstream columns: {upstream_columns}")
-                    print(f"DEBUG: Downstream columns: {downstream_columns}")
-
                     # Create single dataset with all data but include location info
                     dataset_id = f"voltage_dataset_{len(self.upstream_datasets) + 1}"
                     color = self.get_next_color(len(self.upstream_datasets))
@@ -1428,12 +1416,6 @@ class DataPlotter:
 
                     # Add to upstream datasets (we'll handle plotting logic elsewhere)
                     self.upstream_datasets.append(dataset)
-
-                    print(
-                        f"DEBUG: Added single dataset with {len(voltage_columns)} columns"
-                    )
-                    print(f"DEBUG: Total datasets: {len(self.upstream_datasets)}")
-                    print(f"DEBUG: Dataset data shape: {df.shape}")
 
                     return (
                         dbc.Alert(
@@ -1935,30 +1917,17 @@ class DataPlotter:
         error_bars=None,
     ):
         """Generate the voltage measurements plot"""
-        print(
-            f"DEBUG: _generate_upstream_plot called with {len(self.upstream_datasets)} datasets"
-        )
         fig = go.Figure()
 
         for dataset in self.upstream_datasets:
-            print(
-                f"DEBUG: Processing dataset: {dataset.get('display_name', 'Unknown')}"
-            )
-            print(f"DEBUG: Dataset visible: {dataset.get('visible', True)}")
-            print(f"DEBUG: Dataset data_type: {dataset.get('data_type', 'pressure')}")
-
             # Skip invisible datasets
             if not dataset.get("visible", True):
-                print("DEBUG: Skipping invisible dataset")
                 continue
 
             data = dataset["data"]
             display_name = dataset.get("display_name", dataset["filename"])
             color = dataset["color"]
             data_type = dataset.get("data_type", "pressure")
-
-            print(f"DEBUG: Data shape: {data.shape}")
-            print(f"DEBUG: Data columns: {list(data.columns)}")
 
             if not data.empty:
                 if data_type == "voltage_measurements":
@@ -1968,8 +1937,6 @@ class DataPlotter:
                     # Get upstream columns for this dataset
                     upstream_columns = dataset.get("upstream_columns", [])
                     voltage_cols = upstream_columns  # Only plot upstream columns
-
-                    print(f"DEBUG: Upstream columns to plot: {voltage_cols}")
 
                     # Define colors for voltage channels
                     channel_colors = [
@@ -2005,16 +1972,6 @@ class DataPlotter:
                             else:
                                 time_data = time_data_raw
 
-                            print(f"DEBUG: Adding trace for {voltage_col}")
-                            print(f"DEBUG: Time data length: {len(time_data)}")
-                            print(f"DEBUG: Voltage data length: {len(voltage_data)}")
-                            print(
-                                f"DEBUG: Time data range: {time_data.min()} to {time_data.max()}"
-                            )
-                            print(
-                                f"DEBUG: Voltage data range: {voltage_data.min()} to {voltage_data.max()}"
-                            )
-
                             # Create trace for each voltage channel
                             trace_kwargs = {
                                 "x": time_data,
@@ -2037,7 +1994,6 @@ class DataPlotter:
                                 )
 
                             fig.add_trace(go.Scatter(**trace_kwargs))
-                            print(f"DEBUG: Successfully added trace for {voltage_col}")
 
                 else:
                     # Handle legacy pressure data format
@@ -2149,10 +2105,6 @@ class DataPlotter:
             color = dataset["color"]
             data_type = dataset.get("data_type", "pressure")
 
-            print(f"DEBUG: Downstream - checking dataset: {display_name}")
-            print(f"DEBUG: Data shape: {data.shape}")
-            print(f"DEBUG: Data columns: {list(data.columns)}")
-
             if not data.empty:
                 if data_type == "voltage_measurements":
                     # Handle voltage data - plot only downstream columns
@@ -2161,8 +2113,6 @@ class DataPlotter:
                     # Get downstream columns for this dataset
                     downstream_columns = dataset.get("downstream_columns", [])
                     voltage_cols = downstream_columns  # Only plot downstream columns
-
-                    print(f"DEBUG: Downstream columns to plot: {voltage_cols}")
 
                     # Define colors for voltage channels
                     channel_colors = [
@@ -2196,10 +2146,6 @@ class DataPlotter:
                             else:
                                 time_data = time_data_raw
 
-                            print(f"DEBUG: Adding downstream trace for {voltage_col}")
-                            print(f"DEBUG: Time data length: {len(time_data)}")
-                            print(f"DEBUG: Voltage data length: {len(voltage_data)}")
-
                             # Create trace for each voltage channel
                             trace_kwargs = {
                                 "x": time_data,
@@ -2225,8 +2171,6 @@ class DataPlotter:
                                 )
 
                             fig.add_trace(go.Scatter(**trace_kwargs))
-                        else:
-                            print(f"DEBUG: Column {voltage_col} not found in data")
 
                 else:
                     # Handle pressure data (legacy code)
