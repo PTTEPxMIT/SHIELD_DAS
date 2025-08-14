@@ -1,25 +1,44 @@
 import base64
-import io
+import json
+import os
+import sys
 import threading
 import webbrowser
 
 import dash
 import dash_bootstrap_components as dbc
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from dash import ALL, MATCH, dcc, html
+from dash import ALL, dcc, html
 from dash.dependencies import Input, Output, State
-from dash.exceptions import PreventUpdate
+from plotly_resampler import FigureResampler
+
+# Import gauge classes
+from .pressure_gauge import Baratron626D_Gauge, CVM211_Gauge, WGM701_Gauge
 
 
 class DataPlotter:
-    def __init__(self, port=8050):
+    def __init__(self, data=None, port=8050):
         """
         Initialize the DataPlotter.
 
         Args:
+            data: Path to a single dataset folder, or list of paths to multiple dataset folders
             port: Port for the Dash server
         """
+
+        # Handle data parameter - convert single path to list for consistent processing
+        if data is None:
+            self.data_paths = []
+        elif isinstance(data, str):
+            self.data_paths = [data]
+        elif isinstance(data, list):
+            self.data_paths = data
+        else:
+            raise ValueError(
+                "data parameter must be a string path, list of paths, or None"
+            )
 
         self.port = port
         self.app = dash.Dash(
@@ -36,6 +55,14 @@ class DataPlotter:
         self.upstream_datasets = []
         self.downstream_datasets = []
 
+        # Store folder-level datasets for management
+        self.folder_datasets = []  # Each folder = 1 dataset with upstream/downstream gauges
+
+        # Process data paths if provided
+        if self.data_paths:
+            self.load_all_data()
+            print("\nData loading complete. Datasets ready for Dash app visualization.")
+
         # Setup the app layout
         self.app.layout = self.create_layout()
 
@@ -45,9 +72,314 @@ class DataPlotter:
         # Flag to track if recording has been started
         self.recording_started = False
 
+    def load_all_data(self):
+        """
+        Load and process data from all specified data paths.
+        """
+        print(f"Loading data from {len(self.data_paths)} dataset(s)")
+
+        for i, data_path in enumerate(self.data_paths):
+            print(
+                f"\n--- Processing dataset {i + 1}/{len(self.data_paths)}: {data_path} ---"
+            )
+            self.load_data(data_path)
+
+    def load_data(self, data_folder):
+        """
+        Load and process data from the specified folder.
+        Read JSON metadata first, then process CSV data based on version.
+
+        Args:
+            data_folder: Path to folder containing JSON metadata and CSV data files
+        """
+        print(f"Loading data from folder: {data_folder}")
+
+        if not os.path.exists(data_folder):
+            print(f"ERROR: Data folder not found: {data_folder}")
+            return
+
+        try:
+            # Process JSON metadata
+            metadata = self.process_json_metadata(data_folder)
+            if metadata is None:
+                return
+
+            # Process CSV data based on version
+            self.process_csv_data(metadata, data_folder)
+
+        except Exception as e:
+            print(f"ERROR loading data from {data_folder}: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    def process_json_metadata(self, data_folder):
+        """
+        Find and process JSON metadata file.
+
+        Args:
+            data_folder: Path to folder containing JSON metadata
+
+        Returns:
+            dict: Parsed metadata or None if error
+        """
+        # Find JSON files
+        json_files = [f for f in os.listdir(data_folder) if f.lower().endswith(".json")]
+
+        if not json_files:
+            print(f"ERROR: No JSON file found in {data_folder}")
+            return None
+
+        json_path = os.path.join(data_folder, json_files[0])
+        print(f"Found JSON metadata: {json_path}")
+
+        # Read JSON metadata
+        with open(json_path) as f:
+            metadata = json.load(f)
+
+        return metadata
+
+    def process_csv_data(self, metadata, data_folder):
+        """
+        Process CSV data based on metadata version.
+
+        Args:
+            metadata: Parsed JSON metadata dictionary
+            data_folder: Path to folder containing CSV data files
+        """
+        version = metadata.get("version")
+
+        if version == "0.0":
+            self.process_csv_v0_0(metadata, data_folder)
+        elif version == "1.0":
+            self.process_csv_v1_0(metadata, data_folder)
+        else:
+            raise NotImplementedError(
+                f"Unsupported metadata version: {version}. "
+                f"Only versions '0.0' and '1.0' are supported."
+            )
+
+    def create_gauge_instances(self, gauges_metadata, data_folder):
+        """Create gauge instances from metadata and load CSV data.
+
+        Args:
+            gauges_metadata: Metadata for gauges
+            data_folder: Path to folder containing CSV data files
+        """
+        gauge_instances = []
+
+        # Mapping of gauge types to classes
+        gauge_type_map = {
+            "WGM701_Gauge": WGM701_Gauge,
+            "CVM211_Gauge": CVM211_Gauge,
+            "Baratron626D_Gauge": Baratron626D_Gauge,
+        }
+
+        for gauge_data in gauges_metadata:
+            gauge_type = gauge_data.get("type")
+
+            if gauge_type not in gauge_type_map:
+                raise ValueError(f"Unknown gauge type: {gauge_type}")
+
+            gauge_class = gauge_type_map[gauge_type]
+
+            # Extract common parameters
+            name = gauge_data.get("name")
+            ain_channel = gauge_data.get("ain_channel")
+            gauge_location = gauge_data.get("gauge_location")
+
+            # Create instance based on gauge type
+            if gauge_type == "Baratron626D_Gauge":
+                # Baratron626D requires additional full_scale_Torr parameter
+                full_scale_torr = gauge_data.get("full_scale_torr")
+                if full_scale_torr is None:
+                    raise ValueError(
+                        f"Baratron626D gauge '{name}' missing required parameter",
+                        "'full_scale_torr'",
+                    )
+                gauge_instance = gauge_class(
+                    ain_channel, name, gauge_location, full_scale_torr
+                )
+            else:
+                # WGM701 and CVM211 use the same constructor parameters
+                gauge_instance = gauge_class(name, ain_channel, gauge_location)
+
+            # Load CSV data for this gauge
+            csv_filename = gauge_data.get("filename")
+            if not csv_filename:
+                raise ValueError(
+                    f"Gauge '{name}' missing required 'filename' field in metadata"
+                )
+
+            csv_path = os.path.join(data_folder, csv_filename)
+            if not os.path.exists(csv_path):
+                raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+            # Load CSV data using numpy
+            data = np.genfromtxt(csv_path, delimiter=",", names=True)
+
+            # Extract RelativeTime and Pressure columns (indices 1 and 2)
+            gauge_instance.time_data = data["RelativeTime"]
+            gauge_instance.pressure_data = data["Pressure_Torr"]
+
+            print(f"Loaded CSV data for {name}: {len(data)} rows")
+
+            gauge_instances.append(gauge_instance)
+            print(f"Created gauge instance: {gauge_type} - {name}")
+
+        return gauge_instances
+
+    def process_csv_v0_0(self, metadata, data_folder):
+        """
+        Process CSV data for metadata version 0.0 (multiple CSV files).
+
+        Args:
+            metadata: Parsed JSON metadata dictionary
+            data_folder: Path to folder containing CSV data files
+        """
+        print("Processing data as version 0.0 (multiple CSV files)")
+
+        # Create gauge instances from metadata
+        self.gauge_instances = self.create_gauge_instances(
+            metadata["gauges"], data_folder
+        )
+        print(f"Created {len(self.gauge_instances)} gauge instances")
+
+        # Separate gauges into upstream and downstream datasets based on gauge_location
+        upstream_gauges = []
+        downstream_gauges = []
+
+        for gauge in self.gauge_instances:
+            if gauge.gauge_location.lower() == "upstream":
+                upstream_gauges.append(gauge)
+            elif gauge.gauge_location.lower() == "downstream":
+                downstream_gauges.append(gauge)
+            else:
+                print(
+                    f"Warning: Unknown gauge location '{gauge.gauge_location}' for gauge '{gauge.name}'"
+                )
+
+        print(f"Upstream gauges: {len(upstream_gauges)}")
+        print(f"Downstream gauges: {len(downstream_gauges)}")
+
+        # Create datasets for plotting
+        self.create_datasets_from_gauges(
+            upstream_gauges, downstream_gauges, data_folder
+        )
+
+        # Log completion
+        print("\nDatasets created:")
+        print(f"  - Upstream: {len(self.upstream_datasets)} datasets")
+        print(f"  - Downstream: {len(self.downstream_datasets)} datasets")
+
+    def create_datasets_from_gauges(
+        self, upstream_gauges, downstream_gauges, data_folder
+    ):
+        """
+        Create dataset dictionaries from gauge instances for plotting.
+
+        Args:
+            upstream_gauges: List of gauge instances with upstream location
+            downstream_gauges: List of gauge instances with downstream location
+            data_folder: Path to folder containing the data
+        """
+        # Don't clear existing datasets - we want to accumulate multiple datasets
+        # Only initialize if not already initialized
+        if not hasattr(self, "upstream_datasets") or self.upstream_datasets is None:
+            self.upstream_datasets = []
+        if not hasattr(self, "downstream_datasets") or self.downstream_datasets is None:
+            self.downstream_datasets = []
+        if not hasattr(self, "folder_datasets") or self.folder_datasets is None:
+            self.folder_datasets = []
+
+        # Create a single folder-level dataset
+        dataset_name = f"Dataset_{len(self.folder_datasets) + 1}"
+        dataset_color = self.get_next_color(len(self.folder_datasets))
+
+        folder_dataset = {
+            "name": dataset_name,
+            "color": dataset_color,
+            "folder": data_folder,
+            "upstream_gauges": [],
+            "downstream_gauges": [],
+        }
+
+        # Create upstream datasets with folder dataset reference
+        for i, gauge in enumerate(upstream_gauges):
+            if hasattr(gauge, "time_data") and hasattr(gauge, "pressure_data"):
+                # Convert to relative time for performance
+                if len(gauge.time_data) > 0:
+                    relative_time = gauge.time_data - gauge.time_data[0]
+                else:
+                    relative_time = gauge.time_data
+
+                # Only Baratron626D_Gauge is visible by default
+                is_visible = gauge.__class__.__name__ == "Baratron626D_Gauge"
+
+                dataset = {
+                    "data": {
+                        "RelativeTime": relative_time,
+                        "Pressure_Torr": gauge.pressure_data,
+                    },
+                    "name": gauge.name,
+                    "display_name": f"{gauge.name} - {dataset_name}",
+                    "color": dataset_color,
+                    "visible": is_visible,
+                    "gauge_type": gauge.__class__.__name__,
+                    "folder_dataset": dataset_name,
+                }
+                self.upstream_datasets.append(dataset)
+                folder_dataset["upstream_gauges"].append(dataset)
+                print(
+                    f"Added upstream dataset: {dataset['display_name']} (visible: {is_visible})"
+                )
+
+        # Create downstream datasets with folder dataset reference
+        for i, gauge in enumerate(downstream_gauges):
+            if hasattr(gauge, "time_data") and hasattr(gauge, "pressure_data"):
+                # Convert to relative time for performance
+                if len(gauge.time_data) > 0:
+                    relative_time = gauge.time_data - gauge.time_data[0]
+                else:
+                    relative_time = gauge.time_data
+
+                # Only Baratron626D_Gauge is visible by default
+                is_visible = gauge.__class__.__name__ == "Baratron626D_Gauge"
+
+                dataset = {
+                    "data": {
+                        "RelativeTime": relative_time,
+                        "Pressure_Torr": gauge.pressure_data,
+                    },
+                    "name": gauge.name,
+                    "display_name": f"{gauge.name} - {dataset_name}",
+                    "color": dataset_color,
+                    "visible": is_visible,
+                    "gauge_type": gauge.__class__.__name__,
+                    "folder_dataset": dataset_name,
+                }
+                self.downstream_datasets.append(dataset)
+                folder_dataset["downstream_gauges"].append(dataset)
+                print(
+                    f"Added downstream dataset: {dataset['display_name']} (visible: {is_visible})"
+                )
+
+        # Add the folder dataset to our list
+        self.folder_datasets.append(folder_dataset)
+
+    def process_csv_v1_0(self, metadata, data_folder):
+        """
+        Process CSV data for metadata version 1.0 (single CSV file).
+
+        Args:
+            metadata: Parsed JSON metadata dictionary
+            data_folder: Path to folder containing CSV data files
+        """
+        raise NotImplementedError("Version 1.0 processing not yet implemented")
+
     def parse_uploaded_file(self, contents, filename):
         """
-        Parse uploaded CSV file content.
+        Parse uploaded JSON metadata file and load referenced data.
 
         Args:
             contents: Base64 encoded file content
@@ -61,13 +393,25 @@ class DataPlotter:
             content_type, content_string = contents.split(",")
             decoded = base64.b64decode(content_string)
 
-            # Read CSV from the decoded content
-            df = pd.read_csv(io.StringIO(decoded.decode("utf-8")))
-            print(
-                f"Successfully uploaded and parsed {filename} "
-                f"with {len(df)} data points"
-            )
-            return df
+            # Parse JSON metadata
+            metadata = json.loads(decoded.decode("utf-8"))
+
+            # Check version and get data filename
+            if metadata.get("version") != "1.0":
+                print(f"Unsupported version: {metadata.get('version')}")
+                return pd.DataFrame()
+
+            data_filename = metadata["run_info"]["data_filename"]
+            print(f"Found data filename: {data_filename}")
+
+            # For now, just demonstrate that we successfully parsed the JSON
+            # In a real implementation, we'd need the user to upload both files
+            # or have the CSV file accessible on the server
+            print(f"Successfully extracted CSV filename: {data_filename}")
+            print("JSON metadata parsing successful!")
+            print("TEST: Metadata parsing complete - terminating program")
+            sys.exit(0)
+
         except Exception as e:
             print(f"Error parsing uploaded file {filename}: {e}")
             return pd.DataFrame()
@@ -124,31 +468,6 @@ class DataPlotter:
             return all(0 <= val <= 255 for val in [r, g, b])
 
         return False
-
-    def calculate_error_bars(self, data, dataset_info=None, method="default"):
-        """
-        Calculate error bars for a dataset.
-
-        This function can be extended to support different error calculation methods
-        based on dataset type, measurement conditions, or other factors.
-
-        Args:
-            data: DataFrame containing the measurement data
-            dataset_info: Dictionary with dataset metadata (for future extensions)
-            method: Error calculation method ('default', 'percentage', 'stddev', etc.)
-
-        Returns:
-            numpy.array or None: Array of error values, or None if no error bars
-        """
-
-        if method == "default" or method == "percentage":
-            if "Pressure (Torr)" in data.columns:
-                pressure_values = data["Pressure (Torr)"].values
-                # 10% error as default
-                error_percentage = 0.10
-                return pressure_values * error_percentage
-
-        return None
 
     def create_layout(self):
         return dbc.Container(
@@ -217,59 +536,6 @@ class DataPlotter:
                                         dbc.Collapse(
                                             dbc.CardBody(
                                                 [
-                                                    # Upload and Clear buttons
-                                                    dbc.Row(
-                                                        [
-                                                            dbc.Col(
-                                                                [
-                                                                    html.Div(
-                                                                        [
-                                                                            dcc.Upload(
-                                                                                id="upload-data",
-                                                                                children=dbc.Button(
-                                                                                    [
-                                                                                        html.I(
-                                                                                            className="fa fa-upload me-2"
-                                                                                        ),
-                                                                                        "Upload CSV",
-                                                                                    ],
-                                                                                    color="primary",
-                                                                                    size="sm",
-                                                                                ),
-                                                                                style={
-                                                                                    "display": "inline-block",
-                                                                                    "marginRight": "10px",
-                                                                                },
-                                                                                multiple=False,
-                                                                                accept=".csv",
-                                                                            ),
-                                                                            dbc.Button(
-                                                                                [
-                                                                                    html.I(
-                                                                                        className="fa fa-trash me-2"
-                                                                                    ),
-                                                                                    "Clear All",
-                                                                                ],
-                                                                                id="clear-data",
-                                                                                color="danger",
-                                                                                size="sm",
-                                                                            ),
-                                                                        ],
-                                                                        style={
-                                                                            "display": "flex",
-                                                                            "gap": "10px",
-                                                                            "alignItems": "center",
-                                                                        },
-                                                                    )
-                                                                ],
-                                                                width=12,
-                                                                style={
-                                                                    "textAlign": "left",
-                                                                    "marginBottom": "15px",
-                                                                },
-                                                            ),
-                                                        ]
-                                                    ),
                                                     # Dataset table
                                                     html.Div(
                                                         id="dataset-table-container",
@@ -313,7 +579,14 @@ class DataPlotter:
                                 dbc.Card(
                                     [
                                         dbc.CardHeader("Upstream Pressure"),
-                                        dbc.CardBody([dcc.Graph(id="upstream-plot")]),
+                                        dbc.CardBody(
+                                            [
+                                                dcc.Graph(
+                                                    id="upstream-plot",
+                                                    figure=self._generate_upstream_plot(),
+                                                )
+                                            ]
+                                        ),
                                     ]
                                 ),
                             ],
@@ -324,7 +597,14 @@ class DataPlotter:
                                 dbc.Card(
                                     [
                                         dbc.CardHeader("Downstream Pressure"),
-                                        dbc.CardBody([dcc.Graph(id="downstream-plot")]),
+                                        dbc.CardBody(
+                                            [
+                                                dcc.Graph(
+                                                    id="downstream-plot",
+                                                    figure=self._generate_downstream_plot(),
+                                                )
+                                            ]
+                                        ),
                                     ]
                                 ),
                             ],
@@ -426,6 +706,7 @@ class DataPlotter:
                                                                                         id="upstream-x-min",
                                                                                         type="number",
                                                                                         placeholder="Auto",
+                                                                                        value=0,
                                                                                         size="sm",
                                                                                     ),
                                                                                 ],
@@ -496,6 +777,7 @@ class DataPlotter:
                                                                                         id="upstream-y-min",
                                                                                         type="number",
                                                                                         placeholder="Auto",
+                                                                                        value=0,
                                                                                         size="sm",
                                                                                     ),
                                                                                 ],
@@ -516,22 +798,6 @@ class DataPlotter:
                                                                                 width=6,
                                                                             ),
                                                                         ]
-                                                                    ),
-                                                                    # Error bars checkbox
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Checkbox(
-                                                                                        id="upstream-error-bars",
-                                                                                        label="Show Error Bars",
-                                                                                        value=False,
-                                                                                    ),
-                                                                                ],
-                                                                                width=12,
-                                                                            ),
-                                                                        ],
-                                                                        className="mb-2",
                                                                     ),
                                                                 ],
                                                                 width=6,
@@ -639,6 +905,7 @@ class DataPlotter:
                                                                                         id="downstream-x-min",
                                                                                         type="number",
                                                                                         placeholder="Auto",
+                                                                                        value=0,
                                                                                         size="sm",
                                                                                     ),
                                                                                 ],
@@ -709,6 +976,7 @@ class DataPlotter:
                                                                                         id="downstream-y-min",
                                                                                         type="number",
                                                                                         placeholder="Auto",
+                                                                                        value=0,
                                                                                         size="sm",
                                                                                     ),
                                                                                 ],
@@ -729,22 +997,6 @@ class DataPlotter:
                                                                                 width=6,
                                                                             ),
                                                                         ]
-                                                                    ),
-                                                                    # Error bars checkbox
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Checkbox(
-                                                                                        id="downstream-error-bars",
-                                                                                        label="Show Error Bars",
-                                                                                        value=False,
-                                                                                    ),
-                                                                                ],
-                                                                                width=12,
-                                                                            ),
-                                                                        ],
-                                                                        className="mb-2",
                                                                     ),
                                                                 ],
                                                                 width=6,
@@ -769,655 +1021,160 @@ class DataPlotter:
         )
 
     def create_dataset_table(self):
-        """Create a table showing all datasets with controls"""
-        all_datasets = self.upstream_datasets + self.downstream_datasets
-        if not all_datasets:
+        """Create a table showing folder-level datasets with editable name and color"""
+        if not self.folder_datasets:
             return html.Div("No datasets loaded", className="text-muted")
 
-        table_header = html.Thead(
+        # Create table rows
+        rows = []
+
+        # Header row
+        header_row = html.Tr(
             [
-                html.Tr(
-                    [
-                        html.Th(
-                            "Dataset Name",
-                            style={"width": "50%", "fontWeight": "normal"},
-                        ),
-                        html.Th(
-                            "Color", style={"width": "25%", "fontWeight": "normal"}
-                        ),
-                        html.Th(
-                            "Display", style={"width": "25%", "fontWeight": "normal"}
-                        ),
-                    ]
-                )
+                html.Th("Dataset Name", style={"text-align": "left", "width": "70%"}),
+                html.Th("Colour", style={"text-align": "center", "width": "30%"}),
             ]
         )
+        rows.append(header_row)
 
-        table_rows = []
-        for i, dataset in enumerate(all_datasets):
+        # Add dataset rows
+        for i, dataset in enumerate(self.folder_datasets):
             row = html.Tr(
                 [
                     html.Td(
                         [
-                            dbc.Input(
-                                id={
-                                    "type": "dataset-name",
-                                    "index": dataset.get("id", i),
+                            dcc.Input(
+                                id={"type": "dataset-name", "index": i},
+                                value=dataset["name"],
+                                style={
+                                    "width": "100%",
+                                    "border": "1px solid #ccc",
+                                    "padding": "4px",
                                 },
-                                value=dataset.get("display_name", dataset["filename"]),
-                                size="sm",
-                                style={"fontSize": "12px"},
                             )
-                        ]
+                        ],
+                        style={"padding": "8px"},
                     ),
                     html.Td(
                         [
-                            html.Div(
-                                [
-                                    # Color button that shows current color
-                                    dbc.Button(
-                                        "",
-                                        id={
-                                            "type": "color-button",
-                                            "index": dataset.get("id", i),
-                                        },
-                                        style={
-                                            "width": "30px",
-                                            "height": "30px",
-                                            "backgroundColor": dataset["color"],
-                                            "border": "2px solid #ccc",
-                                            "borderRadius": "5px",
-                                            "padding": "0",
-                                            "minWidth": "30px",
-                                        },
-                                        size="sm",
-                                    ),
-                                    # Color picker popup (hidden by default)
-                                    dbc.Popover(
-                                        [
-                                            dbc.PopoverBody(
-                                                [
-                                                    # First row - 4 colors
-                                                    html.Div(
-                                                        [
-                                                            dbc.Button(
-                                                                "",
-                                                                id={
-                                                                    "type": "color-option",
-                                                                    "index": dataset.get(
-                                                                        "id", i
-                                                                    ),
-                                                                    "color": "#000000",
-                                                                },
-                                                                style={
-                                                                    "width": "25px",
-                                                                    "height": "25px",
-                                                                    "backgroundColor": "#000000",
-                                                                    "border": "1px solid #ccc",
-                                                                    "borderRadius": "3px",
-                                                                    "margin": "2px",
-                                                                    "padding": "0",
-                                                                    "minWidth": "25px",
-                                                                },
-                                                                size="sm",
-                                                            ),
-                                                            dbc.Button(
-                                                                "",
-                                                                id={
-                                                                    "type": "color-option",
-                                                                    "index": dataset.get(
-                                                                        "id", i
-                                                                    ),
-                                                                    "color": "#DF1AD2",
-                                                                },
-                                                                style={
-                                                                    "width": "25px",
-                                                                    "height": "25px",
-                                                                    "backgroundColor": "#DF1AD2",
-                                                                    "border": "1px solid #ccc",
-                                                                    "borderRadius": "3px",
-                                                                    "margin": "2px",
-                                                                    "padding": "0",
-                                                                    "minWidth": "25px",
-                                                                },
-                                                                size="sm",
-                                                            ),
-                                                            dbc.Button(
-                                                                "",
-                                                                id={
-                                                                    "type": "color-option",
-                                                                    "index": dataset.get(
-                                                                        "id", i
-                                                                    ),
-                                                                    "color": "#779BE7",
-                                                                },
-                                                                style={
-                                                                    "width": "25px",
-                                                                    "height": "25px",
-                                                                    "backgroundColor": "#779BE7",
-                                                                    "border": "1px solid #ccc",
-                                                                    "borderRadius": "3px",
-                                                                    "margin": "2px",
-                                                                    "padding": "0",
-                                                                    "minWidth": "25px",
-                                                                },
-                                                                size="sm",
-                                                            ),
-                                                            dbc.Button(
-                                                                "",
-                                                                id={
-                                                                    "type": "color-option",
-                                                                    "index": dataset.get(
-                                                                        "id", i
-                                                                    ),
-                                                                    "color": "#49B6FF",
-                                                                },
-                                                                style={
-                                                                    "width": "25px",
-                                                                    "height": "25px",
-                                                                    "backgroundColor": "#49B6FF",
-                                                                    "border": "1px solid #ccc",
-                                                                    "borderRadius": "3px",
-                                                                    "margin": "2px",
-                                                                    "padding": "0",
-                                                                    "minWidth": "25px",
-                                                                },
-                                                                size="sm",
-                                                            ),
-                                                        ],
-                                                        style={
-                                                            "display": "flex",
-                                                            "flexWrap": "nowrap",
-                                                            "marginBottom": "2px",
-                                                        },
-                                                    ),
-                                                    # Second row - 4 colors
-                                                    html.Div(
-                                                        [
-                                                            dbc.Button(
-                                                                "",
-                                                                id={
-                                                                    "type": "color-option",
-                                                                    "index": dataset.get(
-                                                                        "id", i
-                                                                    ),
-                                                                    "color": "#254E70",
-                                                                },
-                                                                style={
-                                                                    "width": "25px",
-                                                                    "height": "25px",
-                                                                    "backgroundColor": "#254E70",
-                                                                    "border": "1px solid #ccc",
-                                                                    "borderRadius": "3px",
-                                                                    "margin": "2px",
-                                                                    "padding": "0",
-                                                                    "minWidth": "25px",
-                                                                },
-                                                                size="sm",
-                                                            ),
-                                                            dbc.Button(
-                                                                "",
-                                                                id={
-                                                                    "type": "color-option",
-                                                                    "index": dataset.get(
-                                                                        "id", i
-                                                                    ),
-                                                                    "color": "#0CCA4A",
-                                                                },
-                                                                style={
-                                                                    "width": "25px",
-                                                                    "height": "25px",
-                                                                    "backgroundColor": "#0CCA4A",
-                                                                    "border": "1px solid #ccc",
-                                                                    "borderRadius": "3px",
-                                                                    "margin": "2px",
-                                                                    "padding": "0",
-                                                                    "minWidth": "25px",
-                                                                },
-                                                                size="sm",
-                                                            ),
-                                                            dbc.Button(
-                                                                "",
-                                                                id={
-                                                                    "type": "color-option",
-                                                                    "index": dataset.get(
-                                                                        "id", i
-                                                                    ),
-                                                                    "color": "#929487",
-                                                                },
-                                                                style={
-                                                                    "width": "25px",
-                                                                    "height": "25px",
-                                                                    "backgroundColor": "#929487",
-                                                                    "border": "1px solid #ccc",
-                                                                    "borderRadius": "3px",
-                                                                    "margin": "2px",
-                                                                    "padding": "0",
-                                                                    "minWidth": "25px",
-                                                                },
-                                                                size="sm",
-                                                            ),
-                                                            dbc.Button(
-                                                                "",
-                                                                id={
-                                                                    "type": "color-option",
-                                                                    "index": dataset.get(
-                                                                        "id", i
-                                                                    ),
-                                                                    "color": "#A1B0AB",
-                                                                },
-                                                                style={
-                                                                    "width": "25px",
-                                                                    "height": "25px",
-                                                                    "backgroundColor": "#A1B0AB",
-                                                                    "border": "1px solid #ccc",
-                                                                    "borderRadius": "3px",
-                                                                    "margin": "2px",
-                                                                    "padding": "0",
-                                                                    "minWidth": "25px",
-                                                                },
-                                                                size="sm",
-                                                            ),
-                                                        ],
-                                                        style={
-                                                            "display": "flex",
-                                                            "flexWrap": "nowrap",
-                                                        },
-                                                    ),
-                                                ]
-                                            )
-                                        ],
-                                        target={
-                                            "type": "color-button",
-                                            "index": dataset.get("id", i),
-                                        },
-                                        placement="top",
-                                        is_open=False,
-                                        id={
-                                            "type": "color-popover",
-                                            "index": dataset.get("id", i),
-                                        },
-                                    ),
-                                ],
-                                style={"position": "relative"},
-                            )
-                        ],
-                        style={"textAlign": "center", "padding": "5px"},
-                    ),
-                    html.Td(
-                        [
-                            dbc.Checkbox(
-                                id={
-                                    "type": "show-dataset",
-                                    "index": dataset.get("id", i),
+                            dcc.Input(
+                                id={"type": "dataset-color", "index": i},
+                                type="color",
+                                value=dataset["color"],
+                                style={
+                                    "width": "50px",
+                                    "height": "30px",
+                                    "border": "none",
                                 },
-                                value=dataset.get("visible", True),
-                                style={"transform": "scale(1.2)"},
-                            )
+                            ),
                         ],
-                        style={
-                            "textAlign": "center",
-                            "verticalAlign": "middle",
-                            "display": "flex",
-                            "justifyContent": "center",
-                            "alignItems": "center",
-                        },
+                        style={"text-align": "center", "padding": "8px"},
                     ),
                 ]
             )
-            table_rows.append(row)
+            rows.append(row)
 
-        table_body = html.Tbody(table_rows)
-
-        return dbc.Table(
-            [table_header, table_body],
-            striped=True,
-            bordered=True,
-            hover=True,
-            responsive=True,
-            size="sm",
+        # Create the table
+        table = html.Table(
+            rows,
+            className="table table-striped table-hover",
+            style={
+                "margin": "0",
+                "border": "1px solid #dee2e6",
+                "border-radius": "8px",
+                "overflow": "hidden",
+            },
         )
+
+        return html.Div([table])
 
     def register_callbacks(self):
-        # Callback to handle file upload
+        # Callback for dataset name changes
         @self.app.callback(
             [
-                Output("upload-status", "children"),
-                Output("datasets-store", "data"),
-                Output("dataset-table-container", "children"),
-            ],
-            [Input("upload-data", "contents")],
-            [State("upload-data", "filename")],
-        )
-        def handle_file_upload(contents, filename):
-            if contents is None:
-                return (
-                    "",
-                    len(self.upstream_datasets) + len(self.downstream_datasets),
-                    self.create_dataset_table(),
-                )
-
-            # Parse the uploaded file
-            new_data = self.parse_uploaded_file(contents, filename)
-
-            if not new_data.empty:
-                # Determine which plot to add to: first upload goes to upstream, second to downstream
-                total_datasets = len(self.upstream_datasets) + len(
-                    self.downstream_datasets
-                )
-
-                if total_datasets % 2 == 0:  # Even number = upstream (0, 2, 4, ...)
-                    target_datasets = self.upstream_datasets
-                    plot_type = "Upstream"
-                    dataset_id = f"upstream_dataset_{len(self.upstream_datasets) + 1}"
-                    color = self.get_next_color(len(self.upstream_datasets))
-                else:  # Odd number = downstream (1, 3, 5, ...)
-                    target_datasets = self.downstream_datasets
-                    plot_type = "Downstream"
-                    dataset_id = (
-                        f"downstream_dataset_{len(self.downstream_datasets) + 1}"
-                    )
-                    color = self.get_next_color(len(self.downstream_datasets))
-
-                dataset = {
-                    "data": new_data,
-                    "filename": filename,
-                    "display_name": f"{plot_type} Dataset {len(target_datasets) + 1}",
-                    "color": color,
-                    "visible": True,
-                    "id": dataset_id,
-                }
-                target_datasets.append(dataset)
-
-                return (
-                    dbc.Alert(
-                        [
-                            html.I(className="fas fa-check-circle me-2"),
-                            f"Successfully loaded {filename} to {plot_type} plot with {len(new_data)} data points. "
-                            f"Total datasets: {len(self.upstream_datasets) + len(self.downstream_datasets)}",
-                        ],
-                        color="success",
-                        dismissable=True,
-                        duration=4000,
-                        style={
-                            "borderRadius": "8px",
-                            "boxShadow": "0 4px 12px rgba(0,0,0,0.15)",
-                            "border": "1px solid #d4edda",
-                        },
-                    ),
-                    len(self.upstream_datasets) + len(self.downstream_datasets),
-                    self.create_dataset_table(),
-                )
-            else:
-                return (
-                    dbc.Alert(
-                        [
-                            html.I(className="fas fa-exclamation-circle me-2"),
-                            f"Failed to load {filename}. Please check the file format.",
-                        ],
-                        color="danger",
-                        dismissable=True,
-                        duration=4000,
-                        style={
-                            "borderRadius": "8px",
-                            "boxShadow": "0 4px 12px rgba(0,0,0,0.15)",
-                            "border": "1px solid #f5c6cb",
-                        },
-                    ),
-                    len(self.datasets),
-                    self.create_dataset_table(),
-                )
-
-        # Callback to handle clear button
-        @self.app.callback(
-            [
-                Output("upload-status", "children", allow_duplicate=True),
-                Output("datasets-store", "data", allow_duplicate=True),
                 Output("dataset-table-container", "children", allow_duplicate=True),
+                Output("upstream-plot", "figure", allow_duplicate=True),
+                Output("downstream-plot", "figure", allow_duplicate=True),
             ],
-            [Input("clear-data", "n_clicks")],
+            [Input({"type": "dataset-name", "index": ALL}, "value")],
             prevent_initial_call=True,
         )
-        def clear_all_data(n_clicks):
-            if n_clicks:
-                # Clear all datasets
-                self.upstream_datasets = []
-                self.downstream_datasets = []
+        def update_dataset_names(names):
+            # Update dataset names
+            for i, name in enumerate(names):
+                if i < len(self.folder_datasets) and name:
+                    self.folder_datasets[i]["name"] = name
 
-                # Create empty figure
-                fig = go.Figure()
-                fig.update_yaxes(type="log")
-                fig.update_layout(
-                    height=600,
-                    xaxis_title="Relative Time (s)",
-                    yaxis_title="Pressure (Torr)",
-                    template="plotly_white",
-                    margin=dict(l=60, r=30, t=40, b=60),
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="center",
-                        x=0.5,
-                    ),
-                )
+                    # Update display names for all gauges in this dataset
+                    for gauge_dataset in self.folder_datasets[i]["upstream_gauges"]:
+                        gauge_dataset["display_name"] = (
+                            f"{gauge_dataset['name']} - {name}"
+                        )
+                        gauge_dataset["folder_dataset"] = name
 
-                return (
-                    dbc.Alert(
-                        [
-                            html.I(className="fas fa-info-circle me-2"),
-                            "All data cleared",
-                        ],
-                        color="info",
-                        dismissable=True,
-                        duration=3000,
-                        style={
-                            "borderRadius": "8px",
-                            "boxShadow": "0 4px 12px rgba(0,0,0,0.15)",
-                            "border": "1px solid #bee5eb",
-                        },
-                    ),
-                    0,
-                    self.create_dataset_table(),
-                )
+                    for gauge_dataset in self.folder_datasets[i]["downstream_gauges"]:
+                        gauge_dataset["display_name"] = (
+                            f"{gauge_dataset['name']} - {name}"
+                        )
+                        gauge_dataset["folder_dataset"] = name
 
-            return (
-                "",
-                len(self.upstream_datasets) + len(self.downstream_datasets),
+            # Return updated table and plots
+            return [
                 self.create_dataset_table(),
-            )
+                self._generate_upstream_plot(),
+                self._generate_downstream_plot(),
+            ]
 
-        # Callback for real-time dataset management changes
+        # Callback for dataset color changes
         @self.app.callback(
             [
-                Output("datasets-store", "data", allow_duplicate=True),
                 Output("dataset-table-container", "children", allow_duplicate=True),
+                Output("upstream-plot", "figure", allow_duplicate=True),
+                Output("downstream-plot", "figure", allow_duplicate=True),
             ],
-            [
-                Input({"type": "dataset-name", "index": ALL}, "value"),
-                Input({"type": "show-dataset", "index": ALL}, "value"),
-            ],
+            [Input({"type": "dataset-color", "index": ALL}, "value")],
             prevent_initial_call=True,
         )
-        def update_dataset_changes(display_names, visibility_values):
-            # Update dataset properties based on form values
-            all_datasets = self.upstream_datasets + self.downstream_datasets
-            for i, dataset in enumerate(all_datasets):
-                if i < len(display_names):
-                    dataset["display_name"] = display_names[i] or dataset["filename"]
-                if i < len(visibility_values):
-                    dataset["visible"] = (
-                        visibility_values[i] if visibility_values[i] else False
-                    )
+        def update_dataset_colors(colors):
+            # Update dataset colors
+            for i, color in enumerate(colors):
+                if i < len(self.folder_datasets) and color:
+                    self.folder_datasets[i]["color"] = color
 
-            # Return updated count and table
-            return len(self.upstream_datasets) + len(
-                self.downstream_datasets
-            ), self.create_dataset_table()
+                    # Update colors for all gauges in this dataset
+                    for gauge_dataset in self.folder_datasets[i]["upstream_gauges"]:
+                        gauge_dataset["color"] = color
 
-        # Callback to toggle color picker popover
+                    for gauge_dataset in self.folder_datasets[i]["downstream_gauges"]:
+                        gauge_dataset["color"] = color
+
+            # Return updated table and plots
+            return [
+                self.create_dataset_table(),
+                self._generate_upstream_plot(),
+                self._generate_downstream_plot(),
+            ]
+
+        # Callback to handle collapse/expand of dataset management
         @self.app.callback(
-            Output({"type": "color-popover", "index": MATCH}, "is_open"),
-            [Input({"type": "color-button", "index": MATCH}, "n_clicks")],
-            [State({"type": "color-popover", "index": MATCH}, "is_open")],
+            [
+                Output("collapse-dataset", "is_open"),
+                Output("collapse-dataset-button", "children"),
+            ],
+            [Input("collapse-dataset-button", "n_clicks")],
+            [State("collapse-dataset", "is_open")],
             prevent_initial_call=True,
         )
-        def toggle_color_popover(n_clicks, is_open):
+        def toggle_dataset_collapse(n_clicks, is_open):
             if n_clicks:
-                return not is_open
-            return is_open
-
-        # Callback to handle color selection from popover
-        @self.app.callback(
-            [
-                Output("datasets-store", "data", allow_duplicate=True),
-                Output("dataset-table-container", "children", allow_duplicate=True),
-            ],
-            [Input({"type": "color-option", "index": ALL, "color": ALL}, "n_clicks")],
-            [State({"type": "color-option", "index": ALL, "color": ALL}, "id")],
-            prevent_initial_call=True,
-        )
-        def update_dataset_color(n_clicks_list, button_ids):
-            if not any(n_clicks_list) or not n_clicks_list:
-                raise PreventUpdate
-
-            # Find which button was clicked
-            ctx = dash.callback_context
-            if not ctx.triggered:
-                raise PreventUpdate
-
-            # Get the triggered button's ID
-            triggered_id = ctx.triggered[0]["prop_id"]
-            # Extract the ID part (before the dot)
-            import json
-
-            id_str = triggered_id.split(".")[0]
-            button_data = json.loads(id_str)
-
-            dataset_index = button_data["index"]
-            selected_color = button_data["color"]
-
-            # Update the dataset color
-            all_datasets = self.upstream_datasets + self.downstream_datasets
-            for dataset in all_datasets:
-                if dataset.get("id", 0) == dataset_index:
-                    dataset["color"] = selected_color
-                    break
-
-            return len(self.upstream_datasets) + len(
-                self.downstream_datasets
-            ), self.create_dataset_table()
-
-        # Callback for upstream plot settings changes
-        @self.app.callback(
-            [
-                Output("upstream-settings-store", "data", allow_duplicate=True),
-            ],
-            [
-                Input("upstream-x-scale", "value"),
-                Input("upstream-y-scale", "value"),
-                Input("upstream-x-min", "value"),
-                Input("upstream-x-max", "value"),
-                Input("upstream-y-min", "value"),
-                Input("upstream-y-max", "value"),
-                Input("upstream-error-bars", "value"),
-            ],
-            prevent_initial_call=True,
-        )
-        def update_upstream_plot_settings(
-            x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
-        ):
-            # Store the upstream plot settings
-            settings = {
-                "x_scale": x_scale,
-                "y_scale": y_scale,
-                "x_min": x_min,
-                "x_max": x_max,
-                "y_min": y_min,
-                "y_max": y_max,
-                "error_bars": error_bars,
-            }
-            return [settings]
-
-        # Callback for downstream plot settings changes
-        @self.app.callback(
-            [
-                Output("downstream-settings-store", "data", allow_duplicate=True),
-            ],
-            [
-                Input("downstream-x-scale", "value"),
-                Input("downstream-y-scale", "value"),
-                Input("downstream-x-min", "value"),
-                Input("downstream-x-max", "value"),
-                Input("downstream-y-min", "value"),
-                Input("downstream-y-max", "value"),
-                Input("downstream-error-bars", "value"),
-            ],
-            prevent_initial_call=True,
-        )
-        def update_downstream_plot_settings(
-            x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
-        ):
-            # Store the downstream plot settings
-            settings = {
-                "x_scale": x_scale,
-                "y_scale": y_scale,
-                "x_min": x_min,
-                "x_max": x_max,
-                "y_min": y_min,
-                "y_max": y_max,
-                "error_bars": error_bars,
-            }
-            return [settings]
-
-        # Callbacks for the upstream and downstream plots
-        @self.app.callback(
-            Output("upstream-plot", "figure"),
-            [
-                Input("datasets-store", "data"),
-                Input("upstream-settings-store", "data"),
-            ],
-        )
-        def update_upstream_plot(datasets_count, plot_settings):
-            # Extract upstream plot settings or use defaults
-            settings = plot_settings or {}
-            x_scale = settings.get("x_scale")
-            y_scale = settings.get("y_scale")
-            x_min = settings.get("x_min")
-            x_max = settings.get("x_max")
-            y_min = settings.get("y_min")
-            y_max = settings.get("y_max")
-            error_bars = settings.get("error_bars")
-
-            print(f"Upstream plot callback with {len(self.upstream_datasets)} datasets")
-            return self._generate_upstream_plot(
-                x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
-            )
-
-        @self.app.callback(
-            Output("downstream-plot", "figure"),
-            [
-                Input("datasets-store", "data"),
-                Input("downstream-settings-store", "data"),
-            ],
-        )
-        def update_downstream_plot(datasets_count, plot_settings):
-            # Extract downstream plot settings or use defaults
-            settings = plot_settings or {}
-            x_scale = settings.get("x_scale")
-            y_scale = settings.get("y_scale")
-            x_min = settings.get("x_min")
-            x_max = settings.get("x_max")
-            y_min = settings.get("y_min")
-            y_max = settings.get("y_max")
-            error_bars = settings.get("error_bars")
-
-            print(
-                f"Downstream plot callback with {len(self.downstream_datasets)} datasets"
-            )
-            return self._generate_downstream_plot(
-                x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
-            )
+                new_state = not is_open
+                # Change icon based on state
+                if new_state:
+                    icon = html.I(className="fas fa-chevron-down")
+                else:
+                    icon = html.I(className="fas fa-chevron-up")
+                return new_state, icon
+            return is_open, html.I(className="fas fa-chevron-up")
 
         # Callbacks to handle collapse/expand of upstream plot controls
         @self.app.callback(
@@ -1461,26 +1218,82 @@ class DataPlotter:
                 return new_state, icon
             return is_open, html.I(className="fas fa-chevron-up")
 
-        # Callback to handle collapse/expand of dataset management
+        # Callback for upstream plot settings changes
         @self.app.callback(
+            [Output("upstream-plot", "figure", allow_duplicate=True)],
             [
-                Output("collapse-dataset", "is_open"),
-                Output("collapse-dataset-button", "children"),
+                Input("upstream-x-scale", "value"),
+                Input("upstream-y-scale", "value"),
+                Input("upstream-x-min", "value"),
+                Input("upstream-x-max", "value"),
+                Input("upstream-y-min", "value"),
+                Input("upstream-y-max", "value"),
             ],
-            [Input("collapse-dataset-button", "n_clicks")],
-            [State("collapse-dataset", "is_open")],
             prevent_initial_call=True,
         )
-        def toggle_dataset_collapse(n_clicks, is_open):
-            if n_clicks:
-                new_state = not is_open
-                # Change icon based on state
-                if new_state:
-                    icon = html.I(className="fas fa-chevron-down")
-                else:
-                    icon = html.I(className="fas fa-chevron-up")
-                return new_state, icon
-            return is_open, html.I(className="fas fa-chevron-up")
+        def update_upstream_plot_settings(x_scale, y_scale, x_min, x_max, y_min, y_max):
+            # Generate updated upstream plot with new settings
+            return [
+                self._generate_upstream_plot(
+                    x_scale, y_scale, x_min, x_max, y_min, y_max
+                )
+            ]
+
+        # Callback for downstream plot settings changes
+        @self.app.callback(
+            [Output("downstream-plot", "figure", allow_duplicate=True)],
+            [
+                Input("downstream-x-scale", "value"),
+                Input("downstream-y-scale", "value"),
+                Input("downstream-x-min", "value"),
+                Input("downstream-x-max", "value"),
+                Input("downstream-y-min", "value"),
+                Input("downstream-y-max", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def update_downstream_plot_settings(
+            x_scale, y_scale, x_min, x_max, y_min, y_max
+        ):
+            # Generate updated downstream plot with new settings
+            return [
+                self._generate_downstream_plot(
+                    x_scale, y_scale, x_min, x_max, y_min, y_max
+                )
+            ]
+
+        # Callbacks to update min values based on scale mode
+        @self.app.callback(
+            [Output("upstream-x-min", "value")],
+            [Input("upstream-x-scale", "value")],
+            prevent_initial_call=True,
+        )
+        def update_upstream_x_min(x_scale):
+            return [0 if x_scale == "linear" else None]
+
+        @self.app.callback(
+            [Output("upstream-y-min", "value")],
+            [Input("upstream-y-scale", "value")],
+            prevent_initial_call=True,
+        )
+        def update_upstream_y_min(y_scale):
+            return [0 if y_scale == "linear" else None]
+
+        @self.app.callback(
+            [Output("downstream-x-min", "value")],
+            [Input("downstream-x-scale", "value")],
+            prevent_initial_call=True,
+        )
+        def update_downstream_x_min(x_scale):
+            return [0 if x_scale == "linear" else None]
+
+        @self.app.callback(
+            [Output("downstream-y-min", "value")],
+            [Input("downstream-y-scale", "value")],
+            prevent_initial_call=True,
+        )
+        def update_downstream_y_min(y_scale):
+            return [0 if y_scale == "linear" else None]
 
     def _generate_plot(
         self,
@@ -1490,46 +1303,41 @@ class DataPlotter:
         x_max=None,
         y_min=None,
         y_max=None,
-        show_error_bars=None,
     ):
         """Generate the plot based on current dataset state and settings"""
-        fig = go.Figure()
+        # Use FigureResampler with show_dash_kwargs to hide resampling annotations
+        fig = FigureResampler(go.Figure(), show_dash_kwargs={"mode": "disabled"})
 
-        for dataset in self.upstream_datasets + self.downstream_datasets:
-            # Skip invisible datasets
-            if not dataset.get("visible", True):
-                continue
+        # Iterate through folder datasets and all their gauges
+        for folder_dataset in self.folder_datasets:
+            all_gauges = (
+                folder_dataset["upstream_gauges"] + folder_dataset["downstream_gauges"]
+            )
+            for dataset in all_gauges:
+                # Skip invisible datasets
+                if not dataset.get("visible", True):
+                    continue
 
-            data = dataset["data"]
-            display_name = dataset.get("display_name", dataset["filename"])
-            color = dataset["color"]
+                data = dataset["data"]
+                display_name = dataset.get(
+                    "display_name", dataset.get("name", "Unknown Dataset")
+                )
+                color = dataset["color"]
 
-            if not data.empty:
-                # Check if the required columns exist
-                required_cols = ["RelativeTime", "Pressure (Torr)"]
-                if all(col in data.columns for col in required_cols):
-                    # Extract all data from CSV
-                    time_data = data["RelativeTime"].values
-                    pressure_data = data["Pressure (Torr)"].values
+                if len(data.get("RelativeTime", [])) > 0:
+                    # Extract data directly from our structure
+                    time_data = data["RelativeTime"]
+                    pressure_data = data["Pressure_Torr"]
 
-                    # Determine trace mode based on error bars setting
-                    mode = "lines+markers"
-                    error_y = None
-
-                    # Add error bars if requested and data available
-                    if show_error_bars and "Error" in data.columns:
-                        error_data = data["Error"].values
-                        error_y = dict(type="data", array=error_data, visible=True)
-
+                    # Use plotly-resampler for automatic downsampling
                     fig.add_trace(
                         go.Scatter(
                             x=time_data,
                             y=pressure_data,
-                            mode=mode,
+                            mode="lines+markers",
                             name=display_name,
-                            line=dict(color=color, width=2),
-                            marker=dict(size=2),
-                            error_y=error_y,
+                            line=dict(color=color, width=1.5),
+                            marker=dict(size=3),
                         )
                     )
 
@@ -1547,7 +1355,7 @@ class DataPlotter:
 
         # Apply axis scaling
         x_axis_type = x_scale if x_scale else "linear"
-        y_axis_type = y_scale if y_scale else "log"
+        y_axis_type = y_scale if y_scale else "linear"
 
         fig.update_xaxes(type=x_axis_type)
         fig.update_yaxes(type=y_axis_type)
@@ -1575,52 +1383,40 @@ class DataPlotter:
         x_max=None,
         y_min=None,
         y_max=None,
-        error_bars=None,
     ):
         """Generate the upstream pressure plot"""
-        fig = go.Figure()
+        # Use FigureResampler with show_dash_kwargs to hide resampling annotations
+        fig = FigureResampler(go.Figure(), show_dash_kwargs={"mode": "disabled"})
 
-        for dataset in self.upstream_datasets:
-            # Skip invisible datasets
-            if not dataset.get("visible", True):
-                continue
+        # Iterate through folder datasets and their upstream gauges
+        for folder_dataset in self.folder_datasets:
+            for dataset in folder_dataset["upstream_gauges"]:
+                # Skip invisible datasets
+                if not dataset.get("visible", True):
+                    continue
 
-            data = dataset["data"]
-            display_name = dataset.get("display_name", dataset["filename"])
-            color = dataset["color"]
+                data = dataset["data"]
+                display_name = dataset.get(
+                    "display_name", dataset.get("name", "Unknown Dataset")
+                )
+                color = dataset["color"]
 
-            if not data.empty:
-                # Check if the required columns exist for upstream
-                required_cols = ["RelativeTime", "Pressure (Torr)"]
-                if all(col in data.columns for col in required_cols):
-                    # Extract all data from CSV
-                    time_data = data["RelativeTime"].values
-                    pressure_data = data["Pressure (Torr)"].values
+                if len(data.get("RelativeTime", [])) > 0:
+                    # Extract data directly from our structure
+                    time_data = data["RelativeTime"]
+                    pressure_data = data["Pressure_Torr"]
 
-                    # Create the trace based on error bars setting
-                    trace_kwargs = {
-                        "x": time_data,
-                        "y": pressure_data,
-                        "mode": "lines+markers",
-                        "name": display_name,
-                        "line": dict(color=color, width=2),
-                        "marker": dict(size=2),
-                    }
-
-                    # Add error bars if enabled
-                    if error_bars:
-                        error_values = self.calculate_error_bars(data, dataset)
-                        if error_values is not None:
-                            trace_kwargs["error_y"] = dict(
-                                type="data",
-                                array=error_values,
-                                visible=True,
-                                color=color,
-                                thickness=1.5,
-                                width=3,
-                            )
-
-                    fig.add_trace(go.Scatter(**trace_kwargs))
+                    # Use plotly-resampler for automatic downsampling
+                    fig.add_trace(
+                        go.Scatter(
+                            x=time_data,
+                            y=pressure_data,
+                            mode="lines+markers",
+                            name=display_name,
+                            line=dict(color=color, width=1.5),
+                            marker=dict(size=3),
+                        )
+                    )
 
         # Configure the layout
         fig.update_layout(
@@ -1636,7 +1432,7 @@ class DataPlotter:
 
         # Apply axis scaling
         x_axis_type = x_scale if x_scale else "linear"
-        y_axis_type = y_scale if y_scale else "log"
+        y_axis_type = y_scale if y_scale else "linear"
 
         fig.update_xaxes(type=x_axis_type)
         fig.update_yaxes(type=y_axis_type)
@@ -1664,53 +1460,40 @@ class DataPlotter:
         x_max=None,
         y_min=None,
         y_max=None,
-        error_bars=None,
     ):
         """Generate the downstream pressure plot"""
-        fig = go.Figure()
+        # Use FigureResampler with show_dash_kwargs to hide resampling annotations
+        fig = FigureResampler(go.Figure(), show_dash_kwargs={"mode": "disabled"})
 
-        for dataset in self.downstream_datasets:
-            # Skip invisible datasets
-            if not dataset.get("visible", True):
-                continue
+        # Iterate through folder datasets and their downstream gauges
+        for folder_dataset in self.folder_datasets:
+            for dataset in folder_dataset["downstream_gauges"]:
+                # Skip invisible datasets
+                if not dataset.get("visible", True):
+                    continue
 
-            data = dataset["data"]
-            display_name = dataset.get("display_name", dataset["filename"])
-            color = dataset["color"]
+                data = dataset["data"]
+                display_name = dataset.get(
+                    "display_name", dataset.get("name", "Unknown Dataset")
+                )
+                color = dataset["color"]
 
-            if not data.empty:
-                # Check if the required columns exist for downstream
-                # For now, using same data but could be different columns
-                required_cols = ["RelativeTime", "Pressure (Torr)"]
-                if all(col in data.columns for col in required_cols):
-                    # Extract all data from CSV
-                    time_data = data["RelativeTime"].values
-                    pressure_data = data["Pressure (Torr)"].values
+                if len(data.get("RelativeTime", [])) > 0:
+                    # Extract data directly from our structure
+                    time_data = data["RelativeTime"]
+                    pressure_data = data["Pressure_Torr"]
 
-                    # Create the trace based on error bars setting
-                    trace_kwargs = {
-                        "x": time_data,
-                        "y": pressure_data,
-                        "mode": "lines+markers",
-                        "name": display_name,
-                        "line": dict(color=color, width=2),
-                        "marker": dict(size=2),
-                    }
-
-                    # Add error bars if enabled
-                    if error_bars:
-                        error_values = self.calculate_error_bars(data, dataset)
-                        if error_values is not None:
-                            trace_kwargs["error_y"] = dict(
-                                type="data",
-                                array=error_values,
-                                visible=True,
-                                color=color,
-                                thickness=1.5,
-                                width=3,
-                            )
-
-                    fig.add_trace(go.Scatter(**trace_kwargs))
+                    # Use plotly-resampler for automatic downsampling
+                    fig.add_trace(
+                        go.Scatter(
+                            x=time_data,
+                            y=pressure_data,
+                            mode="lines+markers",
+                            name=display_name,
+                            line=dict(color=color, width=1.5),
+                            marker=dict(size=3),
+                        )
+                    )
 
         # Configure the layout
         fig.update_layout(
@@ -1726,7 +1509,7 @@ class DataPlotter:
 
         # Apply axis scaling
         x_axis_type = x_scale if x_scale else "linear"
-        y_axis_type = y_scale if y_scale else "log"
+        y_axis_type = y_scale if y_scale else "linear"
 
         fig.update_xaxes(type=x_axis_type)
         fig.update_yaxes(type=y_axis_type)
@@ -1765,7 +1548,3 @@ class DataPlotter:
 
         # Run the server directly (blocking)
         self.app.run(debug=False, host="127.0.0.1", port=self.port)
-
-    def stop(self):
-        """Stop the data plotter (CSV mode - nothing to stop)"""
-        pass
