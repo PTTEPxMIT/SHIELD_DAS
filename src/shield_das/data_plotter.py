@@ -125,31 +125,6 @@ class DataPlotter:
 
         return False
 
-    def calculate_error_bars(self, data, dataset_info=None, method="default"):
-        """
-        Calculate error bars for a dataset.
-
-        This function can be extended to support different error calculation methods
-        based on dataset type, measurement conditions, or other factors.
-
-        Args:
-            data: DataFrame containing the measurement data
-            dataset_info: Dictionary with dataset metadata (for future extensions)
-            method: Error calculation method ('default', 'percentage', 'stddev', etc.)
-
-        Returns:
-            numpy.array or None: Array of error values, or None if no error bars
-        """
-
-        if method == "default" or method == "percentage":
-            if "Pressure (Torr)" in data.columns:
-                pressure_values = data["Pressure (Torr)"].values
-                # 10% error as default
-                error_percentage = 0.10
-                return pressure_values * error_percentage
-
-        return None
-
     def create_layout(self):
         return dbc.Container(
             [
@@ -231,7 +206,7 @@ class DataPlotter:
                                                                                         html.I(
                                                                                             className="fa fa-upload me-2"
                                                                                         ),
-                                                                                        "Upload CSV",
+                                                                                        "Upload Data",
                                                                                     ],
                                                                                     color="primary",
                                                                                     size="sm",
@@ -517,22 +492,6 @@ class DataPlotter:
                                                                             ),
                                                                         ]
                                                                     ),
-                                                                    # Error bars checkbox
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Checkbox(
-                                                                                        id="upstream-error-bars",
-                                                                                        label="Show Error Bars",
-                                                                                        value=False,
-                                                                                    ),
-                                                                                ],
-                                                                                width=12,
-                                                                            ),
-                                                                        ],
-                                                                        className="mb-2",
-                                                                    ),
                                                                 ],
                                                                 width=6,
                                                             ),
@@ -729,22 +688,6 @@ class DataPlotter:
                                                                                 width=6,
                                                                             ),
                                                                         ]
-                                                                    ),
-                                                                    # Error bars checkbox
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Checkbox(
-                                                                                        id="downstream-error-bars",
-                                                                                        label="Show Error Bars",
-                                                                                        value=False,
-                                                                                    ),
-                                                                                ],
-                                                                                width=12,
-                                                                            ),
-                                                                        ],
-                                                                        className="mb-2",
                                                                     ),
                                                                 ],
                                                                 width=6,
@@ -1320,13 +1263,10 @@ class DataPlotter:
                 Input("upstream-x-max", "value"),
                 Input("upstream-y-min", "value"),
                 Input("upstream-y-max", "value"),
-                Input("upstream-error-bars", "value"),
             ],
             prevent_initial_call=True,
         )
-        def update_upstream_plot_settings(
-            x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
-        ):
+        def update_upstream_plot_settings(x_scale, y_scale, x_min, x_max, y_min, y_max):
             # Store the upstream plot settings
             settings = {
                 "x_scale": x_scale,
@@ -1335,7 +1275,6 @@ class DataPlotter:
                 "x_max": x_max,
                 "y_min": y_min,
                 "y_max": y_max,
-                "error_bars": error_bars,
             }
             return [settings]
 
@@ -1351,12 +1290,11 @@ class DataPlotter:
                 Input("downstream-x-max", "value"),
                 Input("downstream-y-min", "value"),
                 Input("downstream-y-max", "value"),
-                Input("downstream-error-bars", "value"),
             ],
             prevent_initial_call=True,
         )
         def update_downstream_plot_settings(
-            x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
+            x_scale, y_scale, x_min, x_max, y_min, y_max
         ):
             # Store the downstream plot settings
             settings = {
@@ -1366,7 +1304,6 @@ class DataPlotter:
                 "x_max": x_max,
                 "y_min": y_min,
                 "y_max": y_max,
-                "error_bars": error_bars,
             }
             return [settings]
 
@@ -1387,11 +1324,10 @@ class DataPlotter:
             x_max = settings.get("x_max")
             y_min = settings.get("y_min")
             y_max = settings.get("y_max")
-            error_bars = settings.get("error_bars")
 
             print(f"Upstream plot callback with {len(self.upstream_datasets)} datasets")
             return self._generate_upstream_plot(
-                x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
+                x_scale, y_scale, x_min, x_max, y_min, y_max
             )
 
         @self.app.callback(
@@ -1410,13 +1346,12 @@ class DataPlotter:
             x_max = settings.get("x_max")
             y_min = settings.get("y_min")
             y_max = settings.get("y_max")
-            error_bars = settings.get("error_bars")
 
             print(
                 f"Downstream plot callback with {len(self.downstream_datasets)} datasets"
             )
             return self._generate_downstream_plot(
-                x_scale, y_scale, x_min, x_max, y_min, y_max, error_bars
+                x_scale, y_scale, x_min, x_max, y_min, y_max
             )
 
         # Callbacks to handle collapse/expand of upstream plot controls
@@ -1490,7 +1425,6 @@ class DataPlotter:
         x_max=None,
         y_min=None,
         y_max=None,
-        show_error_bars=None,
     ):
         """Generate the plot based on current dataset state and settings"""
         fig = go.Figure()
@@ -1512,24 +1446,15 @@ class DataPlotter:
                     time_data = data["RelativeTime"].values
                     pressure_data = data["Pressure (Torr)"].values
 
-                    # Determine trace mode based on error bars setting
-                    mode = "lines+markers"
-                    error_y = None
-
-                    # Add error bars if requested and data available
-                    if show_error_bars and "Error" in data.columns:
-                        error_data = data["Error"].values
-                        error_y = dict(type="data", array=error_data, visible=True)
-
+                    # Create trace with lines and markers
                     fig.add_trace(
                         go.Scatter(
                             x=time_data,
                             y=pressure_data,
-                            mode=mode,
+                            mode="lines+markers",
                             name=display_name,
                             line=dict(color=color, width=2),
                             marker=dict(size=2),
-                            error_y=error_y,
                         )
                     )
 
@@ -1575,7 +1500,6 @@ class DataPlotter:
         x_max=None,
         y_min=None,
         y_max=None,
-        error_bars=None,
     ):
         """Generate the upstream pressure plot"""
         fig = go.Figure()
@@ -1597,7 +1521,7 @@ class DataPlotter:
                     time_data = data["RelativeTime"].values
                     pressure_data = data["Pressure (Torr)"].values
 
-                    # Create the trace based on error bars setting
+                    # Create the trace
                     trace_kwargs = {
                         "x": time_data,
                         "y": pressure_data,
@@ -1606,19 +1530,6 @@ class DataPlotter:
                         "line": dict(color=color, width=2),
                         "marker": dict(size=2),
                     }
-
-                    # Add error bars if enabled
-                    if error_bars:
-                        error_values = self.calculate_error_bars(data, dataset)
-                        if error_values is not None:
-                            trace_kwargs["error_y"] = dict(
-                                type="data",
-                                array=error_values,
-                                visible=True,
-                                color=color,
-                                thickness=1.5,
-                                width=3,
-                            )
 
                     fig.add_trace(go.Scatter(**trace_kwargs))
 
@@ -1664,7 +1575,6 @@ class DataPlotter:
         x_max=None,
         y_min=None,
         y_max=None,
-        error_bars=None,
     ):
         """Generate the downstream pressure plot"""
         fig = go.Figure()
@@ -1687,7 +1597,7 @@ class DataPlotter:
                     time_data = data["RelativeTime"].values
                     pressure_data = data["Pressure (Torr)"].values
 
-                    # Create the trace based on error bars setting
+                    # Create the trace
                     trace_kwargs = {
                         "x": time_data,
                         "y": pressure_data,
@@ -1696,19 +1606,6 @@ class DataPlotter:
                         "line": dict(color=color, width=2),
                         "marker": dict(size=2),
                     }
-
-                    # Add error bars if enabled
-                    if error_bars:
-                        error_values = self.calculate_error_bars(data, dataset)
-                        if error_values is not None:
-                            trace_kwargs["error_y"] = dict(
-                                type="data",
-                                array=error_values,
-                                visible=True,
-                                color=color,
-                                thickness=1.5,
-                                width=3,
-                            )
 
                     fig.add_trace(go.Scatter(**trace_kwargs))
 
