@@ -253,6 +253,9 @@ class DataPlotter:
                 else:
                     relative_time = gauge.time_data
 
+                # Only Baratron626D_Gauge is visible by default
+                is_visible = gauge.__class__.__name__ == "Baratron626D_Gauge"
+
                 dataset = {
                     "data": {
                         "RelativeTime": relative_time,
@@ -261,11 +264,13 @@ class DataPlotter:
                     "name": gauge.name,
                     "display_name": f"{gauge.name} ({gauge.gauge_location})",
                     "color": self.get_next_color(i),
-                    "visible": True,
+                    "visible": is_visible,
                     "gauge_type": gauge.__class__.__name__,
                 }
                 self.upstream_datasets.append(dataset)
-                print(f"Added upstream dataset: {dataset['display_name']}")
+                print(
+                    f"Added upstream dataset: {dataset['display_name']} (visible: {is_visible})"
+                )
 
         # Create downstream datasets
         for i, gauge in enumerate(downstream_gauges):
@@ -276,6 +281,9 @@ class DataPlotter:
                 else:
                     relative_time = gauge.time_data
 
+                # Only Baratron626D_Gauge is visible by default
+                is_visible = gauge.__class__.__name__ == "Baratron626D_Gauge"
+
                 dataset = {
                     "data": {
                         "RelativeTime": relative_time,
@@ -284,11 +292,13 @@ class DataPlotter:
                     "name": gauge.name,
                     "display_name": f"{gauge.name} ({gauge.gauge_location})",
                     "color": self.get_next_color(len(upstream_gauges) + i),
-                    "visible": True,
+                    "visible": is_visible,
                     "gauge_type": gauge.__class__.__name__,
                 }
                 self.downstream_datasets.append(dataset)
-                print(f"Added downstream dataset: {dataset['display_name']}")
+                print(
+                    f"Added downstream dataset: {dataset['display_name']} (visible: {is_visible})"
+                )
 
     def process_csv_v1_0(self, metadata):
         """
