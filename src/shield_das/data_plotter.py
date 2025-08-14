@@ -19,16 +19,27 @@ from .pressure_gauge import Baratron626D_Gauge, CVM211_Gauge, WGM701_Gauge
 
 
 class DataPlotter:
-    def __init__(self, data_folder=None, port=8050):
+    def __init__(self, data=None, port=8050):
         """
         Initialize the DataPlotter.
 
         Args:
-            data_folder: Path to folder containing JSON metadata and CSV data files
+            data: Path to a single dataset folder, or list of paths to multiple dataset folders
             port: Port for the Dash server
         """
 
-        self.data_folder = data_folder
+        # Handle data parameter - convert single path to list for consistent processing
+        if data is None:
+            self.data_paths = []
+        elif isinstance(data, str):
+            self.data_paths = [data]
+        elif isinstance(data, list):
+            self.data_paths = data
+        else:
+            raise ValueError(
+                "data parameter must be a string path, list of paths, or None"
+            )
+
         self.port = port
         self.app = dash.Dash(
             __name__,
@@ -47,9 +58,9 @@ class DataPlotter:
         # Store folder-level datasets for management
         self.folder_datasets = []  # Each folder = 1 dataset with upstream/downstream gauges
 
-        # Process data folder if provided
-        if self.data_folder:
-            self.load_data()
+        # Process data paths if provided
+        if self.data_paths:
+            self.load_all_data()
             print("\nData loading complete. Datasets ready for Dash app visualization.")
 
         # Setup the app layout
@@ -61,49 +72,65 @@ class DataPlotter:
         # Flag to track if recording has been started
         self.recording_started = False
 
-    def load_data(self):
+    def load_all_data(self):
+        """
+        Load and process data from all specified data paths.
+        """
+        print(f"Loading data from {len(self.data_paths)} dataset(s)")
+
+        for i, data_path in enumerate(self.data_paths):
+            print(
+                f"\n--- Processing dataset {i + 1}/{len(self.data_paths)}: {data_path} ---"
+            )
+            self.load_data(data_path)
+
+    def load_data(self, data_folder):
         """
         Load and process data from the specified folder.
         Read JSON metadata first, then process CSV data based on version.
-        """
-        print(f"Loading data from folder: {self.data_folder}")
 
-        if not os.path.exists(self.data_folder):
-            print(f"ERROR: Data folder not found: {self.data_folder}")
+        Args:
+            data_folder: Path to folder containing JSON metadata and CSV data files
+        """
+        print(f"Loading data from folder: {data_folder}")
+
+        if not os.path.exists(data_folder):
+            print(f"ERROR: Data folder not found: {data_folder}")
             return
 
         try:
             # Process JSON metadata
-            metadata = self.process_json_metadata()
+            metadata = self.process_json_metadata(data_folder)
             if metadata is None:
                 return
 
             # Process CSV data based on version
-            self.process_csv_data(metadata)
+            self.process_csv_data(metadata, data_folder)
 
         except Exception as e:
-            print(f"ERROR loading data from {self.data_folder}: {e}")
+            print(f"ERROR loading data from {data_folder}: {e}")
             import traceback
 
             traceback.print_exc()
 
-    def process_json_metadata(self):
+    def process_json_metadata(self, data_folder):
         """
         Find and process JSON metadata file.
+
+        Args:
+            data_folder: Path to folder containing JSON metadata
 
         Returns:
             dict: Parsed metadata or None if error
         """
         # Find JSON files
-        json_files = [
-            f for f in os.listdir(self.data_folder) if f.lower().endswith(".json")
-        ]
+        json_files = [f for f in os.listdir(data_folder) if f.lower().endswith(".json")]
 
         if not json_files:
-            print(f"ERROR: No JSON file found in {self.data_folder}")
+            print(f"ERROR: No JSON file found in {data_folder}")
             return None
 
-        json_path = os.path.join(self.data_folder, json_files[0])
+        json_path = os.path.join(data_folder, json_files[0])
         print(f"Found JSON metadata: {json_path}")
 
         # Read JSON metadata
@@ -112,27 +139,33 @@ class DataPlotter:
 
         return metadata
 
-    def process_csv_data(self, metadata):
+    def process_csv_data(self, metadata, data_folder):
         """
         Process CSV data based on metadata version.
 
         Args:
             metadata: Parsed JSON metadata dictionary
+            data_folder: Path to folder containing CSV data files
         """
         version = metadata.get("version")
 
         if version == "0.0":
-            self.process_csv_v0_0(metadata)
+            self.process_csv_v0_0(metadata, data_folder)
         elif version == "1.0":
-            self.process_csv_v1_0(metadata)
+            self.process_csv_v1_0(metadata, data_folder)
         else:
             raise NotImplementedError(
                 f"Unsupported metadata version: {version}. "
                 f"Only versions '0.0' and '1.0' are supported."
             )
 
-    def create_gauge_instances(self, gauges_metadata):
-        """Create gauge instances from metadata and load CSV data."""
+    def create_gauge_instances(self, gauges_metadata, data_folder):
+        """Create gauge instances from metadata and load CSV data.
+
+        Args:
+            gauges_metadata: Metadata for gauges
+            data_folder: Path to folder containing CSV data files
+        """
         gauge_instances = []
 
         # Mapping of gauge types to classes
@@ -178,7 +211,7 @@ class DataPlotter:
                     f"Gauge '{name}' missing required 'filename' field in metadata"
                 )
 
-            csv_path = os.path.join(self.data_folder, csv_filename)
+            csv_path = os.path.join(data_folder, csv_filename)
             if not os.path.exists(csv_path):
                 raise FileNotFoundError(f"CSV file not found: {csv_path}")
 
@@ -196,17 +229,20 @@ class DataPlotter:
 
         return gauge_instances
 
-    def process_csv_v0_0(self, metadata):
+    def process_csv_v0_0(self, metadata, data_folder):
         """
         Process CSV data for metadata version 0.0 (multiple CSV files).
 
         Args:
             metadata: Parsed JSON metadata dictionary
+            data_folder: Path to folder containing CSV data files
         """
         print("Processing data as version 0.0 (multiple CSV files)")
 
         # Create gauge instances from metadata
-        self.gauge_instances = self.create_gauge_instances(metadata["gauges"])
+        self.gauge_instances = self.create_gauge_instances(
+            metadata["gauges"], data_folder
+        )
         print(f"Created {len(self.gauge_instances)} gauge instances")
 
         # Separate gauges into upstream and downstream datasets based on gauge_location
@@ -227,34 +263,43 @@ class DataPlotter:
         print(f"Downstream gauges: {len(downstream_gauges)}")
 
         # Create datasets for plotting
-        self.create_datasets_from_gauges(upstream_gauges, downstream_gauges)
+        self.create_datasets_from_gauges(
+            upstream_gauges, downstream_gauges, data_folder
+        )
 
         # Log completion
         print("\nDatasets created:")
         print(f"  - Upstream: {len(self.upstream_datasets)} datasets")
         print(f"  - Downstream: {len(self.downstream_datasets)} datasets")
 
-    def create_datasets_from_gauges(self, upstream_gauges, downstream_gauges):
+    def create_datasets_from_gauges(
+        self, upstream_gauges, downstream_gauges, data_folder
+    ):
         """
         Create dataset dictionaries from gauge instances for plotting.
 
         Args:
             upstream_gauges: List of gauge instances with upstream location
             downstream_gauges: List of gauge instances with downstream location
+            data_folder: Path to folder containing the data
         """
-        # Clear existing datasets
-        self.upstream_datasets = []
-        self.downstream_datasets = []
-        self.folder_datasets = []
+        # Don't clear existing datasets - we want to accumulate multiple datasets
+        # Only initialize if not already initialized
+        if not hasattr(self, "upstream_datasets") or self.upstream_datasets is None:
+            self.upstream_datasets = []
+        if not hasattr(self, "downstream_datasets") or self.downstream_datasets is None:
+            self.downstream_datasets = []
+        if not hasattr(self, "folder_datasets") or self.folder_datasets is None:
+            self.folder_datasets = []
 
         # Create a single folder-level dataset
         dataset_name = f"Dataset_{len(self.folder_datasets) + 1}"
-        dataset_color = self.get_next_color(0)
+        dataset_color = self.get_next_color(len(self.folder_datasets))
 
         folder_dataset = {
             "name": dataset_name,
             "color": dataset_color,
-            "folder": self.data_folder,
+            "folder": data_folder,
             "upstream_gauges": [],
             "downstream_gauges": [],
         }
@@ -322,12 +367,13 @@ class DataPlotter:
         # Add the folder dataset to our list
         self.folder_datasets.append(folder_dataset)
 
-    def process_csv_v1_0(self, metadata):
+    def process_csv_v1_0(self, metadata, data_folder):
         """
         Process CSV data for metadata version 1.0 (single CSV file).
 
         Args:
             metadata: Parsed JSON metadata dictionary
+            data_folder: Path to folder containing CSV data files
         """
         raise NotImplementedError("Version 1.0 processing not yet implemented")
 
@@ -1259,7 +1305,8 @@ class DataPlotter:
         y_max=None,
     ):
         """Generate the plot based on current dataset state and settings"""
-        fig = FigureResampler(go.Figure())
+        # Use FigureResampler with show_dash_kwargs to hide resampling annotations
+        fig = FigureResampler(go.Figure(), show_dash_kwargs={"mode": "disabled"})
 
         # Iterate through folder datasets and all their gauges
         for folder_dataset in self.folder_datasets:
@@ -1338,7 +1385,8 @@ class DataPlotter:
         y_max=None,
     ):
         """Generate the upstream pressure plot"""
-        fig = FigureResampler(go.Figure())
+        # Use FigureResampler with show_dash_kwargs to hide resampling annotations
+        fig = FigureResampler(go.Figure(), show_dash_kwargs={"mode": "disabled"})
 
         # Iterate through folder datasets and their upstream gauges
         for folder_dataset in self.folder_datasets:
@@ -1414,7 +1462,8 @@ class DataPlotter:
         y_max=None,
     ):
         """Generate the downstream pressure plot"""
-        fig = FigureResampler(go.Figure())
+        # Use FigureResampler with show_dash_kwargs to hide resampling annotations
+        fig = FigureResampler(go.Figure(), show_dash_kwargs={"mode": "disabled"})
 
         # Iterate through folder datasets and their downstream gauges
         for folder_dataset in self.folder_datasets:
