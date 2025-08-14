@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 from dash import ALL, MATCH, dcc, html
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
+from plotly_resampler import FigureResampler
 
 # Import gauge classes
 from .pressure_gauge import Baratron626D_Gauge, CVM211_Gauge, WGM701_Gauge
@@ -1199,7 +1200,7 @@ class DataPlotter:
         y_max=None,
     ):
         """Generate the plot based on current dataset state and settings"""
-        fig = go.Figure()
+        fig = FigureResampler(go.Figure())
 
         for dataset in self.upstream_datasets + self.downstream_datasets:
             # Skip invisible datasets
@@ -1217,21 +1218,15 @@ class DataPlotter:
                 time_data = data["RelativeTime"]
                 pressure_data = data["Pressure_Torr"]
 
-                # Performance optimization: downsample large datasets
-                if len(time_data) > 5000:
-                    # Keep every nth point to reduce to ~5000 points
-                    step = len(time_data) // 5000
-                    time_data = time_data[::step]
-                    pressure_data = pressure_data[::step]
-
-                # Create trace with lines only (no markers for better performance)
+                # Use plotly-resampler for automatic downsampling
                 fig.add_trace(
                     go.Scatter(
                         x=time_data,
                         y=pressure_data,
-                        mode="lines",  # Remove markers for performance
+                        mode="lines+markers",
                         name=display_name,
                         line=dict(color=color, width=1.5),
+                        marker=dict(size=3),
                     )
                 )
 
@@ -1279,7 +1274,7 @@ class DataPlotter:
         y_max=None,
     ):
         """Generate the upstream pressure plot"""
-        fig = go.Figure()
+        fig = FigureResampler(go.Figure())
 
         for dataset in self.upstream_datasets:
             # Skip invisible datasets
@@ -1297,23 +1292,17 @@ class DataPlotter:
                 time_data = data["RelativeTime"]
                 pressure_data = data["Pressure_Torr"]
 
-                # Performance optimization: downsample large datasets
-                if len(time_data) > 5000:
-                    # Keep every nth point to reduce to ~5000 points
-                    step = len(time_data) // 5000
-                    time_data = time_data[::step]
-                    pressure_data = pressure_data[::step]
-
-                # Create the trace
-                trace_kwargs = {
-                    "x": time_data,
-                    "y": pressure_data,
-                    "mode": "lines",  # Remove markers for performance
-                    "name": display_name,
-                    "line": dict(color=color, width=1.5),
-                }
-
-                fig.add_trace(go.Scatter(**trace_kwargs))
+                # Use plotly-resampler for automatic downsampling
+                fig.add_trace(
+                    go.Scatter(
+                        x=time_data,
+                        y=pressure_data,
+                        mode="lines+markers",
+                        name=display_name,
+                        line=dict(color=color, width=1.5),
+                        marker=dict(size=3),
+                    )
+                )
 
         # Configure the layout
         fig.update_layout(
@@ -1359,7 +1348,7 @@ class DataPlotter:
         y_max=None,
     ):
         """Generate the downstream pressure plot"""
-        fig = go.Figure()
+        fig = FigureResampler(go.Figure())
 
         for dataset in self.downstream_datasets:
             # Skip invisible datasets
@@ -1377,23 +1366,17 @@ class DataPlotter:
                 time_data = data["RelativeTime"]
                 pressure_data = data["Pressure_Torr"]
 
-                # Performance optimization: downsample large datasets
-                if len(time_data) > 5000:
-                    # Keep every nth point to reduce to ~5000 points
-                    step = len(time_data) // 5000
-                    time_data = time_data[::step]
-                    pressure_data = pressure_data[::step]
-
-                # Create the trace
-                trace_kwargs = {
-                    "x": time_data,
-                    "y": pressure_data,
-                    "mode": "lines",  # Remove markers for performance
-                    "name": display_name,
-                    "line": dict(color=color, width=1.5),
-                }
-
-                fig.add_trace(go.Scatter(**trace_kwargs))
+                # Use plotly-resampler for automatic downsampling
+                fig.add_trace(
+                    go.Scatter(
+                        x=time_data,
+                        y=pressure_data,
+                        mode="lines+markers",
+                        name=display_name,
+                        line=dict(color=color, width=1.5),
+                        marker=dict(size=3),
+                    )
+                )
 
         # Configure the layout
         fig.update_layout(
