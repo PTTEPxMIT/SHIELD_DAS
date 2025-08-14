@@ -1,26 +1,34 @@
 import base64
-import io
+import json
+import os
+import sys
 import threading
 import webbrowser
 
 import dash
 import dash_bootstrap_components as dbc
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from dash import ALL, MATCH, dcc, html
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 
+# Import gauge classes
+from .pressure_gauge import Baratron626D_Gauge, CVM211_Gauge, WGM701_Gauge
+
 
 class DataPlotter:
-    def __init__(self, port=8050):
+    def __init__(self, data_folder=None, port=8050):
         """
         Initialize the DataPlotter.
 
         Args:
+            data_folder: Path to folder containing JSON metadata and CSV data files
             port: Port for the Dash server
         """
 
+        self.data_folder = data_folder
         self.port = port
         self.app = dash.Dash(
             __name__,
@@ -36,6 +44,12 @@ class DataPlotter:
         self.upstream_datasets = []
         self.downstream_datasets = []
 
+        # Process data folder if provided
+        if self.data_folder:
+            self.load_data()
+            # Terminate after loading data
+            sys.exit(0)
+
         # Setup the app layout
         self.app.layout = self.create_layout()
 
@@ -45,9 +59,170 @@ class DataPlotter:
         # Flag to track if recording has been started
         self.recording_started = False
 
+    def load_data(self):
+        """
+        Load and process data from the specified folder.
+        Read JSON metadata first, then process CSV data based on version.
+        """
+        print(f"Loading data from folder: {self.data_folder}")
+
+        if not os.path.exists(self.data_folder):
+            print(f"ERROR: Data folder not found: {self.data_folder}")
+            return
+
+        try:
+            # Process JSON metadata
+            metadata = self.process_json_metadata()
+            if metadata is None:
+                return
+
+            # Process CSV data based on version
+            self.process_csv_data(metadata)
+
+        except Exception as e:
+            print(f"ERROR loading data from {self.data_folder}: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    def process_json_metadata(self):
+        """
+        Find and process JSON metadata file.
+
+        Returns:
+            dict: Parsed metadata or None if error
+        """
+        # Find JSON files
+        json_files = [
+            f for f in os.listdir(self.data_folder) if f.lower().endswith(".json")
+        ]
+
+        if not json_files:
+            print(f"ERROR: No JSON file found in {self.data_folder}")
+            return None
+
+        json_path = os.path.join(self.data_folder, json_files[0])
+        print(f"Found JSON metadata: {json_path}")
+
+        # Read JSON metadata
+        with open(json_path) as f:
+            metadata = json.load(f)
+
+        return metadata
+
+    def process_csv_data(self, metadata):
+        """
+        Process CSV data based on metadata version.
+
+        Args:
+            metadata: Parsed JSON metadata dictionary
+        """
+        version = metadata.get("version")
+
+        if version == "0.0":
+            self.process_csv_v0_0(metadata)
+        elif version == "1.0":
+            self.process_csv_v1_0(metadata)
+        else:
+            raise NotImplementedError(
+                f"Unsupported metadata version: {version}. "
+                f"Only versions '0.0' and '1.0' are supported."
+            )
+
+    def create_gauge_instances(self, gauges_metadata):
+        """Create gauge instances from metadata and load CSV data."""
+        gauge_instances = []
+
+        # Mapping of gauge types to classes
+        gauge_type_map = {
+            "WGM701_Gauge": WGM701_Gauge,
+            "CVM211_Gauge": CVM211_Gauge,
+            "Baratron626D_Gauge": Baratron626D_Gauge,
+        }
+
+        for gauge_data in gauges_metadata:
+            gauge_type = gauge_data.get("type")
+
+            if gauge_type not in gauge_type_map:
+                raise ValueError(f"Unknown gauge type: {gauge_type}")
+
+            gauge_class = gauge_type_map[gauge_type]
+
+            # Extract common parameters
+            name = gauge_data.get("name")
+            ain_channel = gauge_data.get("ain_channel")
+            gauge_location = gauge_data.get("gauge_location")
+
+            # Create instance based on gauge type
+            if gauge_type == "Baratron626D_Gauge":
+                # Baratron626D requires additional full_scale_Torr parameter
+                full_scale_torr = gauge_data.get("full_scale_torr")
+                if full_scale_torr is None:
+                    raise ValueError(
+                        f"Baratron626D gauge '{name}' missing required parameter",
+                        "'full_scale_torr'",
+                    )
+                gauge_instance = gauge_class(
+                    ain_channel, name, gauge_location, full_scale_torr
+                )
+            else:
+                # WGM701 and CVM211 use the same constructor parameters
+                gauge_instance = gauge_class(name, ain_channel, gauge_location)
+
+            # Load CSV data for this gauge
+            csv_filename = gauge_data.get("filename")
+            if not csv_filename:
+                raise ValueError(
+                    f"Gauge '{name}' missing required 'filename' field in metadata"
+                )
+
+            csv_path = os.path.join(self.data_folder, csv_filename)
+            if not os.path.exists(csv_path):
+                raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+            # Load CSV data using numpy
+            data = np.genfromtxt(csv_path, delimiter=",", names=True)
+
+            # Extract RelativeTime and Pressure columns (indices 1 and 2)
+            gauge_instance.time_data = data["RelativeTime"]
+            print(gauge_instance.time_data)
+            gauge_instance.pressure_data = data["Pressure_Torr"]
+
+            print(f"Loaded CSV data for {name}: {len(data)} rows")
+
+            gauge_instances.append(gauge_instance)
+            print(f"Created gauge instance: {gauge_type} - {name}")
+
+        return gauge_instances
+
+    def process_csv_v0_0(self, metadata):
+        """
+        Process CSV data for metadata version 0.0 (multiple CSV files).
+
+        Args:
+            metadata: Parsed JSON metadata dictionary
+        """
+        print("Processing data as version 0.0 (multiple CSV files)")
+
+        # Create gauge instances from metadata
+        self.gauge_instances = self.create_gauge_instances(metadata["gauges"])
+        print(f"Created {len(self.gauge_instances)} gauge instances")
+
+        # Terminate the program after demonstrating gauge creation and data loading
+        sys.exit(0)
+
+    def process_csv_v1_0(self, metadata):
+        """
+        Process CSV data for metadata version 1.0 (single CSV file).
+
+        Args:
+            metadata: Parsed JSON metadata dictionary
+        """
+        raise NotImplementedError("Version 1.0 processing not yet implemented")
+
     def parse_uploaded_file(self, contents, filename):
         """
-        Parse uploaded CSV file content.
+        Parse uploaded JSON metadata file and load referenced data.
 
         Args:
             contents: Base64 encoded file content
@@ -61,13 +236,25 @@ class DataPlotter:
             content_type, content_string = contents.split(",")
             decoded = base64.b64decode(content_string)
 
-            # Read CSV from the decoded content
-            df = pd.read_csv(io.StringIO(decoded.decode("utf-8")))
-            print(
-                f"Successfully uploaded and parsed {filename} "
-                f"with {len(df)} data points"
-            )
-            return df
+            # Parse JSON metadata
+            metadata = json.loads(decoded.decode("utf-8"))
+
+            # Check version and get data filename
+            if metadata.get("version") != "1.0":
+                print(f"Unsupported version: {metadata.get('version')}")
+                return pd.DataFrame()
+
+            data_filename = metadata["run_info"]["data_filename"]
+            print(f"Found data filename: {data_filename}")
+
+            # For now, just demonstrate that we successfully parsed the JSON
+            # In a real implementation, we'd need the user to upload both files
+            # or have the CSV file accessible on the server
+            print(f"Successfully extracted CSV filename: {data_filename}")
+            print("JSON metadata parsing successful!")
+            print("TEST: Metadata parsing complete - terminating program")
+            sys.exit(0)
+
         except Exception as e:
             print(f"Error parsing uploaded file {filename}: {e}")
             return pd.DataFrame()
@@ -216,7 +403,7 @@ class DataPlotter:
                                                                                     "marginRight": "10px",
                                                                                 },
                                                                                 multiple=False,
-                                                                                accept=".csv",
+                                                                                accept=".json",
                                                                             ),
                                                                             dbc.Button(
                                                                                 [
@@ -1666,3 +1853,21 @@ class DataPlotter:
     def stop(self):
         """Stop the data plotter (CSV mode - nothing to stop)"""
         pass
+
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) > 1:
+        # Use folder path from command line argument
+        folder_path = sys.argv[1]
+        print(f"Loading data from folder: {folder_path}")
+        plotter = DataPlotter(data_folder=folder_path)
+    else:
+        # Default mode without folder
+        print("Usage: python data_plotter.py [folder_path]")
+        print("Example: python data_plotter.py results/08.14/test_run_1_08h44")
+        print("Starting without data folder...")
+        plotter = DataPlotter()
+
+    plotter.run()
