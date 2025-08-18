@@ -1815,21 +1815,22 @@ class DataPlotter:
         @self.app.callback(
             Output("download-upstream-plot", "data", allow_duplicate=True),
             [Input("export-upstream-plot", "n_clicks")],
+            [State("show-gauge-names-upstream", "value")],
             prevent_initial_call=True,
         )
-        def export_upstream_plot(n_clicks):
+        def export_upstream_plot(n_clicks, show_gauge_names):
             if not n_clicks:
                 raise PreventUpdate
 
-            # Generate the upstream plot
-            fig = self._generate_upstream_plot()
+            # Generate the upstream plot with FULL DATA (no resampling)
+            fig = self._generate_upstream_plot_full_data(show_gauge_names)
 
             # Convert to HTML
             html_str = fig.to_html(include_plotlyjs="inline")
 
             return dict(
                 content=html_str,
-                filename="upstream_plot.html",
+                filename="upstream_plot_full_data.html",
                 type="text/html",
             )
 
@@ -1837,21 +1838,22 @@ class DataPlotter:
         @self.app.callback(
             Output("download-downstream-plot", "data", allow_duplicate=True),
             [Input("export-downstream-plot", "n_clicks")],
+            [State("show-gauge-names-downstream", "value")],
             prevent_initial_call=True,
         )
-        def export_downstream_plot(n_clicks):
+        def export_downstream_plot(n_clicks, show_gauge_names):
             if not n_clicks:
                 raise PreventUpdate
 
-            # Generate the downstream plot
-            fig = self._generate_downstream_plot()
+            # Generate the downstream plot with FULL DATA (no resampling)
+            fig = self._generate_downstream_plot_full_data(show_gauge_names)
 
             # Convert to HTML
             html_str = fig.to_html(include_plotlyjs="inline")
 
             return dict(
                 content=html_str,
-                filename="downstream_plot.html",
+                filename="downstream_plot_full_data.html",
                 type="text/html",
             )
 
@@ -2116,6 +2118,124 @@ class DataPlotter:
         for trace in fig.data:
             if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
                 trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
+
+        return fig
+
+    def _generate_upstream_plot_full_data(self, show_gauge_names=False):
+        """Generate the upstream pressure plot with FULL DATA (no resampling)"""
+        # Use regular plotly Figure WITHOUT FigureResampler
+        fig = go.Figure()
+
+        # Iterate through folder datasets and their upstream gauges
+        for folder_dataset in self.folder_datasets:
+            for dataset in folder_dataset["upstream_gauges"]:
+                # Skip invisible datasets
+                if not dataset.get("visible", True):
+                    continue
+
+                data = dataset["data"]
+                # Determine display name based on checkbox state
+                if show_gauge_names:
+                    display_name = dataset.get(
+                        "display_name", dataset.get("name", "Unknown Dataset")
+                    )
+                else:
+                    display_name = folder_dataset["name"]
+                color = dataset["color"]
+
+                if len(data.get("RelativeTime", [])) > 0:
+                    # Extract data directly from our structure
+                    time_data = data["RelativeTime"]
+                    pressure_data = data["Pressure_Torr"]
+
+                    # Add ALL data points (no resampling)
+                    fig.add_trace(
+                        go.Scatter(
+                            x=time_data,
+                            y=pressure_data,
+                            mode="lines+markers",
+                            name=display_name,
+                            line=dict(color=color, width=1.5),
+                            marker=dict(size=3),
+                        )
+                    )
+
+        # Configure the layout
+        fig.update_layout(
+            title="Upstream Pressure (Full Data)",
+            height=500,
+            xaxis_title="Relative Time (s)",
+            yaxis_title="Pressure (Torr)",
+            template="plotly_white",
+            margin=dict(l=60, r=30, t=40, b=60),
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.05,
+            ),
+            hovermode="x unified",
+        )
+
+        return fig
+
+    def _generate_downstream_plot_full_data(self, show_gauge_names=False):
+        """Generate the downstream pressure plot with FULL DATA (no resampling)"""
+        # Use regular plotly Figure WITHOUT FigureResampler
+        fig = go.Figure()
+
+        # Iterate through folder datasets and their downstream gauges
+        for folder_dataset in self.folder_datasets:
+            for dataset in folder_dataset["downstream_gauges"]:
+                # Skip invisible datasets
+                if not dataset.get("visible", True):
+                    continue
+
+                data = dataset["data"]
+                # Determine display name based on checkbox state
+                if show_gauge_names:
+                    display_name = dataset.get(
+                        "display_name", dataset.get("name", "Unknown Dataset")
+                    )
+                else:
+                    display_name = folder_dataset["name"]
+                color = dataset["color"]
+
+                if len(data.get("RelativeTime", [])) > 0:
+                    # Extract data directly from our structure
+                    time_data = data["RelativeTime"]
+                    pressure_data = data["Pressure_Torr"]
+
+                    # Add ALL data points (no resampling)
+                    fig.add_trace(
+                        go.Scatter(
+                            x=time_data,
+                            y=pressure_data,
+                            mode="lines+markers",
+                            name=display_name,
+                            line=dict(color=color, width=1.5),
+                            marker=dict(size=3),
+                        )
+                    )
+
+        # Configure the layout
+        fig.update_layout(
+            title="Downstream Pressure (Full Data)",
+            height=500,
+            xaxis_title="Relative Time (s)",
+            yaxis_title="Pressure (Torr)",
+            template="plotly_white",
+            margin=dict(l=60, r=30, t=40, b=60),
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.05,
+            ),
+            hovermode="x unified",
+        )
 
         return fig
 
