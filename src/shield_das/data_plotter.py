@@ -892,6 +892,21 @@ class DataPlotter:
                                                                         value=False,
                                                                         className="mb-2",
                                                                     ),
+                                                                    html.Hr(
+                                                                        className="my-2"
+                                                                    ),
+                                                                    dbc.Button(
+                                                                        [
+                                                                            html.I(
+                                                                                className="fas fa-download me-2"
+                                                                            ),
+                                                                            "Export Upstream Plot",
+                                                                        ],
+                                                                        id="export-upstream-plot",
+                                                                        color="outline-secondary",
+                                                                        size="sm",
+                                                                        className="w-100",
+                                                                    ),
                                                                 ],
                                                                 width=12,
                                                             ),
@@ -1111,6 +1126,21 @@ class DataPlotter:
                                                                         value=False,
                                                                         className="mb-2",
                                                                     ),
+                                                                    html.Hr(
+                                                                        className="my-2"
+                                                                    ),
+                                                                    dbc.Button(
+                                                                        [
+                                                                            html.I(
+                                                                                className="fas fa-download me-2"
+                                                                            ),
+                                                                            "Export Downstream Plot",
+                                                                        ],
+                                                                        id="export-downstream-plot",
+                                                                        color="outline-secondary",
+                                                                        size="sm",
+                                                                        className="w-100",
+                                                                    ),
                                                                 ],
                                                                 width=12,
                                                             ),
@@ -1138,6 +1168,11 @@ class DataPlotter:
                         ),
                     ],
                 ),
+                # Download component for dataset downloads
+                dcc.Download(id="download-dataset-output"),
+                # Download components for plot exports
+                dcc.Download(id="download-upstream-plot"),
+                dcc.Download(id="download-downstream-plot"),
             ],
             fluid=True,
         )
@@ -1157,7 +1192,7 @@ class DataPlotter:
                     "Dataset Name",
                     style={
                         "text-align": "left",
-                        "width": "45%",
+                        "width": "40%",
                         "padding": "2px",
                         "font-weight": "normal",
                     },
@@ -1166,7 +1201,7 @@ class DataPlotter:
                     "Dataset Path",
                     style={
                         "text-align": "left",
-                        "width": "30%",
+                        "width": "40%",
                         "padding": "2px",
                         "font-weight": "normal",
                     },
@@ -1175,7 +1210,7 @@ class DataPlotter:
                     "Colour",
                     style={
                         "text-align": "center",
-                        "width": "15%",
+                        "width": "10%",
                         "padding": "2px",
                         "font-weight": "normal",
                     },
@@ -1184,7 +1219,16 @@ class DataPlotter:
                     "",
                     style={
                         "text-align": "center",
-                        "width": "10%",
+                        "width": "5%",
+                        "padding": "2px",
+                        "font-weight": "normal",
+                    },
+                ),
+                html.Th(
+                    "",
+                    style={
+                        "text-align": "center",
+                        "width": "5%",
                         "padding": "2px",
                         "font-weight": "normal",
                     },
@@ -1248,6 +1292,25 @@ class DataPlotter:
                                     "height": "40px",
                                     "border": "none",
                                 },
+                            ),
+                        ],
+                        style={"text-align": "center", "padding": "4px"},
+                    ),
+                    html.Td(
+                        [
+                            html.Button(
+                                "⬇",
+                                id={"type": "download-dataset", "index": i},
+                                className="btn btn-outline-primary btn-sm",
+                                style={
+                                    "width": "32px",
+                                    "height": "32px",
+                                    "padding": "0",
+                                    "border-radius": "4px",
+                                    "font-size": "14px",
+                                    "line-height": "1",
+                                },
+                                title=f"Download {dataset['name']}",
                             ),
                         ],
                         style={"text-align": "center", "padding": "4px"},
@@ -1667,6 +1730,130 @@ class DataPlotter:
                 self._generate_upstream_plot(),
                 self._generate_downstream_plot(),
             ]
+
+        # Callback for downloading datasets
+        @self.app.callback(
+            Output("download-dataset-output", "data", allow_duplicate=True),
+            [Input({"type": "download-dataset", "index": ALL}, "n_clicks")],
+            prevent_initial_call=True,
+        )
+        def download_dataset(n_clicks_list):
+            # Check if any download button was clicked
+            if not n_clicks_list or not any(n_clicks_list):
+                raise PreventUpdate
+
+            # Find which button was clicked
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                raise PreventUpdate
+
+            # Extract the index from the triggered button
+            button_id = ctx.triggered[0]["prop_id"]
+            import json
+
+            try:
+                button_data = json.loads(button_id.split(".")[0])
+                download_index = button_data["index"]
+            except (json.JSONDecodeError, KeyError, IndexError):
+                raise PreventUpdate
+
+            # Get the dataset to download
+            if 0 <= download_index < len(self.folder_datasets):
+                dataset = self.folder_datasets[download_index]
+
+                # Create CSV data combining all gauges from this dataset
+                import pandas as pd
+
+                # Combine upstream and downstream gauges
+                all_gauges = dataset["upstream_gauges"] + dataset["downstream_gauges"]
+
+                # Collect all unique time points first
+                all_times = set()
+                gauge_data_dict = {}
+
+                for gauge in all_gauges:
+                    gauge_data = gauge["data"]
+                    if len(gauge_data.get("RelativeTime", [])) > 0:
+                        times = gauge_data["RelativeTime"]
+                        pressures = gauge_data["Pressure_Torr"]
+
+                        # Add times to our set
+                        all_times.update(times)
+
+                        # Store gauge data with unique column name
+                        gauge_name = gauge.get(
+                            "display_name", gauge.get("name", "Unknown")
+                        )
+                        gauge_data_dict[f"{gauge_name}_Pressure_Torr"] = dict(
+                            zip(times, pressures)
+                        )
+
+                if all_times and gauge_data_dict:
+                    # Create a sorted list of times
+                    sorted_times = sorted(all_times)
+
+                    # Build the final DataFrame
+                    result_data = {"RelativeTime": sorted_times}
+
+                    # Add each gauge's data
+                    for gauge_column, time_pressure_map in gauge_data_dict.items():
+                        result_data[gauge_column] = [
+                            time_pressure_map.get(time, "") for time in sorted_times
+                        ]
+
+                    df = pd.DataFrame(result_data)
+                    csv_data = df.to_csv(index=False)
+                    return dict(
+                        content=csv_data,
+                        filename=f"{dataset['name']}_data.csv",
+                        type="text/csv",
+                    )
+
+            raise PreventUpdate
+
+        # Callback for exporting upstream plot
+        @self.app.callback(
+            Output("download-upstream-plot", "data", allow_duplicate=True),
+            [Input("export-upstream-plot", "n_clicks")],
+            prevent_initial_call=True,
+        )
+        def export_upstream_plot(n_clicks):
+            if not n_clicks:
+                raise PreventUpdate
+
+            # Generate the upstream plot
+            fig = self._generate_upstream_plot()
+
+            # Convert to HTML
+            html_str = fig.to_html(include_plotlyjs="inline")
+
+            return dict(
+                content=html_str,
+                filename="upstream_plot.html",
+                type="text/html",
+            )
+
+        # Callback for exporting downstream plot
+        @self.app.callback(
+            Output("download-downstream-plot", "data", allow_duplicate=True),
+            [Input("export-downstream-plot", "n_clicks")],
+            prevent_initial_call=True,
+        )
+        def export_downstream_plot(n_clicks):
+            if not n_clicks:
+                raise PreventUpdate
+
+            # Generate the downstream plot
+            fig = self._generate_downstream_plot()
+
+            # Convert to HTML
+            html_str = fig.to_html(include_plotlyjs="inline")
+
+            return dict(
+                content=html_str,
+                filename="downstream_plot.html",
+                type="text/html",
+            )
 
     def _generate_plot(
         self,
