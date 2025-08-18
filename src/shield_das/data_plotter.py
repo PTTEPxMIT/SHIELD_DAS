@@ -12,6 +12,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from dash import ALL, dcc, html
 from dash.dependencies import Input, Output, State
+from dash.exceptions import PreventUpdate
 from plotly_resampler import FigureResampler
 
 # Import gauge classes
@@ -1154,15 +1155,39 @@ class DataPlotter:
             [
                 html.Th(
                     "Dataset Name",
-                    style={"text-align": "left", "width": "50%", "padding": "2px"},
+                    style={
+                        "text-align": "left",
+                        "width": "45%",
+                        "padding": "2px",
+                        "font-weight": "normal",
+                    },
                 ),
                 html.Th(
                     "Dataset Path",
-                    style={"text-align": "left", "width": "30%", "padding": "2px"},
+                    style={
+                        "text-align": "left",
+                        "width": "30%",
+                        "padding": "2px",
+                        "font-weight": "normal",
+                    },
                 ),
                 html.Th(
                     "Colour",
-                    style={"text-align": "center", "width": "20%", "padding": "2px"},
+                    style={
+                        "text-align": "center",
+                        "width": "15%",
+                        "padding": "2px",
+                        "font-weight": "normal",
+                    },
+                ),
+                html.Th(
+                    "",
+                    style={
+                        "text-align": "center",
+                        "width": "10%",
+                        "padding": "2px",
+                        "font-weight": "normal",
+                    },
                 ),
             ]
         )
@@ -1223,6 +1248,25 @@ class DataPlotter:
                                     "height": "40px",
                                     "border": "none",
                                 },
+                            ),
+                        ],
+                        style={"text-align": "center", "padding": "4px"},
+                    ),
+                    html.Td(
+                        [
+                            html.Button(
+                                "🗑",
+                                id={"type": "delete-dataset", "index": i},
+                                className="btn btn-outline-danger btn-sm",
+                                style={
+                                    "width": "32px",
+                                    "height": "32px",
+                                    "padding": "0",
+                                    "border-radius": "4px",
+                                    "font-size": "14px",
+                                    "line-height": "1",
+                                },
+                                title=f"Delete {dataset['name']}",
                             ),
                         ],
                         style={"text-align": "center", "padding": "4px"},
@@ -1581,6 +1625,48 @@ class DataPlotter:
                         duration=5000,
                     ),
                 ]
+
+        # Callback for deleting datasets
+        @self.app.callback(
+            [
+                Output("dataset-table", "children"),
+                Output("upstream-plot", "figure"),
+                Output("downstream-plot", "figure"),
+            ],
+            [Input({"type": "delete-dataset", "index": ALL}, "n_clicks")],
+            prevent_initial_call=True,
+        )
+        def delete_dataset(n_clicks_list):
+            # Check if any delete button was clicked
+            if not n_clicks_list or not any(n_clicks_list):
+                raise PreventUpdate
+
+            # Find which button was clicked
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                raise PreventUpdate
+
+            # Extract the index from the triggered button
+            button_id = ctx.triggered[0]["prop_id"]
+            import json
+
+            try:
+                button_data = json.loads(button_id.split(".")[0])
+                delete_index = button_data["index"]
+            except (json.JSONDecodeError, KeyError, IndexError):
+                raise PreventUpdate
+
+            # Remove the dataset at the specified index
+            if 0 <= delete_index < len(self.folder_datasets):
+                deleted_dataset = self.folder_datasets.pop(delete_index)
+                print(f"Deleted dataset: {deleted_dataset['name']}")
+
+            # Return updated components
+            return [
+                self.create_dataset_table(),
+                self._generate_upstream_plot(),
+                self._generate_downstream_plot(),
+            ]
 
     def _generate_plot(
         self,
