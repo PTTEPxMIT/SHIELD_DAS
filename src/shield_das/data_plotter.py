@@ -1592,8 +1592,13 @@ class DataPlotter:
         y_max=None,
     ):
         """Generate the plot based on current dataset state and settings"""
-        # Use FigureResampler with show_dash_kwargs to hide resampling annotations
-        fig = FigureResampler(go.Figure(), show_dash_kwargs={"mode": "disabled"})
+        # Use FigureResampler with parameters to hide resampling annotations
+        fig = FigureResampler(
+            go.Figure(),
+            show_dash_kwargs={"mode": "disabled"},
+            show_mean_aggregation_size=False,
+            verbose=False,
+        )
 
         # Iterate through folder datasets and all their gauges
         for folder_dataset in self.folder_datasets:
@@ -1660,6 +1665,11 @@ class DataPlotter:
             else:
                 fig.update_yaxes(range=[y_min, y_max])
 
+        # Clean up trace names to remove [R] annotations
+        for trace in fig.data:
+            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
+                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
+
         return fig
 
     def _generate_upstream_plot(
@@ -1672,8 +1682,13 @@ class DataPlotter:
         y_max=None,
     ):
         """Generate the upstream pressure plot"""
-        # Use FigureResampler with show_dash_kwargs to hide resampling annotations
-        fig = FigureResampler(go.Figure(), show_dash_kwargs={"mode": "disabled"})
+        # Use FigureResampler with parameters to hide resampling annotations
+        fig = FigureResampler(
+            go.Figure(),
+            show_dash_kwargs={"mode": "disabled"},
+            show_mean_aggregation_size=False,
+            verbose=False,
+        )
 
         # Iterate through folder datasets and their upstream gauges
         for folder_dataset in self.folder_datasets:
@@ -1737,6 +1752,11 @@ class DataPlotter:
             else:
                 fig.update_yaxes(range=[y_min, y_max])
 
+        # Clean up trace names to remove [R] annotations
+        for trace in fig.data:
+            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
+                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
+
         return fig
 
     def _generate_downstream_plot(
@@ -1749,8 +1769,13 @@ class DataPlotter:
         y_max=None,
     ):
         """Generate the downstream pressure plot"""
-        # Use FigureResampler with show_dash_kwargs to hide resampling annotations
-        fig = FigureResampler(go.Figure(), show_dash_kwargs={"mode": "disabled"})
+        # Use FigureResampler with parameters to hide resampling annotations
+        fig = FigureResampler(
+            go.Figure(),
+            show_dash_kwargs={"mode": "disabled"},
+            show_mean_aggregation_size=False,
+            verbose=False,
+        )
 
         # Iterate through folder datasets and their downstream gauges
         for folder_dataset in self.folder_datasets:
@@ -1813,6 +1838,11 @@ class DataPlotter:
                 fig.update_yaxes(range=[math.log10(y_min), math.log10(y_max)])
             else:
                 fig.update_yaxes(range=[y_min, y_max])
+
+        # Clean up trace names to remove [R] annotations
+        for trace in fig.data:
+            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
+                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
 
         return fig
 
