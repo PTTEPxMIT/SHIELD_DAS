@@ -1035,6 +1035,15 @@ class DataPlotter:
                     ],
                     className="mt-3",
                 ),
+                # Add whitespace at the bottom of the page
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            html.Div(style={"height": "100px"}),
+                            width=12,
+                        ),
+                    ],
+                ),
             ],
             fluid=True,
         )
