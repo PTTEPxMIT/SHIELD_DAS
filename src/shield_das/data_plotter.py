@@ -1165,10 +1165,15 @@ class DataPlotter:
                 Output("downstream-plot", "figure", allow_duplicate=True),
             ],
             [Input({"type": "dataset-name", "index": ALL}, "value")],
-            [State("hide-gauge-names-upstream", "value"), State("hide-gauge-names-downstream", "value")],
+            [
+                State("hide-gauge-names-upstream", "value"),
+                State("hide-gauge-names-downstream", "value"),
+            ],
             prevent_initial_call=True,
         )
-        def update_dataset_names(names, hide_gauge_names_upstream, hide_gauge_names_downstream):
+        def update_dataset_names(
+            names, hide_gauge_names_upstream, hide_gauge_names_downstream
+        ):
             # Update dataset names
             for i, name in enumerate(names):
                 if i < len(self.folder_datasets) and name:
@@ -1179,7 +1184,9 @@ class DataPlotter:
                         if hide_gauge_names_upstream:
                             gauge_dataset["display_name"] = name
                         else:
-                            gauge_dataset["display_name"] = f"{gauge_dataset['name']} - {name}"
+                            gauge_dataset["display_name"] = (
+                                f"{gauge_dataset['name']} - {name}"
+                            )
                         gauge_dataset["folder_dataset"] = name
 
                     # Update display names for downstream gauges based on downstream checkbox state
@@ -1187,7 +1194,9 @@ class DataPlotter:
                         if hide_gauge_names_downstream:
                             gauge_dataset["display_name"] = name
                         else:
-                            gauge_dataset["display_name"] = f"{gauge_dataset['name']} - {name}"
+                            gauge_dataset["display_name"] = (
+                                f"{gauge_dataset['name']} - {name}"
+                            )
                         gauge_dataset["folder_dataset"] = name
 
             # Return updated table and plots
@@ -1377,14 +1386,16 @@ class DataPlotter:
             # Update display names for upstream gauges only
             for folder_dataset in self.folder_datasets:
                 dataset_name = folder_dataset["name"]
-                
+
                 # Update upstream gauges
                 for gauge_dataset in folder_dataset["upstream_gauges"]:
                     if hide_gauge_names_upstream:
                         gauge_dataset["display_name"] = dataset_name
                     else:
-                        gauge_dataset["display_name"] = f"{gauge_dataset['name']} - {dataset_name}"
-            
+                        gauge_dataset["display_name"] = (
+                            f"{gauge_dataset['name']} - {dataset_name}"
+                        )
+
             # Return updated upstream plot
             return [self._generate_upstream_plot()]
 
@@ -1398,14 +1409,16 @@ class DataPlotter:
             # Update display names for downstream gauges only
             for folder_dataset in self.folder_datasets:
                 dataset_name = folder_dataset["name"]
-                
+
                 # Update downstream gauges
                 for gauge_dataset in folder_dataset["downstream_gauges"]:
                     if hide_gauge_names_downstream:
                         gauge_dataset["display_name"] = dataset_name
                     else:
-                        gauge_dataset["display_name"] = f"{gauge_dataset['name']} - {dataset_name}"
-            
+                        gauge_dataset["display_name"] = (
+                            f"{gauge_dataset['name']} - {dataset_name}"
+                        )
+
             # Return updated downstream plot
             return [self._generate_downstream_plot()]
 
