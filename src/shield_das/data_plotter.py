@@ -1154,15 +1154,15 @@ class DataPlotter:
             [
                 html.Th(
                     "Dataset Name",
-                    style={"text-align": "left", "width": "50%", "padding": "8px"},
+                    style={"text-align": "left", "width": "50%", "padding": "2px"},
                 ),
                 html.Th(
                     "Dataset Path",
-                    style={"text-align": "left", "width": "30%", "padding": "8px"},
+                    style={"text-align": "left", "width": "30%", "padding": "2px"},
                 ),
                 html.Th(
                     "Colour",
-                    style={"text-align": "center", "width": "20%", "padding": "8px"},
+                    style={"text-align": "center", "width": "20%", "padding": "2px"},
                 ),
             ]
         )
@@ -1184,7 +1184,7 @@ class DataPlotter:
                                 },
                             )
                         ],
-                        style={"padding": "8px"},
+                        style={"padding": "4px"},
                     ),
                     html.Td(
                         [
@@ -1210,7 +1210,7 @@ class DataPlotter:
                                 },
                             )
                         ],
-                        style={"padding": "8px"},
+                        style={"padding": "4px"},
                     ),
                     html.Td(
                         [
@@ -1225,7 +1225,7 @@ class DataPlotter:
                                 },
                             ),
                         ],
-                        style={"text-align": "center", "padding": "8px"},
+                        style={"text-align": "center", "padding": "4px"},
                     ),
                 ]
             )
