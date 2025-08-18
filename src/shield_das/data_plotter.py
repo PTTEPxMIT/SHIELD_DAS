@@ -560,6 +560,59 @@ class DataPlotter:
                                                         id="dataset-table-container",
                                                         children=self.create_dataset_table(),
                                                     ),
+                                                    # Add dataset section
+                                                    html.Div(
+                                                        [
+                                                            html.Hr(
+                                                                style={
+                                                                    "margin": "20px 0 15px 0"
+                                                                }
+                                                            ),
+                                                            dbc.Row(
+                                                                [
+                                                                    dbc.Col(
+                                                                        [
+                                                                            dbc.Input(
+                                                                                id="new-dataset-path",
+                                                                                type="text",
+                                                                                placeholder="Enter dataset folder path...",
+                                                                                style={
+                                                                                    "margin-bottom": "10px"
+                                                                                },
+                                                                            ),
+                                                                        ],
+                                                                        width=9,
+                                                                    ),
+                                                                    dbc.Col(
+                                                                        [
+                                                                            dbc.Button(
+                                                                                [
+                                                                                    html.I(
+                                                                                        className="fas fa-plus me-2"
+                                                                                    ),
+                                                                                    "Add Dataset",
+                                                                                ],
+                                                                                id="add-dataset-button",
+                                                                                color="primary",
+                                                                                style={
+                                                                                    "width": "100%"
+                                                                                },
+                                                                            ),
+                                                                        ],
+                                                                        width=3,
+                                                                    ),
+                                                                ],
+                                                                className="g-2",
+                                                            ),
+                                                            # Status message for add dataset
+                                                            html.Div(
+                                                                id="add-dataset-status",
+                                                                style={
+                                                                    "margin-top": "10px"
+                                                                },
+                                                            ),
+                                                        ]
+                                                    ),
                                                 ]
                                             ),
                                             id="collapse-dataset",
@@ -1457,6 +1510,77 @@ class DataPlotter:
 
             # Return updated downstream plot
             return [self._generate_downstream_plot()]
+
+        # Callback for adding new dataset
+        @self.app.callback(
+            [
+                Output("dataset-table-container", "children", allow_duplicate=True),
+                Output("upstream-plot", "figure", allow_duplicate=True),
+                Output("downstream-plot", "figure", allow_duplicate=True),
+                Output("new-dataset-path", "value"),
+                Output("add-dataset-status", "children"),
+            ],
+            [Input("add-dataset-button", "n_clicks")],
+            [State("new-dataset-path", "value")],
+            prevent_initial_call=True,
+        )
+        def add_new_dataset(n_clicks, new_path):
+            if not n_clicks or not new_path:
+                return [
+                    self.create_dataset_table(),
+                    self._generate_upstream_plot(),
+                    self._generate_downstream_plot(),
+                    new_path or "",
+                    "",
+                ]
+
+            # Check if path exists and contains valid data
+            import os
+
+            if not os.path.exists(new_path):
+                return [
+                    self.create_dataset_table(),
+                    self._generate_upstream_plot(),
+                    self._generate_downstream_plot(),
+                    new_path,
+                    dbc.Alert(
+                        "Path does not exist.",
+                        color="danger",
+                        dismissable=True,
+                        duration=3000,
+                    ),
+                ]
+
+            try:
+                # Try to load the dataset
+                self.load_data(new_path)
+
+                return [
+                    self.create_dataset_table(),
+                    self._generate_upstream_plot(),
+                    self._generate_downstream_plot(),
+                    "",  # Clear the input field
+                    dbc.Alert(
+                        f"Dataset added successfully from {new_path}",
+                        color="success",
+                        dismissable=True,
+                        duration=3000,
+                    ),
+                ]
+
+            except Exception as e:
+                return [
+                    self.create_dataset_table(),
+                    self._generate_upstream_plot(),
+                    self._generate_downstream_plot(),
+                    new_path,
+                    dbc.Alert(
+                        f"Error loading dataset: {e!s}",
+                        color="danger",
+                        dismissable=True,
+                        duration=5000,
+                    ),
+                ]
 
     def _generate_plot(
         self,
