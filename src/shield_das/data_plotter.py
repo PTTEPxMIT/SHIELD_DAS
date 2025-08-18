@@ -81,6 +81,52 @@ class DataPlotter:
         # Setup the app layout
         self.app.layout = self.create_layout()
 
+        # Add custom CSS for hover effects
+        self.app.index_string = """
+        <!DOCTYPE html>
+        <html>
+            <head>
+                {%metas%}
+                <title>{%title%}</title>
+                {%favicon%}
+                {%css%}
+                <style>
+                    .dataset-name-input:hover {
+                        border-color: #007bff !important;
+                        box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25) !important;
+                        transform: scale(1.01) !important;
+                    }
+                    
+                    .dataset-name-input:focus {
+                        border-color: #007bff !important;
+                        box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25) !important;
+                        outline: 0 !important;
+                    }
+                    
+                    .color-picker-input:hover {
+                        border-color: #007bff !important;
+                        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.4) !important;
+                        transform: none !important;
+                    }
+                    
+                    .color-picker-input:focus {
+                        border-color: #007bff !important;
+                        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.4) !important;
+                        outline: 0 !important;
+                    }
+                </style>
+            </head>
+            <body>
+                {%app_entry%}
+                <footer>
+                    {%config%}
+                    {%scripts%}
+                    {%renderer%}
+                </footer>
+            </body>
+        </html>
+        """
+
         # Register callbacks
         self.register_callbacks()
 
@@ -1247,10 +1293,13 @@ class DataPlotter:
                                 id={"type": "dataset-name", "index": i},
                                 value=dataset["name"],
                                 style={
-                                    "width": "100%",
+                                    "width": "90%",
                                     "border": "1px solid #ccc",
                                     "padding": "4px",
+                                    "border-radius": "4px",
+                                    "transition": "all 0.2s ease",
                                 },
+                                className="dataset-name-input",
                             )
                         ],
                         style={"padding": "4px"},
@@ -1288,10 +1337,16 @@ class DataPlotter:
                                 type="color",
                                 value=dataset["color"],
                                 style={
-                                    "width": "40px",
-                                    "height": "40px",
-                                    "border": "none",
+                                    "width": "32px",
+                                    "height": "32px",
+                                    "border": "2px solid transparent",
+                                    "border-radius": "4px",
+                                    "cursor": "pointer",
+                                    "transition": "all 0.2s ease",
+                                    "padding": "0",
+                                    "outline": "none",
                                 },
+                                className="color-picker-input",
                             ),
                         ],
                         style={"text-align": "center", "padding": "4px"},
