@@ -1081,8 +1081,8 @@ class DataPlotter:
                                 type="color",
                                 value=dataset["color"],
                                 style={
-                                    "width": "50px",
-                                    "height": "30px",
+                                    "width": "40px",
+                                    "height": "40px",
                                     "border": "none",
                                 },
                             ),
