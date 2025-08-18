@@ -1432,7 +1432,13 @@ class DataPlotter:
                     html.Td(
                         [
                             html.Button(
-                                "⬇",
+                                html.Img(
+                                    src="/assets/download-minimalistic-svgrepo-com.svg",
+                                    style={
+                                        "width": "16px",
+                                        "height": "16px",
+                                    },
+                                ),
                                 id={"type": "download-dataset", "index": i},
                                 className="btn btn-outline-primary btn-sm",
                                 style={
@@ -1442,6 +1448,9 @@ class DataPlotter:
                                     "border-radius": "4px",
                                     "font-size": "14px",
                                     "line-height": "1",
+                                    "display": "flex",
+                                    "align-items": "center",
+                                    "justify-content": "center",
                                 },
                                 title=f"Download {dataset['name']}",
                             ),
@@ -1451,7 +1460,13 @@ class DataPlotter:
                     html.Td(
                         [
                             html.Button(
-                                "🗑",
+                                html.Img(
+                                    src="/assets/delete-svgrepo-com.svg",
+                                    style={
+                                        "width": "16px",
+                                        "height": "16px",
+                                    },
+                                ),
                                 id={"type": "delete-dataset", "index": i},
                                 className="btn btn-outline-danger btn-sm",
                                 style={
@@ -1461,6 +1476,9 @@ class DataPlotter:
                                     "border-radius": "4px",
                                     "font-size": "14px",
                                     "line-height": "1",
+                                    "display": "flex",
+                                    "align-items": "center",
+                                    "justify-content": "center",
                                 },
                                 title=f"Delete {dataset['name']}",
                             ),
