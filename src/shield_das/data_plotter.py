@@ -1099,8 +1099,18 @@ class DataPlotter:
         # Header row
         header_row = html.Tr(
             [
-                html.Th("Dataset Name", style={"text-align": "left", "width": "70%"}),
-                html.Th("Colour", style={"text-align": "center", "width": "30%"}),
+                html.Th(
+                    "Dataset Name",
+                    style={"text-align": "left", "width": "50%", "padding": "8px"},
+                ),
+                html.Th(
+                    "Dataset Path",
+                    style={"text-align": "left", "width": "30%", "padding": "8px"},
+                ),
+                html.Th(
+                    "Colour",
+                    style={"text-align": "center", "width": "20%", "padding": "8px"},
+                ),
             ]
         )
         rows.append(header_row)
@@ -1118,6 +1128,32 @@ class DataPlotter:
                                     "width": "100%",
                                     "border": "1px solid #ccc",
                                     "padding": "4px",
+                                },
+                            )
+                        ],
+                        style={"padding": "8px"},
+                    ),
+                    html.Td(
+                        [
+                            html.Div(
+                                [
+                                    html.Span(
+                                        dataset["folder"],
+                                        style={
+                                            "font-family": "monospace",
+                                            "font-size": "0.9em",
+                                            "color": "#666",
+                                            "word-break": "break-all",
+                                        },
+                                        title=dataset["folder"],  # Full path on hover
+                                    )
+                                ],
+                                style={
+                                    "width": "100%",
+                                    "padding": "4px",
+                                    "min-height": "1.5em",  # Match input field height
+                                    "display": "flex",
+                                    "align-items": "center",
                                 },
                             )
                         ],
@@ -1179,7 +1215,7 @@ class DataPlotter:
                 if i < len(self.folder_datasets) and name:
                     self.folder_datasets[i]["name"] = name
 
-                    # Update display names for upstream gauges based on upstream checkbox state
+                    # Update upstream gauge display names based on checkbox state
                     for gauge_dataset in self.folder_datasets[i]["upstream_gauges"]:
                         if hide_gauge_names_upstream:
                             gauge_dataset["display_name"] = name
@@ -1189,7 +1225,7 @@ class DataPlotter:
                             )
                         gauge_dataset["folder_dataset"] = name
 
-                    # Update display names for downstream gauges based on downstream checkbox state
+                    # Update downstream gauge display names based on checkbox state
                     for gauge_dataset in self.folder_datasets[i]["downstream_gauges"]:
                         if hide_gauge_names_downstream:
                             gauge_dataset["display_name"] = name
