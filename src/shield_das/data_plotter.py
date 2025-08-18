@@ -19,12 +19,13 @@ from .pressure_gauge import Baratron626D_Gauge, CVM211_Gauge, WGM701_Gauge
 
 
 class DataPlotter:
-    def __init__(self, data=None, port=8050):
+    def __init__(self, data=None, dataset_names=None, port=8050):
         """
         Initialize the DataPlotter.
 
         Args:
             data: Path to a single dataset folder, or list of paths to multiple dataset folders
+            dataset_names: List of strings to name the datasets (optional, must match data length if provided)
             port: Port for the Dash server
         """
 
@@ -39,6 +40,19 @@ class DataPlotter:
             raise ValueError(
                 "data parameter must be a string path, list of paths, or None"
             )
+
+        # Handle dataset_names parameter
+        if dataset_names is None:
+            self.dataset_names = None
+        elif isinstance(dataset_names, list):
+            # Validate that dataset_names length matches data paths length
+            if len(self.data_paths) > 0 and len(dataset_names) != len(self.data_paths):
+                raise ValueError(
+                    f"dataset_names length ({len(dataset_names)}) must match data paths length ({len(self.data_paths)})"
+                )
+            self.dataset_names = dataset_names
+        else:
+            raise ValueError("dataset_names must be a list of strings or None")
 
         self.port = port
         self.app = dash.Dash(
@@ -293,7 +307,12 @@ class DataPlotter:
             self.folder_datasets = []
 
         # Create a single folder-level dataset
-        dataset_name = f"Dataset_{len(self.folder_datasets) + 1}"
+        # Use custom dataset name if provided, otherwise use default naming
+        dataset_index = len(self.folder_datasets)
+        if self.dataset_names and dataset_index < len(self.dataset_names):
+            dataset_name = self.dataset_names[dataset_index]
+        else:
+            dataset_name = f"Dataset_{dataset_index + 1}"
         dataset_color = self.get_next_color(len(self.folder_datasets))
 
         folder_dataset = {
