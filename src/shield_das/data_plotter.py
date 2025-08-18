@@ -213,7 +213,7 @@ class DataPlotter:
         if version == "0.0":
             self.process_csv_v0_0(metadata, data_folder)
         elif version == "1.0":
-            self.process_csv_v1_0(metadata, data_folder)
+            self.process_csv_v1_0()
         else:
             raise NotImplementedError(
                 f"Unsupported metadata version: {version}. "
@@ -433,7 +433,7 @@ class DataPlotter:
         # Add the folder dataset to our list
         self.folder_datasets.append(folder_dataset)
 
-    def process_csv_v1_0(self, metadata, data_folder):
+    def process_csv_v1_0(self):
         """
         Process CSV data for metadata version 1.0 (single CSV file).
 

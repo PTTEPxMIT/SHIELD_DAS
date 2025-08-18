@@ -204,6 +204,6 @@ class TestDataPlotterFileProcessing:
     def test_process_csv_v1_0_not_implemented(self):
         """Test that v1.0 CSV processing raises NotImplementedError."""
         with pytest.raises(
-            NotImplementedError, match="Version 1.0 processing  not yet implemented"
+            NotImplementedError, match="Version 1.0 processing not yet implemented"
         ):
-            self.plotter.process_csv_v1_0({}, "/fake/path")
+            self.plotter.process_csv_v1_0()
