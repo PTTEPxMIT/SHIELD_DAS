@@ -822,7 +822,27 @@ class DataPlotter:
                                                                 width=6,
                                                             ),
                                                         ]
-                                                    )
+                                                    ),
+                                                    # Label Options Row for Upstream
+                                                    dbc.Row(
+                                                        [
+                                                            dbc.Col(
+                                                                [
+                                                                    html.H6(
+                                                                        "Label Options",
+                                                                        className="mb-2 mt-3",
+                                                                    ),
+                                                                    dbc.Checkbox(
+                                                                        id="hide-gauge-names-upstream",
+                                                                        label="Hide gauge names (show dataset names only)",
+                                                                        value=False,
+                                                                        className="mb-2",
+                                                                    ),
+                                                                ],
+                                                                width=12,
+                                                            ),
+                                                        ]
+                                                    ),
                                                 ]
                                             ),
                                             id="collapse-upstream-controls",
@@ -1021,7 +1041,27 @@ class DataPlotter:
                                                                 width=6,
                                                             ),
                                                         ]
-                                                    )
+                                                    ),
+                                                    # Label Options Row for Downstream
+                                                    dbc.Row(
+                                                        [
+                                                            dbc.Col(
+                                                                [
+                                                                    html.H6(
+                                                                        "Label Options",
+                                                                        className="mb-2 mt-3",
+                                                                    ),
+                                                                    dbc.Checkbox(
+                                                                        id="hide-gauge-names-downstream",
+                                                                        label="Hide gauge names (show dataset names only)",
+                                                                        value=False,
+                                                                        className="mb-2",
+                                                                    ),
+                                                                ],
+                                                                width=12,
+                                                            ),
+                                                        ]
+                                                    ),
                                                 ]
                                             ),
                                             id="collapse-downstream-controls",
@@ -1125,25 +1165,29 @@ class DataPlotter:
                 Output("downstream-plot", "figure", allow_duplicate=True),
             ],
             [Input({"type": "dataset-name", "index": ALL}, "value")],
+            [State("hide-gauge-names-upstream", "value"), State("hide-gauge-names-downstream", "value")],
             prevent_initial_call=True,
         )
-        def update_dataset_names(names):
+        def update_dataset_names(names, hide_gauge_names_upstream, hide_gauge_names_downstream):
             # Update dataset names
             for i, name in enumerate(names):
                 if i < len(self.folder_datasets) and name:
                     self.folder_datasets[i]["name"] = name
 
-                    # Update display names for all gauges in this dataset
+                    # Update display names for upstream gauges based on upstream checkbox state
                     for gauge_dataset in self.folder_datasets[i]["upstream_gauges"]:
-                        gauge_dataset["display_name"] = (
-                            f"{gauge_dataset['name']} - {name}"
-                        )
+                        if hide_gauge_names_upstream:
+                            gauge_dataset["display_name"] = name
+                        else:
+                            gauge_dataset["display_name"] = f"{gauge_dataset['name']} - {name}"
                         gauge_dataset["folder_dataset"] = name
 
+                    # Update display names for downstream gauges based on downstream checkbox state
                     for gauge_dataset in self.folder_datasets[i]["downstream_gauges"]:
-                        gauge_dataset["display_name"] = (
-                            f"{gauge_dataset['name']} - {name}"
-                        )
+                        if hide_gauge_names_downstream:
+                            gauge_dataset["display_name"] = name
+                        else:
+                            gauge_dataset["display_name"] = f"{gauge_dataset['name']} - {name}"
                         gauge_dataset["folder_dataset"] = name
 
             # Return updated table and plots
@@ -1322,6 +1366,48 @@ class DataPlotter:
         )
         def update_downstream_y_min(y_scale):
             return [0 if y_scale == "linear" else None]
+
+        # Callback for upstream hide gauge names checkbox
+        @self.app.callback(
+            [Output("upstream-plot", "figure", allow_duplicate=True)],
+            [Input("hide-gauge-names-upstream", "value")],
+            prevent_initial_call=True,
+        )
+        def update_upstream_label_display(hide_gauge_names_upstream):
+            # Update display names for upstream gauges only
+            for folder_dataset in self.folder_datasets:
+                dataset_name = folder_dataset["name"]
+                
+                # Update upstream gauges
+                for gauge_dataset in folder_dataset["upstream_gauges"]:
+                    if hide_gauge_names_upstream:
+                        gauge_dataset["display_name"] = dataset_name
+                    else:
+                        gauge_dataset["display_name"] = f"{gauge_dataset['name']} - {dataset_name}"
+            
+            # Return updated upstream plot
+            return [self._generate_upstream_plot()]
+
+        # Callback for downstream hide gauge names checkbox
+        @self.app.callback(
+            [Output("downstream-plot", "figure", allow_duplicate=True)],
+            [Input("hide-gauge-names-downstream", "value")],
+            prevent_initial_call=True,
+        )
+        def update_downstream_label_display(hide_gauge_names_downstream):
+            # Update display names for downstream gauges only
+            for folder_dataset in self.folder_datasets:
+                dataset_name = folder_dataset["name"]
+                
+                # Update downstream gauges
+                for gauge_dataset in folder_dataset["downstream_gauges"]:
+                    if hide_gauge_names_downstream:
+                        gauge_dataset["display_name"] = dataset_name
+                    else:
+                        gauge_dataset["display_name"] = f"{gauge_dataset['name']} - {dataset_name}"
+            
+            # Return updated downstream plot
+            return [self._generate_downstream_plot()]
 
     def _generate_plot(
         self,
