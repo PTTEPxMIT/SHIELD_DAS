@@ -607,56 +607,134 @@ class DataPlotter:
                                                         id="dataset-table-container",
                                                         children=self.create_dataset_table(),
                                                     ),
-                                                    # Add dataset section
+                                                    # Collapsible Add Dataset Section
                                                     html.Div(
                                                         [
-                                                            html.Hr(
-                                                                style={
-                                                                    "margin": "20px 0 15px 0"
-                                                                }
-                                                            ),
-                                                            dbc.Row(
+                                                            # Separator with centered plus button
+                                                            html.Div(
                                                                 [
-                                                                    dbc.Col(
-                                                                        [
-                                                                            dbc.Input(
-                                                                                id="new-dataset-path",
-                                                                                type="text",
-                                                                                placeholder="Enter dataset folder path...",
-                                                                                style={
-                                                                                    "margin-bottom": "10px"
-                                                                                },
+                                                                    html.Hr(
+                                                                        style={
+                                                                            "flex": "1",
+                                                                            "margin": "0",
+                                                                            "border-top": (
+                                                                                "1px solid "
+                                                                                "#dee2e6"
                                                                             ),
-                                                                        ],
-                                                                        width=9,
+                                                                        }
                                                                     ),
-                                                                    dbc.Col(
-                                                                        [
-                                                                            dbc.Button(
-                                                                                [
-                                                                                    html.I(
-                                                                                        className="fas fa-plus me-2"
-                                                                                    ),
-                                                                                    "Add Dataset",
-                                                                                ],
-                                                                                id="add-dataset-button",
-                                                                                color="primary",
-                                                                                style={
-                                                                                    "width": "100%"
-                                                                                },
+                                                                    dbc.Button(
+                                                                        html.I(
+                                                                            id="add-dataset-icon",
+                                                                            className=(
+                                                                                "fas fa-plus"
                                                                             ),
-                                                                        ],
-                                                                        width=3,
+                                                                        ),
+                                                                        id="toggle-add-dataset",
+                                                                        color="light",
+                                                                        size="sm",
+                                                                        style={
+                                                                            "margin": (
+                                                                                "0 10px"
+                                                                            ),
+                                                                            "border-radius": (
+                                                                                "50%"
+                                                                            ),
+                                                                            "width": "32px",
+                                                                            "height": "32px",
+                                                                            "padding": "0",
+                                                                            "border": (
+                                                                                "1px solid "
+                                                                                "#dee2e6"
+                                                                            ),
+                                                                        },
+                                                                        title=(
+                                                                            "Add new dataset"
+                                                                        ),
+                                                                    ),
+                                                                    html.Hr(
+                                                                        style={
+                                                                            "flex": "1",
+                                                                            "margin": "0",
+                                                                            "border-top": (
+                                                                                "1px solid "
+                                                                                "#dee2e6"
+                                                                            ),
+                                                                        }
                                                                     ),
                                                                 ],
-                                                                className="g-2",
-                                                            ),
-                                                            # Status message for add dataset
-                                                            html.Div(
-                                                                id="add-dataset-status",
                                                                 style={
-                                                                    "margin-top": "10px"
+                                                                    "display": "flex",
+                                                                    "align-items": (
+                                                                        "center"
+                                                                    ),
+                                                                    "margin": (
+                                                                        "20px 0 15px 0"
+                                                                    ),
                                                                 },
+                                                            ),
+                                                            # Collapsible add dataset form
+                                                            dbc.Collapse(
+                                                                [
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Input(
+                                                                                        id="new-dataset-path",
+                                                                                        type="text",
+                                                                                        placeholder=(
+                                                                                            "Enter dataset "
+                                                                                            "folder path..."
+                                                                                        ),
+                                                                                        style={
+                                                                                            "margin-bottom": (
+                                                                                                "10px"
+                                                                                            )
+                                                                                        },
+                                                                                    ),
+                                                                                ],
+                                                                                width=9,
+                                                                            ),
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    dbc.Button(
+                                                                                        [
+                                                                                            html.I(
+                                                                                                className=(
+                                                                                                    "fas fa-plus me-2"
+                                                                                                )
+                                                                                            ),
+                                                                                            (
+                                                                                                "Add Dataset"
+                                                                                            ),
+                                                                                        ],
+                                                                                        id="add-dataset-button",
+                                                                                        color="primary",
+                                                                                        style={
+                                                                                            "width": (
+                                                                                                "100%"
+                                                                                            )
+                                                                                        },
+                                                                                    ),
+                                                                                ],
+                                                                                width=3,
+                                                                            ),
+                                                                        ],
+                                                                        className="g-2",
+                                                                    ),
+                                                                    # Status message for add dataset
+                                                                    html.Div(
+                                                                        id="add-dataset-status",
+                                                                        style={
+                                                                            "margin-top": (
+                                                                                "10px"
+                                                                            )
+                                                                        },
+                                                                    ),
+                                                                ],
+                                                                id="collapse-add-dataset",
+                                                                is_open=False,
                                                             ),
                                                         ]
                                                     ),
@@ -1911,6 +1989,28 @@ class DataPlotter:
                 filename="downstream_plot_full_data.html",
                 type="text/html",
             )
+
+        # Callback for toggling add dataset section
+        @self.app.callback(
+            [
+                Output("collapse-add-dataset", "is_open"),
+                Output("add-dataset-icon", "className"),
+            ],
+            [Input("toggle-add-dataset", "n_clicks")],
+            [State("collapse-add-dataset", "is_open")],
+            prevent_initial_call=True,
+        )
+        def toggle_add_dataset_section(n_clicks, is_open):
+            if not n_clicks:
+                raise PreventUpdate
+
+            # Toggle the collapse state
+            new_is_open = not is_open
+
+            # Change icon based on state
+            icon_class = "fas fa-minus" if new_is_open else "fas fa-plus"
+
+            return new_is_open, icon_class
 
     def _generate_plot(
         self,
