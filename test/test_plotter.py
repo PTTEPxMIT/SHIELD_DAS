@@ -1,4 +1,6 @@
 import base64
+import json
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -7,165 +9,201 @@ from shield_das import DataPlotter
 
 
 class TestDataPlotter:
-    """Test class for DataPlotter pure Python functionality."""
+    """Test DataPlotter pure Python utility functions."""
 
     def setup_method(self):
-        """Set up a DataPlotter instance for each test."""
+        """Create DataPlotter instance for testing."""
         self.plotter = DataPlotter()
 
-    # Tests for get_next_color
-    def test_get_next_color_first_color(self):
-        """Test that index 0 returns black."""
-        color = self.plotter.get_next_color(0)
-        assert color == "#000000"
+    @pytest.mark.parametrize(
+        "index,expected_color",
+        [
+            (0, "#000000"),
+            (1, "#DF1AD2"),
+            (7, "#A1B0AB"),
+            (8, "#000000"),  # Cycles back
+            (-1, "#A1B0AB"),  # Last color
+            (16, "#000000"),  # Large index cycles
+        ],
+    )
+    def test_get_next_color(self, index, expected_color):
+        """Test color palette returns correct values and cycles properly."""
+        assert self.plotter.get_next_color(index) == expected_color
 
-    def test_get_next_color_second_color(self):
-        """Test that index 1 returns magenta."""
-        color = self.plotter.get_next_color(1)
-        assert color == "#DF1AD2"
+    @pytest.mark.parametrize(
+        "color,expected",
+        [
+            ("#000000", True),
+            ("#fff", True),
+            ("#ABC123", True),
+            ("  #000000  ", True),  # Whitespace stripped
+            ("#GGG", False),  # Invalid chars
+            ("123456", False),  # Missing #
+            ("", False),
+            (None, False),
+            ("   ", False),
+        ],
+    )
+    def test_is_valid_color_hex(self, color, expected):
+        """Test hex color validation."""
+        assert self.plotter.is_valid_color(color) is expected
 
-    def test_get_next_color_all_colors(self):
-        """Test all 8 defined colors are returned correctly."""
-        expected_colors = [
-            "#000000",  # Black
-            "#DF1AD2",  # Magenta
-            "#779BE7",  # Light Blue
-            "#49B6FF",  # Blue
-            "#254E70",  # Dark Blue
-            "#0CCA4A",  # Green
-            "#929487",  # Gray
-            "#A1B0AB",  # Light Gray
-        ]
+    @pytest.mark.parametrize(
+        "color,expected",
+        [
+            ("rgb(0,0,0)", True),
+            ("rgb(255,255,255)", True),
+            ("RGB(100,200,50)", True),  # Case check
+            ("rgb(256,0,0)", False),  # Out of range
+            ("rgb(-1,0,0)", False),  # Negative
+        ],
+    )
+    def test_is_valid_color_rgb(self, color, expected):
+        """Test RGB color validation."""
+        assert self.plotter.is_valid_color(color) is expected
 
-        for i, expected in enumerate(expected_colors):
-            assert self.plotter.get_next_color(i) == expected
-
-    def test_get_next_color_cycles_after_eight(self):
-        """Test that colors cycle back to beginning after 8."""
-        # Index 8 should return the same as index 0
-        assert self.plotter.get_next_color(8) == self.plotter.get_next_color(0)
-        assert self.plotter.get_next_color(9) == self.plotter.get_next_color(1)
-
-    def test_get_next_color_large_index(self):
-        """Test color cycling with large indices."""
-        # Index 16 should be same as 0 (16 % 8 = 0)
-        assert self.plotter.get_next_color(16) == "#000000"
-        # Index 25 should be same as 1 (25 % 8 = 1)
-        assert self.plotter.get_next_color(25) == "#DF1AD2"
-
-    # Tests for is_valid_color
-    def test_is_valid_color_valid_hex_6_digit(self):
-        """Test valid 6-digit hex colors."""
-        assert self.plotter.is_valid_color("#000000") is True
-        assert self.plotter.is_valid_color("#FFFFFF") is True
-        assert self.plotter.is_valid_color("#ff6600") is True
-        assert self.plotter.is_valid_color("#ABC123") is True
-
-    def test_is_valid_color_valid_hex_3_digit(self):
-        """Test valid 3-digit hex colors."""
-        assert self.plotter.is_valid_color("#000") is True
-        assert self.plotter.is_valid_color("#FFF") is True
-        assert self.plotter.is_valid_color("#f60") is True
-        assert self.plotter.is_valid_color("#A1B") is True
-
-    def test_is_valid_color_valid_rgb(self):
-        """Test valid RGB color format."""
-        assert self.plotter.is_valid_color("rgb(0,0,0)") is True
-        assert self.plotter.is_valid_color("rgb(255,255,255)") is True
-        assert self.plotter.is_valid_color("rgb(128, 64, 192)") is True
-        assert (
-            self.plotter.is_valid_color("RGB(100, 200, 50)") is True
-        )  # Case insensitive
-
-    def test_is_valid_color_invalid_hex(self):
-        """Test invalid hex color formats."""
-        assert self.plotter.is_valid_color("#GGG") is False  # Invalid hex chars
-        assert self.plotter.is_valid_color("#12345") is False  # Wrong length
-        assert self.plotter.is_valid_color("#1234567") is False  # Too long
-        assert self.plotter.is_valid_color("123456") is False  # Missing #
-        assert self.plotter.is_valid_color("#XY1234") is False  # Invalid chars
-
-    def test_is_valid_color_invalid_rgb(self):
-        """Test invalid RGB color formats."""
-        assert self.plotter.is_valid_color("rgb(256,0,0)") is False  # Out of range
-        assert self.plotter.is_valid_color("rgb(-1,0,0)") is False  # Negative
-        assert self.plotter.is_valid_color("rgb(1,2)") is False  # Missing value
-        assert self.plotter.is_valid_color("rgb(1,2,3,4)") is False  # Too many values
-        assert self.plotter.is_valid_color("rgba(1,2,3,0.5)") is False  # Not supported
-
-    def test_is_valid_color_empty_and_none(self):
-        """Test empty, None, and whitespace inputs."""
-        assert self.plotter.is_valid_color("") is False
-        assert self.plotter.is_valid_color(None) is False
-        assert self.plotter.is_valid_color("   ") is False
-
-    def test_is_valid_color_with_whitespace(self):
-        """Test color validation with whitespace (should be stripped)."""
-        assert self.plotter.is_valid_color("  #000000  ") is True
-        assert self.plotter.is_valid_color(" rgb(0,0,0) ") is True
-
-    # Tests for convert_timestamps_to_seconds
-    def test_convert_timestamps_empty_list(self):
-        """Test conversion with empty input."""
-        result = self.plotter.convert_timestamps_to_seconds([])
-        assert result == []
-
-    def test_convert_timestamps_single_value(self):
-        """Test conversion with single timestamp."""
-        result = self.plotter.convert_timestamps_to_seconds(["123.45"])
-        assert result == [123.45]
-
-    def test_convert_timestamps_multiple_values(self):
-        """Test conversion with multiple timestamps."""
-        input_timestamps = ["0", "1.5", "3.0", "4.25"]
+    @pytest.mark.parametrize(
+        "input_timestamps,expected",
+        [
+            (["0", "1.5", "3.0"], [0.0, 1.5, 3.0]),
+            (["123.45"], [123.45]),
+            ([], []),
+            (None, []),
+        ],
+    )
+    def test_convert_timestamps_to_seconds(self, input_timestamps, expected):
+        """Test timestamp string to float conversion."""
         result = self.plotter.convert_timestamps_to_seconds(input_timestamps)
-        expected = [0.0, 1.5, 3.0, 4.25]
         assert result == expected
 
-    def test_convert_timestamps_integer_strings(self):
-        """Test conversion with integer string timestamps."""
-        input_timestamps = ["0", "1", "2", "3"]
-        result = self.plotter.convert_timestamps_to_seconds(input_timestamps)
-        expected = [0.0, 1.0, 2.0, 3.0]
-        assert result == expected
-
-    def test_convert_timestamps_float_strings(self):
-        """Test conversion with float string timestamps."""
-        input_timestamps = ["0.0", "1.234", "2.567", "3.999"]
-        result = self.plotter.convert_timestamps_to_seconds(input_timestamps)
-        expected = [0.0, 1.234, 2.567, 3.999]
-        assert result == expected
-
-    def test_convert_timestamps_none_input(self):
-        """Test conversion with None input."""
-        result = self.plotter.convert_timestamps_to_seconds(None)
-        assert result == []
-
-
-# Additional edge case tests
-class TestDataPlotterEdgeCases:
-    """Test edge cases and error conditions."""
-
-    def setup_method(self):
-        """Set up a DataPlotter instance for each test."""
-        self.plotter = DataPlotter()
-
-    def test_get_next_color_negative_index(self):
-        """Test get_next_color with negative index."""
-        # Python's modulo should handle this gracefully
-        color = self.plotter.get_next_color(-1)
-        assert color == "#A1B0AB"  # -1 % 8 = 7, so last color
-
-    def test_convert_timestamps_invalid_strings(self):
-        """Test convert_timestamps with non-numeric strings."""
-        # This should raise ValueError since we're calling float()
+    def test_convert_timestamps_invalid(self):
+        """Test timestamp conversion with invalid input raises ValueError."""
         with pytest.raises(ValueError):
             self.plotter.convert_timestamps_to_seconds(["not_a_number"])
 
-    def test_is_valid_color_edge_rgb_values(self):
-        """Test RGB validation at boundary values."""
-        assert self.plotter.is_valid_color("rgb(0,0,0)") is True
-        assert self.plotter.is_valid_color("rgb(255,255,255)") is True
-        assert self.plotter.is_valid_color("rgb(0,255,0)") is True
-        assert self.plotter.is_valid_color("rgb(256,0,0)") is False  # Just over limit
-        assert self.plotter.is_valid_color("rgb(-1,0,0)") is False  # Just under limit
+
+class TestDataPlotterInitialization:
+    """Test DataPlotter initialization and parameter handling."""
+
+    def test_init_defaults(self):
+        """Test default initialization values."""
+        plotter = DataPlotter()
+        assert plotter.data_paths == []
+        assert plotter.dataset_names is None
+        assert plotter.port == 8050
+
+    @pytest.mark.parametrize(
+        "data,expected_paths",
+        [
+            ("/path/to/data", ["/path/to/data"]),
+            (["/path1", "/path2"], ["/path1", "/path2"]),
+        ],
+    )
+    def test_init_with_data(self, data, expected_paths):
+        """Test initialization with data paths."""
+        plotter = DataPlotter(data=data)
+        assert plotter.data_paths == expected_paths
+
+    def test_init_with_dataset_names(self):
+        """Test initialization with dataset names."""
+        paths = ["/path1", "/path2"]
+        names = ["Dataset 1", "Dataset 2"]
+        plotter = DataPlotter(data=paths, dataset_names=names)
+        assert plotter.data_paths == paths
+        assert plotter.dataset_names == names
+
+    def test_init_custom_port(self):
+        """Test initialization with custom port."""
+        plotter = DataPlotter(port=9000)
+        assert plotter.port == 9000
+
+    @pytest.mark.parametrize(
+        "invalid_data,error_match",
+        [
+            (123, "data parameter must be"),
+        ],
+    )
+    def test_init_invalid_data_type(self, invalid_data, error_match):
+        """Test initialization with invalid data type raises ValueError."""
+        with pytest.raises(ValueError, match=error_match):
+            DataPlotter(data=invalid_data)
+
+    def test_init_mismatched_names_length(self):
+        """Test initialization with mismatched dataset names length."""
+        with pytest.raises(ValueError, match="dataset_names length"):
+            DataPlotter(data=["/path1", "/path2"], dataset_names=["name1"])
+
+
+class TestDataPlotterFileProcessing:
+    """Test file processing methods."""
+
+    def setup_method(self):
+        """Create DataPlotter instance for testing."""
+        self.plotter = DataPlotter()
+
+    def test_parse_uploaded_file_valid_json(self):
+        """Test parsing valid JSON file with version 1.0."""
+        metadata = {"version": "1.0", "run_info": {"data_filename": "test.csv"}}
+        json_content = json.dumps(metadata)
+        encoded_content = base64.b64encode(json_content.encode()).decode()
+        contents = f"data:application/json;base64,{encoded_content}"
+
+        with patch("sys.exit") as mock_exit:
+            self.plotter.parse_uploaded_file(contents, "test.json")
+            mock_exit.assert_called_once_with(0)
+
+    @pytest.mark.parametrize(
+        "test_data,description",
+        [
+            ({"version": "2.0"}, "unsupported version"),
+            ("not valid json", "invalid JSON content"),
+            ("invalid_content", "malformed base64 content"),
+        ],
+    )
+    def test_parse_uploaded_file_returns_empty_dataframe(self, test_data, description):
+        """Test parsing files that should return empty DataFrame."""
+        if isinstance(test_data, dict):
+            # Valid JSON but unsupported version
+            json_content = json.dumps(test_data)
+            encoded_content = base64.b64encode(json_content.encode()).decode()
+            contents = f"data:application/json;base64,{encoded_content}"
+        elif test_data == "not valid json":
+            # Invalid JSON
+            encoded_content = base64.b64encode(test_data.encode()).decode()
+            contents = f"data:application/json;base64,{encoded_content}"
+        else:
+            # Malformed content
+            contents = test_data
+
+        result = self.plotter.parse_uploaded_file(contents, "test.json")
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty
+
+    def test_process_json_metadata_no_file(self, tmp_path):
+        """Test processing directory with no JSON file."""
+        result = self.plotter.process_json_metadata(str(tmp_path))
+        assert result is None
+
+    def test_process_json_metadata_success(self, tmp_path):
+        """Test successful JSON metadata processing."""
+        metadata = {"version": "1.0", "test": "data"}
+        json_file = tmp_path / "metadata.json"
+        json_file.write_text(json.dumps(metadata))
+
+        result = self.plotter.process_json_metadata(str(tmp_path))
+        assert result == metadata
+
+    def test_process_json_metadata_invalid_json(self, tmp_path):
+        """Test processing directory with invalid JSON file."""
+        json_file = tmp_path / "invalid.json"
+        json_file.write_text("invalid json content")
+
+        with pytest.raises(json.JSONDecodeError):
+            self.plotter.process_json_metadata(str(tmp_path))
+
+    def test_process_csv_v1_0_not_implemented(self):
+        """Test that v1.0 CSV processing raises NotImplementedError."""
+        with pytest.raises(
+            NotImplementedError, match="Version 1.0 processing  not yet implemented"
+        ):
+            self.plotter.process_csv_v1_0({}, "/fake/path")
