@@ -140,6 +140,31 @@ class DataPlotter:
 
         self._dataset_paths = value
 
+    @property
+    def dataset_names(self) -> list[str]:
+        return self._dataset_names
+
+    @dataset_names.setter
+    def dataset_names(self, value: list[str]):
+        # if value not a list of strings raise ValueError
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) for item in value
+        ):
+            raise ValueError("dataset_names must be a list of strings")
+
+        # Check if dataset_names length matches dataset_paths length
+        if len(value) != len(self.dataset_paths):
+            raise ValueError(
+                f"dataset_names length ({len(value)}) must match dataset_paths "
+                f"length ({len(self.dataset_paths)})"
+            )
+
+        # Check if all dataset names are unique
+        if len(value) != len(set(value)):
+            raise ValueError("dataset_names must contain unique names")
+
+        self._dataset_names = value
+
     def load_all_data(self):
         """
         Load and process data from all specified data paths.
