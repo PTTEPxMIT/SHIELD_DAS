@@ -20,118 +20,125 @@ from .pressure_gauge import Baratron626D_Gauge, CVM211_Gauge, WGM701_Gauge
 
 
 class DataPlotter:
-    def __init__(self, data=None, dataset_names=None, port=8050):
-        """
-        Initialize the DataPlotter.
+    """
+        DataPlotter is responsible for visualizing pressure gauge data using Dash.
 
-        Args:
-            data: Path to a single dataset folder, or list of paths to multiple dataset folders
-            dataset_names: List of strings to name the datasets (optional, must match data length if provided)
-            port: Port for the Dash server
-        """
+    Args:
+        dataset_paths: list of strings with paths to dataset folders
+        dataset_names: List of strings to name the datasets (optional, must match data
+            length if provided)
+        port: Port for the Dash server, defaults to 8050
 
+    Attributes:
+        dataset_paths: list of strings with paths to dataset folders
+        dataset_names: List of strings to name the datasets (optional, must match data
+            length if provided)
+        port: Port for the Dash server, defaults to 8050
+        app: Dash app instance
+        app_running: Flag indicating if the app is running
+        server_thread: Thread for running the Dash server
+        upstream_datasets: List of upstream dataset paths
+        downstream_datasets: List of downstream dataset paths
+        folder_datasets: List of folder-level datasets
+    """
+
+    dataset_paths: list[str]
+    dataset_names: list[str]
+    port: int
+
+    app: dash.Dash
+    app_running: bool
+    server_thread: threading.Thread
+    upstream_datasets: list[str]
+    downstream_datasets: list[str]
+    folder_datasets: list[str]
+
+    def __init__(self, dataset_paths=None, dataset_names=None, port=8050):
         # Handle data parameter - convert single path to list for consistent processing
-        if data is None:
-            self.data_paths = []
-        elif isinstance(data, str):
-            self.data_paths = [data]
-        elif isinstance(data, list):
-            self.data_paths = data
-        else:
-            raise ValueError(
-                "data parameter must be a string path, list of paths, or None"
-            )
 
-        # Handle dataset_names parameter
-        if dataset_names is None:
-            self.dataset_names = None
-        elif isinstance(dataset_names, list):
-            # Validate that dataset_names length matches data paths length
-            if len(self.data_paths) > 0 and len(dataset_names) != len(self.data_paths):
-                raise ValueError(
-                    f"dataset_names length ({len(dataset_names)}) must match data paths length ({len(self.data_paths)})"
-                )
-            self.dataset_names = dataset_names
-        else:
-            raise ValueError("dataset_names must be a list of strings or None")
-
+        self.dataset_paths = dataset_paths or []
+        self.dataset_names = dataset_names or []
         self.port = port
-        self.app = dash.Dash(
-            __name__,
-            external_stylesheets=[
-                dbc.themes.BOOTSTRAP,
-                "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
-            ],
-        )
-        self.app_running = False
-        self.server_thread = None
 
-        # Store multiple datasets - separate lists for upstream and downstream
-        self.upstream_datasets = []
-        self.downstream_datasets = []
+        # # Handle dataset_names parameter
+        # if dataset_names is None:
+        #     self.dataset_names = None
+        # elif isinstance(dataset_names, list):
+        #     # Validate that dataset_names length matches data paths length
+        #     if len(self.data_paths) > 0 and len(dataset_names) != len(self.data_paths):
+        #         raise ValueError(
+        #             f"dataset_names length ({len(dataset_names)}) must match data paths length ({len(self.data_paths)})"
+        #         )
+        #     self.dataset_names = dataset_names
+        # else:
+        #     raise ValueError("dataset_names must be a list of strings or None")
 
-        # Store folder-level datasets for management
-        self.folder_datasets = []  # Each folder = 1 dataset with upstream/downstream gauges
+        # self.app = dash.Dash(
+        #     __name__,
+        #     external_stylesheets=[
+        #         dbc.themes.BOOTSTRAP,
+        #         "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
+        #     ],
+        # )
+        # self.app_running = False
+        # self.server_thread = None
 
-        # Process data paths if provided
-        if self.data_paths:
-            self.load_all_data()
-            print("\nData loading complete. Datasets ready for Dash app visualization.")
+        # # Store multiple datasets - separate lists for upstream and downstream
+        # self.upstream_datasets = []
+        # self.downstream_datasets = []
 
-        # Setup the app layout
-        self.app.layout = self.create_layout()
+        # # Store folder-level datasets for management
+        # self.folder_datasets = []  # Each folder = 1 dataset with upstream/downstream gauges
 
-        # Add custom CSS for hover effects
-        self.app.index_string = """
-        <!DOCTYPE html>
-        <html>
-            <head>
-                {%metas%}
-                <title>{%title%}</title>
-                {%favicon%}
-                {%css%}
-                <style>
-                    .dataset-name-input:hover {
-                        border-color: #007bff !important;
-                        box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25) !important;
-                        transform: scale(1.01) !important;
-                    }
-                    
-                    .dataset-name-input:focus {
-                        border-color: #007bff !important;
-                        box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25) !important;
-                        outline: 0 !important;
-                    }
-                    
-                    .color-picker-input:hover {
-                        border-color: #007bff !important;
-                        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.4) !important;
-                        transform: none !important;
-                    }
-                    
-                    .color-picker-input:focus {
-                        border-color: #007bff !important;
-                        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.4) !important;
-                        outline: 0 !important;
-                    }
-                </style>
-            </head>
-            <body>
-                {%app_entry%}
-                <footer>
-                    {%config%}
-                    {%scripts%}
-                    {%renderer%}
-                </footer>
-            </body>
-        </html>
-        """
+        # # Process data paths if provided
+        # if self.data_paths:
+        #     self.load_all_data()
+        #     print("\nData loading complete. Datasets ready for Dash app visualization.")
 
-        # Register callbacks
-        self.register_callbacks()
+        # # Setup the app layout
+        # self.app.layout = self.create_layout()
 
-        # Flag to track if recording has been started
-        self.recording_started = False
+        # # Add custom CSS for hover effects
+        # self.app.index_string = hover_css
+
+        # # Register callbacks
+        # self.register_callbacks()
+
+        # # Flag to track if recording has been started
+        # self.recording_started = False
+
+    @property
+    def dataset_paths(self) -> list[str]:
+        return self._dataset_paths
+
+    @dataset_paths.setter
+    def dataset_paths(self, value: list[str]):
+        # if value not a list of strings raise ValueError
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) for item in value
+        ):
+            raise ValueError("dataset_paths must be a list of strings")
+
+        # Check if all dataset paths exist
+        for dataset_path in value:
+            if not os.path.exists(dataset_path):
+                raise ValueError(f"Dataset path does not exist: {dataset_path}")
+
+        # check all dataset paths are unique
+        if len(value) != len(set(value)):
+            raise ValueError("dataset_paths must contain unique paths")
+
+        # check csv files exist in each dataset path
+        for dataset_path in value:
+            csv_files = [
+                f for f in os.listdir(dataset_path) if f.lower().endswith(".csv")
+            ]
+            if not csv_files:
+                raise FileNotFoundError(
+                    f"No data CSV files found in dataset path: {dataset_path}"
+                )
+
+        self._dataset_paths = value
 
     def load_all_data(self):
         """
@@ -2431,3 +2438,49 @@ class DataPlotter:
 
         # Run the server directly (blocking)
         self.app.run(debug=False, host="127.0.0.1", port=self.port)
+
+
+hover_css = """
+    <!DOCTYPE html>
+    <html>
+        <head>
+            {%metas%}
+            <title>{%title%}</title>
+            {%favicon%}
+            {%css%}
+            <style>
+                .dataset-name-input:hover {
+                    border-color: #007bff !important;
+                    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25) !important;
+                    transform: scale(1.01) !important;
+                }
+
+                .dataset-name-input:focus {
+                    border-color: #007bff !important;
+                    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25) !important;
+                    outline: 0 !important;
+                }
+
+                .color-picker-input:hover {
+                    border-color: #007bff !important;
+                    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.4) !important;
+                    transform: none !important;
+                }
+
+                .color-picker-input:focus {
+                    border-color: #007bff !important;
+                    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.4) !important;
+                    outline: 0 !important;
+                }
+            </style>
+        </head>
+        <body>
+            {%app_entry%}
+            <footer>
+                {%config%}
+                {%scripts%}
+                {%renderer%}
+            </footer>
+        </body>
+    </html>
+    """
