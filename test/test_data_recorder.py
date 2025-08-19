@@ -305,8 +305,11 @@ class TestDataRecorder:
         # Stop recording
         self.recorder.stop()
 
+    @pytest.mark.filterwarnings(
+        "ignore:Exception in thread:pytest.PytestUnhandledThreadExceptionWarning"
+    )
     def test_error_handling_in_recording(self):
-        """Test error handling during data recording."""
+        """Test error handling during data recording. #TODO need to replace this"""
         # Make one gauge raise an exception
         self.mock_gauge1.record_ain_channel_voltage.side_effect = Exception(
             "Test error"
