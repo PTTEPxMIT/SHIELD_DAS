@@ -1,9 +1,11 @@
 import json
-from unittest.mock import patch
+import os
+import time
+from unittest.mock import Mock, patch
 
 import pytest
 
-from shield_das import DataPlotter
+from shield_das import DataPlotter, DataRecorder
 from shield_das.pressure_gauge import PressureGauge
 
 example_metadata_v0 = {
@@ -320,3 +322,206 @@ class TestDataPlotterFileOperations:
         captured = capsys.readouterr()
         assert "Loading data from 1 dataset(s)" in captured.out
         assert "Processing dataset 1/1" in captured.out
+
+
+class TestDataPlotterIntegration:
+    """Integration tests that use DataRecorder to generate real data."""
+
+    def setup_method(self):
+        """Create DataPlotter instance for testing."""
+        self.plotter = DataPlotter()
+
+    def test_process_csv_v0_0_with_realistic_data(self, tmp_path):
+        """Test process_csv_v0_0 with realistic gauge data structure."""
+        dataset = tmp_path / "dataset"
+        dataset.mkdir()
+
+        # Create realistic v0.0 metadata that matches the expected format
+        metadata = {
+            "version": "0.0",
+            "gauges": [
+                {
+                    "name": "TestGauge1",
+                    "type": "Baratron626D_Gauge",
+                    "ain_channel": 10,
+                    "gauge_location": "upstream",
+                    "filename": "gauge1_data.csv",
+                    "full_scale_torr": 1.0,
+                },
+                {
+                    "name": "TestGauge2",
+                    "type": "CVM211_Gauge",
+                    "ain_channel": 6,
+                    "gauge_location": "downstream",
+                    "filename": "gauge2_data.csv",
+                },
+            ],
+        }
+
+        # Create metadata file
+        (dataset / "run_metadata.json").write_text(json.dumps(metadata))
+
+        # Create CSV files with expected format (RelativeTime, Pressure_Torr)
+        gauge1_data = """RelativeTime,Pressure_Torr
+            0.0,0.001
+            1.0,0.002
+            2.0,0.003
+            3.0,0.004
+            4.0,0.005"""
+        (dataset / "gauge1_data.csv").write_text(gauge1_data)
+
+        gauge2_data = """RelativeTime,Pressure_Torr
+            0.0,0.1
+            1.0,0.2
+            2.0,0.3
+            3.0,0.4
+            4.0,0.5"""
+        (dataset / "gauge2_data.csv").write_text(gauge2_data)
+
+        # Set up plotter and process the data
+        self.plotter.dataset_paths = [str(dataset)]
+        self.plotter.load_data()
+
+        # Verify gauge instances were created
+        assert len(self.plotter.gauge_instances) == 2
+
+        # Verify data was loaded correctly
+        gauge1 = self.plotter.gauge_instances[0]
+        gauge2 = self.plotter.gauge_instances[1]
+
+        # Check time data
+        assert len(gauge1.time_data) == 5
+        assert gauge1.time_data[0] == 0.0
+        assert gauge1.time_data[-1] == 4.0
+
+        # Check pressure data
+        assert len(gauge1.pressure_data) == 5
+        assert gauge1.pressure_data[0] == 0.001
+        assert gauge1.pressure_data[-1] == 0.005
+
+        assert len(gauge2.pressure_data) == 5
+        assert gauge2.pressure_data[0] == 0.1
+        assert gauge2.pressure_data[-1] == 0.5
+
+        # Verify datasets were created for plotting
+        assert hasattr(self.plotter, "upstream_datasets")
+        assert hasattr(self.plotter, "downstream_datasets")
+
+    def test_integration_with_data_recorder(self, tmp_path):
+        """Integration test using DataRecorder to generate data."""
+        # Create mock gauges for the recorder
+        mock_gauge1 = Mock(spec=PressureGauge)
+        mock_gauge1.name = "IntegrationGauge1"
+        mock_gauge1.voltage_data = [2.5]  # Mock voltage data
+        mock_gauge1.record_ain_channel_voltage.return_value = None
+        mock_gauge1.ain_channel = 10
+        mock_gauge1.gauge_location = "upstream"
+
+        mock_gauge2 = Mock(spec=PressureGauge)
+        mock_gauge2.name = "IntegrationGauge2"
+        mock_gauge2.voltage_data = [3.7]  # Mock voltage data
+        mock_gauge2.record_ain_channel_voltage.return_value = None
+        mock_gauge2.ain_channel = 6
+        mock_gauge2.gauge_location = "downstream"
+
+        # Create DataRecorder and generate test data
+        recorder = DataRecorder(
+            gauges=[mock_gauge1, mock_gauge2],
+            thermocouples=[],
+            results_dir=str(tmp_path),
+            test_mode=True,
+            recording_interval=0.05,  # Fast recording for testing
+        )
+
+        # Record some data
+        recorder.start()
+        time.sleep(0.3)  # Record for 300ms
+        recorder.stop()
+
+        # Verify data was recorded
+        assert recorder.run_dir is not None
+        csv_path = os.path.join(recorder.run_dir, "pressure_gauge_data.csv")
+        metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+
+        assert os.path.exists(csv_path)
+        assert os.path.exists(metadata_path)
+
+        # Read the generated CSV to verify structure
+        with open(csv_path) as f:
+            csv_content = f.read()
+            lines = csv_content.strip().split("\n")
+            assert len(lines) >= 2  # Header + at least one data row
+
+            # Check header structure
+            header = lines[0]
+            assert "RealTimestamp" in header
+            assert "IntegrationGauge1_Voltage (V)" in header
+            assert "IntegrationGauge2_Voltage (V)" in header
+
+        # Read metadata to verify structure
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+            assert metadata["version"] == "1.0"
+            assert "gauges" in metadata
+            assert len(metadata["gauges"]) == 2
+
+        # Note: The current DataRecorder generates v1.0 format which isn't
+        # implemented in DataPlotter yet, but we can test that the files
+        # are generated correctly and the structure matches expectations
+
+    def test_process_csv_v0_0_error_handling(self, tmp_path):
+        """Test error handling in process_csv_v0_0 method."""
+        dataset = tmp_path / "dataset"
+        dataset.mkdir()
+
+        # Create metadata with missing CSV file
+        metadata = {
+            "version": "0.0",
+            "gauges": [
+                {
+                    "name": "MissingGauge",
+                    "type": "Baratron626D_Gauge",
+                    "ain_channel": 10,
+                    "gauge_location": "upstream",
+                    "filename": "missing_file.csv",
+                }
+            ],
+        }
+
+        (dataset / "run_metadata.json").write_text(json.dumps(metadata))
+
+        # Should raise an error when trying to load non-existent CSV
+        with pytest.raises(FileNotFoundError):
+            self.plotter.dataset_paths = [str(dataset)]
+
+    def test_process_csv_v0_0_invalid_csv_format(self, tmp_path):
+        """Test handling of invalid CSV format in process_csv_v0_0."""
+        dataset = tmp_path / "dataset"
+        dataset.mkdir()
+
+        metadata = {
+            "version": "0.0",
+            "gauges": [
+                {
+                    "name": "InvalidGauge",
+                    "type": "Baratron626D_Gauge",
+                    "ain_channel": 10,
+                    "gauge_location": "upstream",
+                    "filename": "invalid_data.csv",
+                }
+            ],
+        }
+
+        (dataset / "run_metadata.json").write_text(json.dumps(metadata))
+
+        # Create CSV with wrong column names
+        invalid_csv = """WrongColumn1,WrongColumn2
+            1.0,2.0
+            3.0,4.0"""
+        (dataset / "invalid_data.csv").write_text(invalid_csv)
+
+        self.plotter.dataset_paths = [str(dataset)]
+
+        # Should raise an error due to missing expected columns
+        with pytest.raises((ValueError, KeyError)):
+            self.plotter.load_data()
