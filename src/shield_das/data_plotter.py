@@ -1,21 +1,17 @@
-import base64
 import json
 import os
-import sys
 import threading
 import webbrowser
 
 import dash
 import dash_bootstrap_components as dbc
 import numpy as np
-import pandas as pd
 import plotly.graph_objects as go
 from dash import ALL, dcc, html
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 from plotly_resampler import FigureResampler
 
-# Import gauge classes
 from .pressure_gauge import (
     Baratron626D_Gauge,
     CVM211_Gauge,
@@ -40,8 +36,6 @@ class DataPlotter:
             length if provided)
         port: Port for the Dash server, defaults to 8050
         app: Dash app instance
-        app_running: Flag indicating if the app is running
-        server_thread: Thread for running the Dash server
         upstream_datasets: List of upstream dataset paths
         downstream_datasets: List of downstream dataset paths
         folder_datasets: List of folder-level datasets
@@ -52,8 +46,6 @@ class DataPlotter:
     port: int
 
     app: dash.Dash
-    app_running: bool
-    server_thread: threading.Thread
     upstream_datasets: list[str]
     downstream_datasets: list[str]
     folder_datasets: list[str]
@@ -71,8 +63,6 @@ class DataPlotter:
                 "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
             ],
         )
-        self.app_running = False
-        self.server_thread = None
 
         # Store multiple datasets - separate lists for upstream and downstream
         self.upstream_datasets = []
@@ -84,17 +74,14 @@ class DataPlotter:
         # Process data
         self.load_data()
 
-        # # Setup the app layout
-        # self.app.layout = self.create_layout()
+        # Setup the app layout
+        self.app.layout = self.create_layout()
 
-        # # Add custom CSS for hover effects
-        # self.app.index_string = hover_css
+        # Add custom CSS for hover effects
+        self.app.index_string = hover_css
 
-        # # Register callbacks
-        # self.register_callbacks()
-
-        # # Flag to track if recording has been started
-        # self.recording_started = False
+        # Register callbacks
+        self.register_callbacks()
 
     @property
     def dataset_paths(self) -> list[str]:
@@ -228,23 +215,8 @@ class DataPlotter:
             gauge_instance.time_data = data["RelativeTime"]
             gauge_instance.pressure_data = data["Pressure_Torr"]
 
-        # Separate gauges into upstream and downstream datasets based on gauge_location
-        upstream_gauges = []
-        downstream_gauges = []
-
-        for gauge in self.gauge_instances:
-            if gauge.gauge_location == "upstream":
-                upstream_gauges.append(gauge)
-            elif gauge.gauge_location == "downstream":
-                downstream_gauges.append(gauge)
-
-        print(f"Upstream gauges: {len(upstream_gauges)}")
-        print(f"Downstream gauges: {len(downstream_gauges)}")
-
         # Create datasets for plotting
-        self.create_datasets_from_gauges(
-            upstream_gauges, downstream_gauges, data_folder
-        )
+        self.create_datasets_from_gauges(self.gauge_instances, data_folder)
 
         # Log completion
         print("\nDatasets created:")
@@ -312,9 +284,8 @@ class DataPlotter:
 
     def create_datasets_from_gauges(
         self,
-        upstream_gauges: list[PressureGauge],
-        downstream_gauges: list[PressureGauge],
-        data_folder,
+        gauges: list[PressureGauge],
+        data_folder: str,
     ):
         """
         Create dataset dictionaries from gauge instances for plotting.
@@ -324,15 +295,6 @@ class DataPlotter:
             downstream_gauges: List of gauge instances with downstream location
             data_folder: Path to folder containing the data
         """
-        # Don't clear existing datasets - we want to accumulate multiple datasets
-        # Only initialize if not already initialized
-        if not hasattr(self, "upstream_datasets") or self.upstream_datasets is None:
-            self.upstream_datasets = []
-        if not hasattr(self, "downstream_datasets") or self.downstream_datasets is None:
-            self.downstream_datasets = []
-        if not hasattr(self, "folder_datasets") or self.folder_datasets is None:
-            self.folder_datasets = []
-
         # Create a single folder-level dataset
         # Use custom dataset name if provided, otherwise use default naming
         dataset_index = len(self.folder_datasets)
@@ -351,64 +313,33 @@ class DataPlotter:
         }
 
         # Create upstream datasets with folder dataset reference
-        for i, gauge in enumerate(upstream_gauges):
-            if hasattr(gauge, "time_data") and hasattr(gauge, "pressure_data"):
-                # Convert to relative time for performance
-                if len(gauge.time_data) > 0:
-                    relative_time = gauge.time_data - gauge.time_data[0]
-                else:
-                    relative_time = gauge.time_data
+        for gauge in gauges:
+            # Only Baratron626D_Gauge is visible by default
+            is_visible = gauge.__class__.__name__ == "Baratron626D_Gauge"
 
-                # Only Baratron626D_Gauge is visible by default
-                is_visible = gauge.__class__.__name__ == "Baratron626D_Gauge"
-
-                dataset = {
-                    "data": {
-                        "RelativeTime": relative_time,
-                        "Pressure_Torr": gauge.pressure_data,
-                    },
-                    "name": gauge.name,
-                    "display_name": dataset_name,
-                    "color": dataset_color,
-                    "visible": is_visible,
-                    "gauge_type": gauge.__class__.__name__,
-                    "folder_dataset": dataset_name,
-                }
+            dataset = {
+                "data": {
+                    "RelativeTime": gauge.time_data,
+                    "Pressure_Torr": gauge.pressure_data,
+                },
+                "name": gauge.name,
+                "display_name": dataset_name,
+                "color": dataset_color,
+                "visible": is_visible,
+                "gauge_type": gauge.__class__.__name__,
+                "folder_dataset": dataset_name,
+            }
+            if gauge.gauge_location == "upstream":
                 self.upstream_datasets.append(dataset)
                 folder_dataset["upstream_gauges"].append(dataset)
-                print(
-                    f"Added upstream dataset: {dataset['display_name']} (visible: {is_visible})"
-                )
-
-        # Create downstream datasets with folder dataset reference
-        for i, gauge in enumerate(downstream_gauges):
-            if hasattr(gauge, "time_data") and hasattr(gauge, "pressure_data"):
-                # Convert to relative time for performance
-                if len(gauge.time_data) > 0:
-                    relative_time = gauge.time_data - gauge.time_data[0]
-                else:
-                    relative_time = gauge.time_data
-
-                # Only Baratron626D_Gauge is visible by default
-                is_visible = gauge.__class__.__name__ == "Baratron626D_Gauge"
-
-                dataset = {
-                    "data": {
-                        "RelativeTime": relative_time,
-                        "Pressure_Torr": gauge.pressure_data,
-                    },
-                    "name": gauge.name,
-                    "display_name": dataset_name,
-                    "color": dataset_color,
-                    "visible": is_visible,
-                    "gauge_type": gauge.__class__.__name__,
-                    "folder_dataset": dataset_name,
-                }
+            else:
                 self.downstream_datasets.append(dataset)
                 folder_dataset["downstream_gauges"].append(dataset)
-                print(
-                    f"Added downstream dataset: {dataset['display_name']} (visible: {is_visible})"
-                )
+
+            print(
+                f"Added to {gauge.gauge_location} dataset: {dataset['display_name']}"
+                f"(visible: {is_visible})"
+            )
 
         # Add the folder dataset to our list
         self.folder_datasets.append(folder_dataset)
@@ -2326,7 +2257,7 @@ class DataPlotter:
 
         # Open web browser after a short delay
         threading.Timer(
-            1.0, lambda: webbrowser.open(f"http://127.0.0.1:{self.port}")
+            0.1, lambda: webbrowser.open(f"http://127.0.0.1:{self.port}")
         ).start()
 
         # Run the server directly (blocking)
