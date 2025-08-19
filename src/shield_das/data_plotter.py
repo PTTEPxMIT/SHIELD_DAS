@@ -36,8 +36,8 @@ class DataPlotter:
             length if provided)
         port: Port for the Dash server, defaults to 8050
         app: Dash app instance
-        upstream_datasets: List of upstream dataset paths
-        downstream_datasets: List of downstream dataset paths
+        upstream_datasets: List of upstream datasets
+        downstream_datasets: List of downstream datasets
         folder_datasets: List of folder-level datasets
     """
 
@@ -46,9 +46,9 @@ class DataPlotter:
     port: int
 
     app: dash.Dash
-    upstream_datasets: list[str]
-    downstream_datasets: list[str]
-    folder_datasets: list[str]
+    upstream_datasets: list[dict]
+    downstream_datasets: list[dict]
+    folder_datasets: list[dict]
 
     def __init__(self, dataset_paths=None, dataset_names=None, port=8050):
         self.dataset_paths = dataset_paths or []
@@ -343,6 +343,8 @@ class DataPlotter:
 
         # Add the folder dataset to our list
         self.folder_datasets.append(folder_dataset)
+
+        print(self.upstream_datasets)
 
     def get_next_color(self, index: int) -> str:
         """
@@ -2242,14 +2244,6 @@ class DataPlotter:
         )
 
         return fig
-
-    def convert_timestamps_to_seconds(self, timestamp_strings):
-        """Convert string timestamps to seconds since first timestamp"""
-        if not timestamp_strings:
-            return []
-
-        # For simple numeric timestamps, just convert the strings to floats
-        return [float(ts_str) for ts_str in timestamp_strings]
 
     def start(self):
         """Start the Dash web server"""
