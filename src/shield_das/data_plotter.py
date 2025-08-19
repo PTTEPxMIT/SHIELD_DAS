@@ -159,20 +159,13 @@ class DataPlotter:
             print(f"ERROR: Data folder not found: {data_folder}")
             return
 
-        try:
-            # Process JSON metadata
-            metadata = self.process_json_metadata(data_folder)
-            if metadata is None:
-                return
+        # Process JSON metadata
+        metadata = self.process_json_metadata(data_folder)
+        if metadata is None:
+            return
 
-            # Process CSV data based on version
-            self.process_csv_data(metadata, data_folder)
-
-        except Exception as e:
-            print(f"ERROR loading data from {data_folder}: {e}")
-            import traceback
-
-            traceback.print_exc()
+        # Process CSV data based on version
+        self.process_csv_data(metadata, data_folder)
 
     def process_json_metadata(self, data_folder):
         """
@@ -188,8 +181,7 @@ class DataPlotter:
         json_files = [f for f in os.listdir(data_folder) if f.lower().endswith(".json")]
 
         if not json_files:
-            print(f"ERROR: No JSON file found in {data_folder}")
-            return None
+            raise FileNotFoundError(f"No metadata JSON file found in {data_folder}")
 
         json_path = os.path.join(data_folder, json_files[0])
         print(f"Found JSON metadata: {json_path}")
@@ -219,6 +211,59 @@ class DataPlotter:
                 f"Unsupported metadata version: {version}. "
                 f"Only versions '0.0' and '1.0' are supported."
             )
+
+    def process_csv_v0_0(self, metadata, data_folder):
+        """
+        Process CSV data for metadata version 0.0 (multiple CSV files).
+
+        Args:
+            metadata: Parsed JSON metadata dictionary
+            data_folder: Path to folder containing CSV data files
+        """
+        print("Processing data as version 0.0 (multiple CSV files)")
+
+        # Create gauge instances from metadata
+        self.gauge_instances = self.create_gauge_instances(
+            metadata["gauges"], data_folder
+        )
+        print(f"Created {len(self.gauge_instances)} gauge instances")
+
+        # Separate gauges into upstream and downstream datasets based on gauge_location
+        upstream_gauges = []
+        downstream_gauges = []
+
+        for gauge in self.gauge_instances:
+            if gauge.gauge_location.lower() == "upstream":
+                upstream_gauges.append(gauge)
+            elif gauge.gauge_location.lower() == "downstream":
+                downstream_gauges.append(gauge)
+            else:
+                print(
+                    f"Warning: Unknown gauge location '{gauge.gauge_location}' for gauge '{gauge.name}'"
+                )
+
+        print(f"Upstream gauges: {len(upstream_gauges)}")
+        print(f"Downstream gauges: {len(downstream_gauges)}")
+
+        # Create datasets for plotting
+        self.create_datasets_from_gauges(
+            upstream_gauges, downstream_gauges, data_folder
+        )
+
+        # Log completion
+        print("\nDatasets created:")
+        print(f"  - Upstream: {len(self.upstream_datasets)} datasets")
+        print(f"  - Downstream: {len(self.downstream_datasets)} datasets")
+
+    def process_csv_v1_0(self):
+        """
+        Process CSV data for metadata version 1.0 (single CSV file).
+
+        Args:
+            metadata: Parsed JSON metadata dictionary
+            data_folder: Path to folder containing CSV data files
+        """
+        raise NotImplementedError("Version 1.0 processing not yet implemented")
 
     def create_gauge_instances(self, gauges_metadata, data_folder):
         """Create gauge instances from metadata and load CSV data.
@@ -289,49 +334,6 @@ class DataPlotter:
             print(f"Created gauge instance: {gauge_type} - {name}")
 
         return gauge_instances
-
-    def process_csv_v0_0(self, metadata, data_folder):
-        """
-        Process CSV data for metadata version 0.0 (multiple CSV files).
-
-        Args:
-            metadata: Parsed JSON metadata dictionary
-            data_folder: Path to folder containing CSV data files
-        """
-        print("Processing data as version 0.0 (multiple CSV files)")
-
-        # Create gauge instances from metadata
-        self.gauge_instances = self.create_gauge_instances(
-            metadata["gauges"], data_folder
-        )
-        print(f"Created {len(self.gauge_instances)} gauge instances")
-
-        # Separate gauges into upstream and downstream datasets based on gauge_location
-        upstream_gauges = []
-        downstream_gauges = []
-
-        for gauge in self.gauge_instances:
-            if gauge.gauge_location.lower() == "upstream":
-                upstream_gauges.append(gauge)
-            elif gauge.gauge_location.lower() == "downstream":
-                downstream_gauges.append(gauge)
-            else:
-                print(
-                    f"Warning: Unknown gauge location '{gauge.gauge_location}' for gauge '{gauge.name}'"
-                )
-
-        print(f"Upstream gauges: {len(upstream_gauges)}")
-        print(f"Downstream gauges: {len(downstream_gauges)}")
-
-        # Create datasets for plotting
-        self.create_datasets_from_gauges(
-            upstream_gauges, downstream_gauges, data_folder
-        )
-
-        # Log completion
-        print("\nDatasets created:")
-        print(f"  - Upstream: {len(self.upstream_datasets)} datasets")
-        print(f"  - Downstream: {len(self.downstream_datasets)} datasets")
 
     def create_datasets_from_gauges(
         self, upstream_gauges, downstream_gauges, data_folder
@@ -432,16 +434,6 @@ class DataPlotter:
 
         # Add the folder dataset to our list
         self.folder_datasets.append(folder_dataset)
-
-    def process_csv_v1_0(self):
-        """
-        Process CSV data for metadata version 1.0 (single CSV file).
-
-        Args:
-            metadata: Parsed JSON metadata dictionary
-            data_folder: Path to folder containing CSV data files
-        """
-        raise NotImplementedError("Version 1.0 processing not yet implemented")
 
     def parse_uploaded_file(self, contents, filename):
         """
