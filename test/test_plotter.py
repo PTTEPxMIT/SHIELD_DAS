@@ -180,9 +180,9 @@ class TestDataPlotterFileProcessing:
         assert result.empty
 
     def test_process_json_metadata_no_file(self, tmp_path):
-        """Test processing directory with no JSON file."""
-        result = self.plotter.process_json_metadata(str(tmp_path))
-        assert result is None
+        """Test processing directory with no JSON file raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError, match="No metadata JSON file found"):
+            self.plotter.process_json_metadata(str(tmp_path))
 
     def test_process_json_metadata_success(self, tmp_path):
         """Test successful JSON metadata processing."""
