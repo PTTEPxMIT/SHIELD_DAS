@@ -69,19 +69,8 @@ class DataPlotter:
         self.downstream_datasets = []
 
         # Store folder-level datasets for management
-        self.folder_datasets = []  # Each folder = 1 dataset with upstream/downstream gauges
-
-        # Process data
-        self.load_data()
-
-        # Setup the app layout
-        self.app.layout = self.create_layout()
-
-        # Add custom CSS for hover effects
-        self.app.index_string = hover_css
-
-        # Register callbacks
-        self.register_callbacks()
+        # Each folder = 1 dataset with upstream/downstream gauges
+        self.folder_datasets = []
 
     @property
     def dataset_paths(self) -> list[str]:
@@ -114,19 +103,12 @@ class DataPlotter:
                     f"No data CSV files found in dataset path: {dataset_path}"
                 )
 
-        # check that a single run_metadata.json file exists in each dataset path
+        # check that run_metadata.json exists in each dataset path
         for dataset_path in value:
-            json_files = [
-                f for f in os.listdir(dataset_path) if f.lower() == "run_metadata.json"
-            ]
-            if len(json_files) == 0:
+            metadata_file = os.path.join(dataset_path, "run_metadata.json")
+            if not os.path.exists(metadata_file):
                 raise FileNotFoundError(
                     f"No run_metadata.json file found in dataset path: {dataset_path}"
-                )
-            elif len(json_files) > 1:
-                raise FileExistsError(
-                    f"Multiple run_metadata.json files found in dataset path: "
-                    f"{dataset_path}"
                 )
 
         self._dataset_paths = value
@@ -238,7 +220,9 @@ class DataPlotter:
 
         Args:
             gauges_metadata: Metadata for gauges
-            data_folder: Path to folder containing CSV data files
+
+        returns:
+            List of PressureGauge instances
         """
         gauge_instances = []
 
@@ -264,19 +248,18 @@ class DataPlotter:
 
             # Create instance based on gauge type
             if gauge_type == "Baratron626D_Gauge":
-                # Baratron626D requires additional full_scale_Torr parameter
                 full_scale_torr = gauge_data.get("full_scale_torr")
-                if full_scale_torr is None:
-                    raise ValueError(
-                        f"Baratron626D gauge '{name}' missing required parameter",
-                        "'full_scale_torr'",
-                    )
                 gauge_instance = gauge_class(
-                    ain_channel, name, gauge_location, full_scale_torr
+                    ain_channel=ain_channel,
+                    name=name,
+                    gauge_location=gauge_location,
+                    full_scale_Torr=full_scale_torr,
                 )
             else:
                 # WGM701 and CVM211 use the same constructor parameters
-                gauge_instance = gauge_class(name, ain_channel, gauge_location)
+                gauge_instance = gauge_class(
+                    name=name, ain_channel=ain_channel, gauge_location=gauge_location
+                )
 
             gauge_instances.append(gauge_instance)
 
@@ -343,8 +326,6 @@ class DataPlotter:
 
         # Add the folder dataset to our list
         self.folder_datasets.append(folder_dataset)
-
-        print(self.upstream_datasets)
 
     def get_next_color(self, index: int) -> str:
         """
@@ -2246,7 +2227,20 @@ class DataPlotter:
         return fig
 
     def start(self):
-        """Start the Dash web server"""
+        """Process data and start the Dash web server"""
+
+        # Process data
+        self.load_data()
+
+        # Setup the app layout
+        self.app.layout = self.create_layout()
+
+        # Add custom CSS for hover effects
+        self.app.index_string = hover_css
+
+        # Register callbacks
+        self.register_callbacks()
+
         print(f"Starting dashboard on http://localhost:{self.port}")
 
         # Open web browser after a short delay
