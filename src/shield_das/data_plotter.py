@@ -1,61 +1,61 @@
-import base64
 import json
 import os
-import sys
 import threading
 import webbrowser
 
 import dash
 import dash_bootstrap_components as dbc
 import numpy as np
-import pandas as pd
 import plotly.graph_objects as go
 from dash import ALL, dcc, html
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 from plotly_resampler import FigureResampler
 
-# Import gauge classes
-from .pressure_gauge import Baratron626D_Gauge, CVM211_Gauge, WGM701_Gauge
+from .pressure_gauge import (
+    Baratron626D_Gauge,
+    CVM211_Gauge,
+    PressureGauge,
+    WGM701_Gauge,
+)
 
 
 class DataPlotter:
-    def __init__(self, data=None, dataset_names=None, port=8050):
-        """
-        Initialize the DataPlotter.
+    """
+        DataPlotter is responsible for visualizing pressure gauge data using Dash.
 
-        Args:
-            data: Path to a single dataset folder, or list of paths to multiple dataset folders
-            dataset_names: List of strings to name the datasets (optional, must match data length if provided)
-            port: Port for the Dash server
-        """
+    Args:
+        dataset_paths: list of strings with paths to dataset folders
+        dataset_names: List of strings to name the datasets (optional, must match data
+            length if provided)
+        port: Port for the Dash server, defaults to 8050
 
-        # Handle data parameter - convert single path to list for consistent processing
-        if data is None:
-            self.data_paths = []
-        elif isinstance(data, str):
-            self.data_paths = [data]
-        elif isinstance(data, list):
-            self.data_paths = data
-        else:
-            raise ValueError(
-                "data parameter must be a string path, list of paths, or None"
-            )
+    Attributes:
+        dataset_paths: list of strings with paths to dataset folders
+        dataset_names: List of strings to name the datasets (optional, must match data
+            length if provided)
+        port: Port for the Dash server, defaults to 8050
+        app: Dash app instance
+        upstream_datasets: List of upstream datasets
+        downstream_datasets: List of downstream datasets
+        folder_datasets: List of folder-level datasets
+    """
 
-        # Handle dataset_names parameter
-        if dataset_names is None:
-            self.dataset_names = None
-        elif isinstance(dataset_names, list):
-            # Validate that dataset_names length matches data paths length
-            if len(self.data_paths) > 0 and len(dataset_names) != len(self.data_paths):
-                raise ValueError(
-                    f"dataset_names length ({len(dataset_names)}) must match data paths length ({len(self.data_paths)})"
-                )
-            self.dataset_names = dataset_names
-        else:
-            raise ValueError("dataset_names must be a list of strings or None")
+    dataset_paths: list[str]
+    dataset_names: list[str]
+    port: int
 
+    app: dash.Dash
+    upstream_datasets: list[dict]
+    downstream_datasets: list[dict]
+    folder_datasets: list[dict]
+
+    def __init__(self, dataset_paths=None, dataset_names=None, port=8050):
+        self.dataset_paths = dataset_paths or []
+        self.dataset_names = dataset_names or []
         self.port = port
+
+        # Initialize Dash app
         self.app = dash.Dash(
             __name__,
             external_stylesheets=[
@@ -63,136 +63,102 @@ class DataPlotter:
                 "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
             ],
         )
-        self.app_running = False
-        self.server_thread = None
 
         # Store multiple datasets - separate lists for upstream and downstream
         self.upstream_datasets = []
         self.downstream_datasets = []
 
         # Store folder-level datasets for management
-        self.folder_datasets = []  # Each folder = 1 dataset with upstream/downstream gauges
+        # Each folder = 1 dataset with upstream/downstream gauges
+        self.folder_datasets = []
 
-        # Process data paths if provided
-        if self.data_paths:
-            self.load_all_data()
-            print("\nData loading complete. Datasets ready for Dash app visualization.")
+    @property
+    def dataset_paths(self) -> list[str]:
+        return self._dataset_paths
 
-        # Setup the app layout
-        self.app.layout = self.create_layout()
+    @dataset_paths.setter
+    def dataset_paths(self, value: list[str]):
+        # if value not a list of strings raise ValueError
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) for item in value
+        ):
+            raise ValueError("dataset_paths must be a list of strings")
 
-        # Add custom CSS for hover effects
-        self.app.index_string = """
-        <!DOCTYPE html>
-        <html>
-            <head>
-                {%metas%}
-                <title>{%title%}</title>
-                {%favicon%}
-                {%css%}
-                <style>
-                    .dataset-name-input:hover {
-                        border-color: #007bff !important;
-                        box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25) !important;
-                        transform: scale(1.01) !important;
-                    }
-                    
-                    .dataset-name-input:focus {
-                        border-color: #007bff !important;
-                        box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25) !important;
-                        outline: 0 !important;
-                    }
-                    
-                    .color-picker-input:hover {
-                        border-color: #007bff !important;
-                        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.4) !important;
-                        transform: none !important;
-                    }
-                    
-                    .color-picker-input:focus {
-                        border-color: #007bff !important;
-                        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.4) !important;
-                        outline: 0 !important;
-                    }
-                </style>
-            </head>
-            <body>
-                {%app_entry%}
-                <footer>
-                    {%config%}
-                    {%scripts%}
-                    {%renderer%}
-                </footer>
-            </body>
-        </html>
-        """
+        # Check if all dataset paths exist
+        for dataset_path in value:
+            if not os.path.exists(dataset_path):
+                raise ValueError(f"Dataset path does not exist: {dataset_path}")
 
-        # Register callbacks
-        self.register_callbacks()
+        # check all dataset paths are unique
+        if len(value) != len(set(value)):
+            raise ValueError("dataset_paths must contain unique paths")
 
-        # Flag to track if recording has been started
-        self.recording_started = False
+        # check csv files exist in each dataset path
+        for dataset_path in value:
+            csv_files = [
+                f for f in os.listdir(dataset_path) if f.lower().endswith(".csv")
+            ]
+            if not csv_files:
+                raise FileNotFoundError(
+                    f"No data CSV files found in dataset path: {dataset_path}"
+                )
 
-    def load_all_data(self):
+        # check that run_metadata.json exists in each dataset path
+        for dataset_path in value:
+            metadata_file = os.path.join(dataset_path, "run_metadata.json")
+            if not os.path.exists(metadata_file):
+                raise FileNotFoundError(
+                    f"No run_metadata.json file found in dataset path: {dataset_path}"
+                )
+
+        self._dataset_paths = value
+
+    @property
+    def dataset_names(self) -> list[str]:
+        return self._dataset_names
+
+    @dataset_names.setter
+    def dataset_names(self, value: list[str]):
+        # if value not a list of strings raise ValueError
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) for item in value
+        ):
+            raise ValueError("dataset_names must be a list of strings")
+
+        # Check if dataset_names length matches dataset_paths length
+        if len(value) != len(self.dataset_paths):
+            raise ValueError(
+                f"dataset_names length ({len(value)}) must match dataset_paths "
+                f"length ({len(self.dataset_paths)})"
+            )
+
+        # Check if all dataset names are unique
+        if len(value) != len(set(value)):
+            raise ValueError("dataset_names must contain unique names")
+
+        self._dataset_names = value
+
+    def load_data(self):
         """
         Load and process data from all specified data paths.
         """
-        print(f"Loading data from {len(self.data_paths)} dataset(s)")
+        print(f"Loading data from {len(self.dataset_paths)} dataset(s)")
 
-        for i, data_path in enumerate(self.data_paths):
+        for i, dataset_path in enumerate(self.dataset_paths):
             print(
-                f"\n--- Processing dataset {i + 1}/{len(self.data_paths)}: {data_path} ---"
+                f"\n--- Processing dataset {i + 1}/{len(self.dataset_paths)}: "
+                f"{dataset_path} ---"
             )
-            self.load_data(data_path)
 
-    def load_data(self, data_folder):
-        """
-        Load and process data from the specified folder.
-        Read JSON metadata first, then process CSV data based on version.
+            # Read metadata file
+            metadata_path = os.path.join(dataset_path, "run_metadata.json")
+            with open(metadata_path) as f:
+                metadata = json.load(f)
 
-        Args:
-            data_folder: Path to folder containing JSON metadata and CSV data files
-        """
-        print(f"Loading data from folder: {data_folder}")
+            # Process CSV data based on version
+            self.process_csv_data(metadata, dataset_path)
 
-        if not os.path.exists(data_folder):
-            print(f"ERROR: Data folder not found: {data_folder}")
-            return
-
-        # Process JSON metadata
-        metadata = self.process_json_metadata(data_folder)
-        if metadata is None:
-            return
-
-        # Process CSV data based on version
-        self.process_csv_data(metadata, data_folder)
-
-    def process_json_metadata(self, data_folder):
-        """
-        Find and process JSON metadata file.
-
-        Args:
-            data_folder: Path to folder containing JSON metadata
-
-        Returns:
-            dict: Parsed metadata or None if error
-        """
-        # Find JSON files
-        json_files = [f for f in os.listdir(data_folder) if f.lower().endswith(".json")]
-
-        if not json_files:
-            raise FileNotFoundError(f"No metadata JSON file found in {data_folder}")
-
-        json_path = os.path.join(data_folder, json_files[0])
-        print(f"Found JSON metadata: {json_path}")
-
-        # Read JSON metadata
-        with open(json_path) as f:
-            metadata = json.load(f)
-
-        return metadata
-
-    def process_csv_data(self, metadata, data_folder):
+    def process_csv_data(self, metadata: dict, data_folder: str):
         """
         Process CSV data based on metadata version.
 
@@ -212,7 +178,7 @@ class DataPlotter:
                 f"Only versions '0.0' and '1.0' are supported."
             )
 
-    def process_csv_v0_0(self, metadata, data_folder):
+    def process_csv_v0_0(self, metadata: dict, data_folder: str):
         """
         Process CSV data for metadata version 0.0 (multiple CSV files).
 
@@ -220,35 +186,19 @@ class DataPlotter:
             metadata: Parsed JSON metadata dictionary
             data_folder: Path to folder containing CSV data files
         """
-        print("Processing data as version 0.0 (multiple CSV files)")
 
         # Create gauge instances from metadata
-        self.gauge_instances = self.create_gauge_instances(
-            metadata["gauges"], data_folder
-        )
-        print(f"Created {len(self.gauge_instances)} gauge instances")
+        self.gauge_instances = self.create_gauge_instances(metadata["gauges"])
 
-        # Separate gauges into upstream and downstream datasets based on gauge_location
-        upstream_gauges = []
-        downstream_gauges = []
-
-        for gauge in self.gauge_instances:
-            if gauge.gauge_location.lower() == "upstream":
-                upstream_gauges.append(gauge)
-            elif gauge.gauge_location.lower() == "downstream":
-                downstream_gauges.append(gauge)
-            else:
-                print(
-                    f"Warning: Unknown gauge location '{gauge.gauge_location}' for gauge '{gauge.name}'"
-                )
-
-        print(f"Upstream gauges: {len(upstream_gauges)}")
-        print(f"Downstream gauges: {len(downstream_gauges)}")
+        # Load data for each gauge
+        for gauge_instance, gauge in zip(self.gauge_instances, metadata["gauges"]):
+            csv_path = os.path.join(data_folder, gauge["filename"])
+            data = np.genfromtxt(csv_path, delimiter=",", names=True)
+            gauge_instance.time_data = data["RelativeTime"]
+            gauge_instance.pressure_data = data["Pressure_Torr"]
 
         # Create datasets for plotting
-        self.create_datasets_from_gauges(
-            upstream_gauges, downstream_gauges, data_folder
-        )
+        self.create_datasets_from_gauges(self.gauge_instances, data_folder)
 
         # Log completion
         print("\nDatasets created:")
@@ -265,12 +215,14 @@ class DataPlotter:
         """
         raise NotImplementedError("Version 1.0 processing not yet implemented")
 
-    def create_gauge_instances(self, gauges_metadata, data_folder):
+    def create_gauge_instances(self, gauges_metadata: dict) -> list[PressureGauge]:
         """Create gauge instances from metadata and load CSV data.
 
         Args:
             gauges_metadata: Metadata for gauges
-            data_folder: Path to folder containing CSV data files
+
+        returns:
+            List of PressureGauge instances
         """
         gauge_instances = []
 
@@ -296,47 +248,27 @@ class DataPlotter:
 
             # Create instance based on gauge type
             if gauge_type == "Baratron626D_Gauge":
-                # Baratron626D requires additional full_scale_Torr parameter
                 full_scale_torr = gauge_data.get("full_scale_torr")
-                if full_scale_torr is None:
-                    raise ValueError(
-                        f"Baratron626D gauge '{name}' missing required parameter",
-                        "'full_scale_torr'",
-                    )
                 gauge_instance = gauge_class(
-                    ain_channel, name, gauge_location, full_scale_torr
+                    ain_channel=ain_channel,
+                    name=name,
+                    gauge_location=gauge_location,
+                    full_scale_Torr=full_scale_torr,
                 )
             else:
                 # WGM701 and CVM211 use the same constructor parameters
-                gauge_instance = gauge_class(name, ain_channel, gauge_location)
-
-            # Load CSV data for this gauge
-            csv_filename = gauge_data.get("filename")
-            if not csv_filename:
-                raise ValueError(
-                    f"Gauge '{name}' missing required 'filename' field in metadata"
+                gauge_instance = gauge_class(
+                    name=name, ain_channel=ain_channel, gauge_location=gauge_location
                 )
 
-            csv_path = os.path.join(data_folder, csv_filename)
-            if not os.path.exists(csv_path):
-                raise FileNotFoundError(f"CSV file not found: {csv_path}")
-
-            # Load CSV data using numpy
-            data = np.genfromtxt(csv_path, delimiter=",", names=True)
-
-            # Extract RelativeTime and Pressure columns (indices 1 and 2)
-            gauge_instance.time_data = data["RelativeTime"]
-            gauge_instance.pressure_data = data["Pressure_Torr"]
-
-            print(f"Loaded CSV data for {name}: {len(data)} rows")
-
             gauge_instances.append(gauge_instance)
-            print(f"Created gauge instance: {gauge_type} - {name}")
 
         return gauge_instances
 
     def create_datasets_from_gauges(
-        self, upstream_gauges, downstream_gauges, data_folder
+        self,
+        gauges: list[PressureGauge],
+        data_folder: str,
     ):
         """
         Create dataset dictionaries from gauge instances for plotting.
@@ -346,15 +278,6 @@ class DataPlotter:
             downstream_gauges: List of gauge instances with downstream location
             data_folder: Path to folder containing the data
         """
-        # Don't clear existing datasets - we want to accumulate multiple datasets
-        # Only initialize if not already initialized
-        if not hasattr(self, "upstream_datasets") or self.upstream_datasets is None:
-            self.upstream_datasets = []
-        if not hasattr(self, "downstream_datasets") or self.downstream_datasets is None:
-            self.downstream_datasets = []
-        if not hasattr(self, "folder_datasets") or self.folder_datasets is None:
-            self.folder_datasets = []
-
         # Create a single folder-level dataset
         # Use custom dataset name if provided, otherwise use default naming
         dataset_index = len(self.folder_datasets)
@@ -373,108 +296,38 @@ class DataPlotter:
         }
 
         # Create upstream datasets with folder dataset reference
-        for i, gauge in enumerate(upstream_gauges):
-            if hasattr(gauge, "time_data") and hasattr(gauge, "pressure_data"):
-                # Convert to relative time for performance
-                if len(gauge.time_data) > 0:
-                    relative_time = gauge.time_data - gauge.time_data[0]
-                else:
-                    relative_time = gauge.time_data
+        for gauge in gauges:
+            # Only Baratron626D_Gauge is visible by default
+            is_visible = gauge.__class__.__name__ == "Baratron626D_Gauge"
 
-                # Only Baratron626D_Gauge is visible by default
-                is_visible = gauge.__class__.__name__ == "Baratron626D_Gauge"
-
-                dataset = {
-                    "data": {
-                        "RelativeTime": relative_time,
-                        "Pressure_Torr": gauge.pressure_data,
-                    },
-                    "name": gauge.name,
-                    "display_name": dataset_name,
-                    "color": dataset_color,
-                    "visible": is_visible,
-                    "gauge_type": gauge.__class__.__name__,
-                    "folder_dataset": dataset_name,
-                }
+            dataset = {
+                "data": {
+                    "RelativeTime": gauge.time_data,
+                    "Pressure_Torr": gauge.pressure_data,
+                },
+                "name": gauge.name,
+                "display_name": dataset_name,
+                "color": dataset_color,
+                "visible": is_visible,
+                "gauge_type": gauge.__class__.__name__,
+                "folder_dataset": dataset_name,
+            }
+            if gauge.gauge_location == "upstream":
                 self.upstream_datasets.append(dataset)
                 folder_dataset["upstream_gauges"].append(dataset)
-                print(
-                    f"Added upstream dataset: {dataset['display_name']} (visible: {is_visible})"
-                )
-
-        # Create downstream datasets with folder dataset reference
-        for i, gauge in enumerate(downstream_gauges):
-            if hasattr(gauge, "time_data") and hasattr(gauge, "pressure_data"):
-                # Convert to relative time for performance
-                if len(gauge.time_data) > 0:
-                    relative_time = gauge.time_data - gauge.time_data[0]
-                else:
-                    relative_time = gauge.time_data
-
-                # Only Baratron626D_Gauge is visible by default
-                is_visible = gauge.__class__.__name__ == "Baratron626D_Gauge"
-
-                dataset = {
-                    "data": {
-                        "RelativeTime": relative_time,
-                        "Pressure_Torr": gauge.pressure_data,
-                    },
-                    "name": gauge.name,
-                    "display_name": dataset_name,
-                    "color": dataset_color,
-                    "visible": is_visible,
-                    "gauge_type": gauge.__class__.__name__,
-                    "folder_dataset": dataset_name,
-                }
+            else:
                 self.downstream_datasets.append(dataset)
                 folder_dataset["downstream_gauges"].append(dataset)
-                print(
-                    f"Added downstream dataset: {dataset['display_name']} (visible: {is_visible})"
-                )
+
+            print(
+                f"Added to {gauge.gauge_location} dataset: {dataset['display_name']}"
+                f"(visible: {is_visible})"
+            )
 
         # Add the folder dataset to our list
         self.folder_datasets.append(folder_dataset)
 
-    def parse_uploaded_file(self, contents, filename):
-        """
-        Parse uploaded JSON metadata file and load referenced data.
-
-        Args:
-            contents: Base64 encoded file content
-            filename: Name of the uploaded file
-
-        Returns:
-            pandas.DataFrame: The parsed data or empty DataFrame on error
-        """
-        try:
-            # Decode the base64 content
-            content_type, content_string = contents.split(",")
-            decoded = base64.b64decode(content_string)
-
-            # Parse JSON metadata
-            metadata = json.loads(decoded.decode("utf-8"))
-
-            # Check version and get data filename
-            if metadata.get("version") != "1.0":
-                print(f"Unsupported version: {metadata.get('version')}")
-                return pd.DataFrame()
-
-            data_filename = metadata["run_info"]["data_filename"]
-            print(f"Found data filename: {data_filename}")
-
-            # For now, just demonstrate that we successfully parsed the JSON
-            # In a real implementation, we'd need the user to upload both files
-            # or have the CSV file accessible on the server
-            print(f"Successfully extracted CSV filename: {data_filename}")
-            print("JSON metadata parsing successful!")
-            print("TEST: Metadata parsing complete - terminating program")
-            sys.exit(0)
-
-        except Exception as e:
-            print(f"Error parsing uploaded file {filename}: {e}")
-            return pd.DataFrame()
-
-    def get_next_color(self, index):
+    def get_next_color(self, index: int) -> str:
         """
         Get a color for the dataset based on its index.
 
@@ -495,37 +348,6 @@ class DataPlotter:
             "#A1B0AB",  # Light Gray
         ]
         return colors[index % len(colors)]
-
-    def is_valid_color(self, color):
-        """
-        Validate if a color string is a valid hex or RGB format.
-
-        Args:
-            color: Color string to validate
-
-        Returns:
-            bool: True if valid color format
-        """
-        import re
-
-        if not color:
-            return False
-
-        color = color.strip()
-
-        # Check hex format (#RGB or #RRGGBB)
-        hex_pattern = r"^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$"
-        if re.match(hex_pattern, color):
-            return True
-
-        # Check RGB format rgb(r,g,b)
-        rgb_pattern = r"^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$"
-        rgb_match = re.match(rgb_pattern, color, re.IGNORECASE)
-        if rgb_match:
-            r, g, b = map(int, rgb_match.groups())
-            return all(0 <= val <= 255 for val in [r, g, b])
-
-        return False
 
     def create_layout(self):
         return dbc.Container(
@@ -2404,22 +2226,73 @@ class DataPlotter:
 
         return fig
 
-    def convert_timestamps_to_seconds(self, timestamp_strings):
-        """Convert string timestamps to seconds since first timestamp"""
-        if not timestamp_strings:
-            return []
-
-        # For simple numeric timestamps, just convert the strings to floats
-        return [float(ts_str) for ts_str in timestamp_strings]
-
     def start(self):
-        """Start the Dash web server"""
+        """Process data and start the Dash web server"""
+
+        # Process data
+        self.load_data()
+
+        # Setup the app layout
+        self.app.layout = self.create_layout()
+
+        # Add custom CSS for hover effects
+        self.app.index_string = hover_css
+
+        # Register callbacks
+        self.register_callbacks()
+
         print(f"Starting dashboard on http://localhost:{self.port}")
 
         # Open web browser after a short delay
         threading.Timer(
-            1.0, lambda: webbrowser.open(f"http://127.0.0.1:{self.port}")
+            0.1, lambda: webbrowser.open(f"http://127.0.0.1:{self.port}")
         ).start()
 
         # Run the server directly (blocking)
         self.app.run(debug=False, host="127.0.0.1", port=self.port)
+
+
+hover_css = """
+    <!DOCTYPE html>
+    <html>
+        <head>
+            {%metas%}
+            <title>{%title%}</title>
+            {%favicon%}
+            {%css%}
+            <style>
+                .dataset-name-input:hover {
+                    border-color: #007bff !important;
+                    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25) !important;
+                    transform: scale(1.01) !important;
+                }
+
+                .dataset-name-input:focus {
+                    border-color: #007bff !important;
+                    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25) !important;
+                    outline: 0 !important;
+                }
+
+                .color-picker-input:hover {
+                    border-color: #007bff !important;
+                    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.4) !important;
+                    transform: none !important;
+                }
+
+                .color-picker-input:focus {
+                    border-color: #007bff !important;
+                    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.4) !important;
+                    outline: 0 !important;
+                }
+            </style>
+        </head>
+        <body>
+            {%app_entry%}
+            <footer>
+                {%config%}
+                {%scripts%}
+                {%renderer%}
+            </footer>
+        </body>
+    </html>
+    """

@@ -27,6 +27,7 @@ class PressureGauge:
     name: str
     ain_channel: int
     gauge_location: str
+
     pressure_data: list[float]
     voltage_data: list[float]
     backup_dir: str
