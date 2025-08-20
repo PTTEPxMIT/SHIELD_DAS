@@ -18,7 +18,7 @@ def test_backup_segments_created(tmp_path):
         gauges=[gauge],
         thermocouples=[],
         results_dir=str(tmp_path),
-        test_mode=True,
+        run_type="test_mode",
         recording_interval=0.05,
         backup_interval=0.1,
     )
@@ -57,7 +57,7 @@ def test_backup_rotation(tmp_path):
         gauges=[gauge],
         thermocouples=[],
         results_dir=str(tmp_path),
-        test_mode=True,
+        run_type="test_mode",
         recording_interval=0.02,
         backup_interval=0.06,
     )

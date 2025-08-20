@@ -42,7 +42,7 @@ class TestDataRecorder:
             gauges=[self.mock_gauge1, self.mock_gauge2],
             thermocouples=self.mock_thermocouples,
             results_dir=self.temp_dir,
-            test_mode=True,
+            run_type="test_mode",
             recording_interval=0.1,  # Fast interval for testing
         )
 
@@ -90,7 +90,7 @@ class TestDataRecorder:
             gauges=[self.mock_gauge1],
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=False,
+            run_type="permeation_exp",
         )
 
         # Test directory creation (actual dates will be used)
@@ -222,7 +222,7 @@ class TestDataRecorder:
             gauges=[self.mock_gauge1, self.mock_gauge2],
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=False,
+            run_type="permeation_exp",
         )
 
         # Check basic attributes
@@ -355,7 +355,7 @@ class TestDataRecorder:
             gauges=[gauge_a, gauge_b, gauge_c],
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=True,
+            run_type="test_mode",
         )
 
         # Start recording to create CSV file
@@ -413,7 +413,7 @@ class TestDataRecorder:
         run_info = metadata["run_info"]
         assert "date" in run_info
         assert "start_time" in run_info
-        assert run_info["test_mode"] is True
+        assert run_info["run_type"] == "test_mode"
         assert run_info["recording_interval_seconds"] == 0.1
         assert run_info["backup_interval_seconds"] == 5.0
 
@@ -447,7 +447,7 @@ class TestDataRecorder:
             gauges=[duplicate_gauge1, duplicate_gauge2],
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=True,  # Use test mode to avoid LabJack initialization
+            run_type="test_mode",  # Use test mode to avoid LabJack initialization
         )
 
         # Starting the recorder should raise ValueError due to duplicate AIN channels
@@ -479,7 +479,7 @@ class TestDataRecorder:
             gauges=[unique_gauge1, unique_gauge2],
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=True,
+            run_type="test_mode",
         )
 
         # Starting the recorder should not raise any error

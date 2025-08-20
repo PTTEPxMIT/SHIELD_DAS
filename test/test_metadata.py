@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from shield_das import DataRecorder, PressureGauge
+from shield_das import DataRecorder, PressureGauge, Thermocouple
 
 
 class TestMetadata:
@@ -49,7 +49,7 @@ class TestMetadata:
             gauges=[self.mock_gauge1, self.mock_gauge2],
             thermocouples=self.mock_thermocouples,
             results_dir=self.temp_dir,
-            test_mode=True,
+            run_type="test_mode",
             recording_interval=0.1,
             backup_interval=1.0,
         )
@@ -85,7 +85,7 @@ class TestMetadata:
             gauges=[self.mock_gauge1],
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=True,
+            run_type="test_mode",
             recording_interval=0.5,
             backup_interval=2.0,
         )
@@ -102,7 +102,7 @@ class TestMetadata:
         run_info = metadata["run_info"]
         assert "date" in run_info
         assert "start_time" in run_info
-        assert run_info["test_mode"] is True
+        assert run_info["run_type"] == "test_mode"
         assert run_info["recording_interval_seconds"] == 0.5
         assert run_info["backup_interval_seconds"] == 2.0
 
@@ -112,7 +112,7 @@ class TestMetadata:
             gauges=[self.mock_gauge1, self.mock_gauge2],
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=True,
+            run_type="test_mode",
         )
 
         recorder.start()
@@ -143,7 +143,7 @@ class TestMetadata:
             gauges=[self.mock_gauge1],
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=True,
+            run_type="test_mode",
         )
 
         recorder.start()
@@ -163,14 +163,14 @@ class TestMetadata:
     def test_metadata_with_thermocouples(self):
         """Test metadata creation when thermocouples are present."""
         # Create mock thermocouple
-        mock_thermocouple = Mock()
+        mock_thermocouple = Mock(spec=Thermocouple)
         mock_thermocouple.name = "TestThermocouple"
 
         recorder = DataRecorder(
             gauges=[self.mock_gauge1],
             thermocouples=[mock_thermocouple],
             results_dir=self.temp_dir,
-            test_mode=True,
+            run_type="test_mode",
         )
 
         recorder.start()
@@ -192,7 +192,7 @@ class TestMetadata:
             gauges=[self.mock_gauge1],
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=True,
+            run_type="test_mode",
         )
 
         recorder.start()
@@ -217,7 +217,7 @@ class TestMetadata:
         from unittest.mock import Mock
 
         # Create mock Baratron gauge
-        mock_baratron = Mock()
+        mock_baratron = Mock(spec=PressureGauge)
         mock_baratron.name = "Baratron_Test"
         mock_baratron.ain_channel = 6
         mock_baratron.gauge_location = "downstream"
@@ -232,7 +232,7 @@ class TestMetadata:
             gauges=[mock_baratron],
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=True,
+            run_type="test_mode",
         )
 
         recorder.start()
@@ -257,7 +257,7 @@ class TestMetadata:
             gauges=[self.mock_gauge1],  # This is not a Baratron
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=True,
+            run_type="test_mode",
         )
 
         recorder.start()
