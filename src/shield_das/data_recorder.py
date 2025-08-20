@@ -54,7 +54,7 @@ class DataRecorder:
 
     gauges: list[PressureGauge]
     thermocouples: list[Thermocouple]
-    furnace_setpoint: float
+    furnace_setpoint: float | None
     results_dir: str
     run_type: str
     recording_interval: float
@@ -77,7 +77,7 @@ class DataRecorder:
         self,
         gauges: list[PressureGauge],
         thermocouples: list[Thermocouple],
-        furnace_setpoint: float,
+        furnace_setpoint: float | None = None,
         results_dir: str = "results",
         run_type="permeation_exp",
         recording_interval: float = 0.5,
