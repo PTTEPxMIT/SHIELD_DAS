@@ -23,8 +23,8 @@ class DataRecorder:
         gauges: List of PressureGauge instances to record data from
         thermocouples: List of Thermocouple instances to record temperature data from
         results_dir: Directory where results will be stored, defaults to "results"
-        test_mode: If True, runs in test mode without actual hardware interaction,
-            defaults to False
+        run_type: Permeation exp, leak test or test mode, defaults to "permeation_exp",
+            if in test mode, runs without actual hardware interaction
         recording_interval: Time interval (seconds) between recordings, defaults to 0.5s
         backup_interval: How often to backup data (seconds)
 
@@ -32,8 +32,8 @@ class DataRecorder:
         gauges: List of PressureGauge instances to record data from
         thermocouples: List of Thermocouple instances to record temperature data from
         results_dir: Directory where results will be stored, defaults to "results"
-        test_mode: If True, runs in test mode without actual hardware interaction,
-            defaults to False
+        run_type: Permeation exp, leak test or test mode, defaults to "permeation_exp",
+            if in test mode, runs without actual hardware interaction
         recording_interval: Time interval (in seconds) between recordings, defaults to
             0.5 seconds
         backup_interval: How often to rotate backup CSV files (seconds)
@@ -53,7 +53,7 @@ class DataRecorder:
     gauges: list[PressureGauge]
     thermocouples: list[Thermocouple]
     results_dir: str
-    test_mode: bool
+    run_type: str
     recording_interval: float
     backup_interval: float
 
@@ -75,14 +75,14 @@ class DataRecorder:
         gauges: list[PressureGauge],
         thermocouples: list[Thermocouple],
         results_dir: str = "results",
-        test_mode=False,
+        run_type="permeation_exp",
         recording_interval: float = 0.5,
         backup_interval: float = 5.0,
     ):
         self.gauges = gauges
         self.thermocouples = thermocouples
         self.results_dir = results_dir
-        self.test_mode = test_mode
+        self.run_type = run_type
         self.recording_interval = recording_interval
         self.backup_interval = backup_interval
 
@@ -105,6 +105,59 @@ class DataRecorder:
             "v3_open_time",
         ]
         self.current_valve_index = 0
+
+    @property
+    def gauges(self) -> list[PressureGauge]:
+        return self._gauges
+
+    @gauges.setter
+    def gauges(self, value: list[PressureGauge]):
+        if not isinstance(value, list) or not all(
+            isinstance(g, PressureGauge) for g in value
+        ):
+            raise ValueError("gauges must be a list of PressureGauge instances")
+        self._gauges = value
+
+    @property
+    def thermocouples(self) -> list[Thermocouple]:
+        return self._thermocouples
+
+    @thermocouples.setter
+    def thermocouples(self, value: list[Thermocouple]):
+        if not isinstance(value, list) or not all(
+            isinstance(t, Thermocouple) for t in value
+        ):
+            raise ValueError("thermocouples must be a list of Thermocouple instances")
+        self._thermocouples = value
+
+    @property
+    def results_dir(self) -> str:
+        """Directory where results will be stored."""
+        return self._results_dir
+
+    @results_dir.setter
+    def results_dir(self, value: str):
+        if not isinstance(value, str):
+            raise ValueError("results_dir must be a string")
+
+        return self._results_dir
+
+    @property
+    def run_type(self) -> str:
+        return self._run_type
+
+    @run_type.setter
+    def run_type(self, value: str):
+        if value not in ["permeation_exp", "leak_test", "test_mode"]:
+            raise ValueError(
+                "run_type must be one of 'permeation_exp', 'leak_test', or 'test_mode'"
+            )
+        self._run_type = value
+
+    @property
+    def test_mode(self) -> bool:
+        """Check if the recorder is in test mode."""
+        return self.run_type == "test_mode"
 
     def _create_results_directory(self):
         """Creates a new directory for results based on date and run number."""
@@ -185,7 +238,7 @@ class DataRecorder:
             "run_info": {
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "test_mode": self.test_mode,
+                "run_type": self.run_type,
                 "recording_interval_seconds": self.recording_interval,
                 "backup_interval_seconds": self.backup_interval,
                 "data_filename": "pressure_gauge_data.csv",
