@@ -132,7 +132,6 @@ class DataRecorder:
 
     @property
     def results_dir(self) -> str:
-        """Directory where results will be stored."""
         return self._results_dir
 
     @results_dir.setter
@@ -140,7 +139,7 @@ class DataRecorder:
         if not isinstance(value, str):
             raise ValueError("results_dir must be a string")
 
-        return self._results_dir
+        self._results_dir = value
 
     @property
     def run_type(self) -> str:
