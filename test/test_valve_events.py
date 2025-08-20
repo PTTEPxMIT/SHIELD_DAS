@@ -28,7 +28,7 @@ class TestValveEvents:
             gauges=[self.mock_gauge],
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=True,
+            run_type="test_mode",
             recording_interval=0.01,  # Much faster for testing
             backup_interval=0.1,  # Much faster for testing
         )

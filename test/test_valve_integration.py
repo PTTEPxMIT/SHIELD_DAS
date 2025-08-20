@@ -35,7 +35,7 @@ class TestValveEventIntegration:
             gauges=[self.mock_gauge],
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=True,
+            run_type="test_mode",
             recording_interval=0.01,  # Much faster for testing
             backup_interval=0.05,  # Much faster for testing
         )
@@ -89,8 +89,8 @@ class TestValveEventIntegration:
             assert "version" in metadata
             assert "date" in metadata["run_info"]
             assert "start_time" in metadata["run_info"]
-            assert "test_mode" in metadata["run_info"]
-            assert metadata["run_info"]["test_mode"] is True
+            assert "run_type" in metadata["run_info"]
+            assert metadata["run_info"]["run_type"] == "test_mode"
 
     def test_partial_valve_recording(self):
         """Test recording only some valve events."""
@@ -98,7 +98,7 @@ class TestValveEventIntegration:
             gauges=[self.mock_gauge],
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=True,
+            run_type="test_mode",
             recording_interval=0.01,  # Much faster for testing
             backup_interval=0.05,  # Much faster for testing
         )
@@ -136,7 +136,7 @@ class TestValveEventIntegration:
             gauges=[self.mock_gauge],
             thermocouples=[],
             results_dir=self.temp_dir,
-            test_mode=True,
+            run_type="test_mode",
             recording_interval=0.01,  # Much faster for testing
             backup_interval=0.05,  # Much faster for testing
         )

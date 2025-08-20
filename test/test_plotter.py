@@ -429,7 +429,7 @@ class TestDataPlotterIntegration:
             gauges=[mock_gauge1, mock_gauge2],
             thermocouples=[],
             results_dir=str(tmp_path),
-            test_mode=True,
+            run_type="test_mode",
             recording_interval=0.05,  # Fast recording for testing
         )
 
