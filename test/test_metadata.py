@@ -103,6 +103,7 @@ class TestMetadata:
         assert "date" in run_info
         assert "start_time" in run_info
         assert run_info["run_type"] == "test_mode"
+        assert "furnace_setpoint" in run_info  # Should always be present
         assert run_info["recording_interval_seconds"] == 0.5
         assert run_info["backup_interval_seconds"] == 2.0
 
@@ -273,3 +274,83 @@ class TestMetadata:
         assert len(gauges) == 1
         gauge = gauges[0]
         assert "full_scale_torr" not in gauge
+
+    def test_metadata_furnace_setpoint_provided(self):
+        """Test that furnace setpoint is correctly included when provided."""
+        furnace_temp = 850.0
+        recorder = DataRecorder(
+            gauges=[self.mock_gauge1],
+            thermocouples=[],
+            results_dir=self.temp_dir,
+            furnace_setpoint=furnace_temp,
+            run_type="test_mode",
+        )
+
+        recorder.start()
+        time.sleep(0.1)
+        recorder.stop()
+
+        metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        # Check that furnace_setpoint is present and correct
+        run_info = metadata["run_info"]
+        assert "furnace_setpoint" in run_info
+        assert run_info["furnace_setpoint"] == furnace_temp
+        assert isinstance(run_info["furnace_setpoint"], int | float)
+
+    def test_metadata_furnace_setpoint_none(self):
+        """Test that furnace setpoint is None when not provided."""
+        recorder = DataRecorder(
+            gauges=[self.mock_gauge1],
+            thermocouples=[],
+            results_dir=self.temp_dir,
+            # furnace_setpoint not provided, should default to None
+            run_type="test_mode",
+        )
+
+        recorder.start()
+        time.sleep(0.1)
+        recorder.stop()
+
+        metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        # Check that furnace_setpoint is present but None
+        run_info = metadata["run_info"]
+        assert "furnace_setpoint" in run_info
+        assert run_info["furnace_setpoint"] is None
+
+    def test_metadata_furnace_setpoint_edge_cases(self):
+        """Test furnace setpoint with various valid values."""
+        test_cases = [
+            0.0,  # Zero temperature
+            25.5,  # Room temperature
+            1200.0,  # High temperature
+            -273.15,  # Absolute zero (unlikely but valid for setpoint)
+        ]
+
+        for setpoint in test_cases:
+            recorder = DataRecorder(
+                gauges=[self.mock_gauge1],
+                thermocouples=[],
+                results_dir=self.temp_dir,
+                furnace_setpoint=setpoint,
+                run_type="test_mode",
+            )
+
+            recorder.start()
+            time.sleep(0.1)
+            recorder.stop()
+
+            metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+            with open(metadata_path) as f:
+                metadata = json.load(f)
+
+            # Verify the setpoint is correctly stored
+            run_info = metadata["run_info"]
+            assert "furnace_setpoint" in run_info
+            assert run_info["furnace_setpoint"] == setpoint
+            assert isinstance(run_info["furnace_setpoint"], int | float)
