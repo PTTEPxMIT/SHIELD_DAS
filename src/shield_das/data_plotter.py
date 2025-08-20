@@ -179,6 +179,108 @@ class DataPlotter:
                 f"Only versions '0.0' and '1.0' are supported."
             )
 
+    def _load_folder_data(self, dataset: dict):
+        """
+        Reload data for a specific dataset.
+
+        Args:
+            dataset: Dataset dictionary containing folder path and gauge lists
+
+        Returns:
+            bool: True if data was successfully loaded, False otherwise
+        """
+        import json
+        import os
+
+        data_folder = dataset["folder"]
+
+        # Check if metadata file exists
+        metadata_path = os.path.join(data_folder, "run_metadata.json")
+        if not os.path.exists(metadata_path):
+            print(
+                f"Skipping live update for {dataset['name']}: "
+                f"run_metadata.json not found in {data_folder}"
+            )
+            return False
+
+        try:
+            # Read metadata
+            with open(metadata_path) as f:
+                metadata = json.load(f)
+
+            # Import required modules
+            import numpy as np
+            from datetime import datetime
+
+            # Create gauge instances from metadata
+            gauge_instances = self.create_gauge_instances(metadata["gauges"])
+
+            # Load CSV data
+            csv_path = os.path.join(data_folder, metadata["run_info"]["data_filename"])
+            if not os.path.exists(csv_path):
+                print(f"CSV file not found: {csv_path}")
+                return False
+
+            data = np.genfromtxt(csv_path, delimiter=",", names=True, dtype=None)
+
+            # Convert datetime strings to relative time in floats
+            dt_objects = [
+                datetime.strptime(t, "%Y-%m-%d %H:%M:%S.%f")
+                for t in data["RealTimestamp"]
+            ]
+            relative_times = [(dt - dt_objects[0]).total_seconds() for dt in dt_objects]
+
+            # Update gauge instances with new data
+            for gauge_instance in gauge_instances:
+                gauge_instance.time_data = relative_times
+                gauge_instance.pressure_data = gauge_instance.voltage_to_pressure(
+                    data[f"{gauge_instance.name}_Voltage_V"]
+                )
+                # Calculate error bars
+                gauge_instance.pressure_error = gauge_instance.calculate_error(
+                    gauge_instance.pressure_data
+                )
+
+            # Update the dataset's gauge data
+            new_upstream_gauges = []
+            new_downstream_gauges = []
+
+            for gauge in gauge_instances:
+                # Only Baratron626D_Gauge is visible by default
+                is_visible = gauge.__class__.__name__ == "Baratron626D_Gauge"
+
+                gauge_dataset = {
+                    "data": {
+                        "RelativeTime": gauge.time_data,
+                        "Pressure_Torr": gauge.pressure_data,
+                        "Pressure_Error": gauge.pressure_error,
+                    },
+                    "name": gauge.name,
+                    "display_name": dataset["name"],
+                    "color": dataset["color"],
+                    "visible": is_visible,
+                    "gauge_type": gauge.__class__.__name__,
+                    "folder_dataset": dataset["name"],
+                }
+
+                if gauge.gauge_location == "upstream":
+                    new_upstream_gauges.append(gauge_dataset)
+                else:
+                    new_downstream_gauges.append(gauge_dataset)
+
+            # Update the dataset with new gauge data
+            dataset["upstream_gauges"] = new_upstream_gauges
+            dataset["downstream_gauges"] = new_downstream_gauges
+
+            return True
+
+        except Exception as e:
+            print(f"Error loading data from {data_folder}: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return False
+
     def process_csv_v0_0(self, metadata: dict, data_folder: str):
         """
         Process CSV data for metadata version 0.0 (multiple CSV files).
@@ -327,6 +429,7 @@ class DataPlotter:
             "name": dataset_name,
             "color": dataset_color,
             "folder": data_folder,
+            "live_data": False,  # Default to not live
             "upstream_gauges": [],
             "downstream_gauges": [],
         }
@@ -1160,6 +1263,13 @@ class DataPlotter:
                 # Download components for plot exports
                 dcc.Download(id="download-upstream-plot"),
                 dcc.Download(id="download-downstream-plot"),
+                # Interval component for live data updates
+                dcc.Interval(
+                    id="live-data-interval",
+                    interval=1000,  # Update every 1 second
+                    n_intervals=0,
+                    disabled=True,  # Start disabled, enable when needed
+                ),
             ],
             fluid=True,
         )
@@ -1179,7 +1289,7 @@ class DataPlotter:
                     "Dataset Name",
                     style={
                         "text-align": "left",
-                        "width": "40%",
+                        "width": "37.5%",
                         "padding": "2px",
                         "font-weight": "normal",
                     },
@@ -1188,7 +1298,16 @@ class DataPlotter:
                     "Dataset Path",
                     style={
                         "text-align": "left",
-                        "width": "40%",
+                        "width": "37.5%",
+                        "padding": "2px",
+                        "font-weight": "normal",
+                    },
+                ),
+                html.Th(
+                    "Live",
+                    style={
+                        "text-align": "center",
+                        "width": "5%",
                         "padding": "2px",
                         "font-weight": "normal",
                     },
@@ -1197,7 +1316,7 @@ class DataPlotter:
                     "Colour",
                     style={
                         "text-align": "center",
-                        "width": "10%",
+                        "width": "5%",
                         "padding": "2px",
                         "font-weight": "normal",
                     },
@@ -1234,7 +1353,7 @@ class DataPlotter:
                                 id={"type": "dataset-name", "index": i},
                                 value=dataset["name"],
                                 style={
-                                    "width": "90%",
+                                    "width": "95%",
                                     "border": "1px solid #ccc",
                                     "padding": "4px",
                                     "border-radius": "4px",
@@ -1243,7 +1362,7 @@ class DataPlotter:
                                 className="dataset-name-input",
                             )
                         ],
-                        style={"padding": "4px"},
+                        style={"padding": "2px", "border": "0.1px solid #dee2e6"},
                     ),
                     html.Td(
                         [
@@ -1273,6 +1392,24 @@ class DataPlotter:
                     ),
                     html.Td(
                         [
+                            html.Span("  "),  # Manual spacing
+                            dbc.Checkbox(
+                                id={"type": "dataset-live-data", "index": i},
+                                value=dataset.get("live_data", False),
+                                style={
+                                    "transform": "scale(1.2)",
+                                    "display": "inline-block",
+                                },
+                            ),
+                        ],
+                        style={
+                            "padding": "4px",
+                            "text-align": "left",
+                            "padding-left": "30px",
+                        },
+                    ),
+                    html.Td(
+                        [
                             dcc.Input(
                                 id={"type": "dataset-color", "index": i},
                                 type="color",
@@ -1290,7 +1427,10 @@ class DataPlotter:
                                 className="color-picker-input",
                             ),
                         ],
-                        style={"text-align": "center", "padding": "4px"},
+                        style={
+                            "text-align": "center",
+                            "padding": "4px",
+                        },
                     ),
                     html.Td(
                         [
@@ -1318,7 +1458,12 @@ class DataPlotter:
                                 title=f"Download {dataset['name']}",
                             ),
                         ],
-                        style={"text-align": "center", "padding": "4px"},
+                        style={
+                            "text-align": "left",
+                            "padding": "4px",
+                            "vertical-align": "middle",
+                            "padding-left": "15px",
+                        },
                     ),
                     html.Td(
                         [
@@ -1346,7 +1491,12 @@ class DataPlotter:
                                 title=f"Delete {dataset['name']}",
                             ),
                         ],
-                        style={"text-align": "center", "padding": "4px"},
+                        style={
+                            "text-align": "left",
+                            "padding": "4px",
+                            "vertical-align": "middle",
+                            "padding-left": "15px",
+                        },
                     ),
                 ]
             )
@@ -1916,10 +2066,115 @@ class DataPlotter:
             # Toggle the collapse state
             new_is_open = not is_open
 
-            # Change icon based on state
-            icon_class = "fas fa-minus" if new_is_open else "fas fa-plus"
+            # Update the icon class based on the new state
+            icon_class = "fas fa-chevron-down" if new_is_open else "fas fa-chevron-up"
 
-            return new_is_open, icon_class
+            return [new_is_open, icon_class]
+
+        # Callback for handling live data checkbox changes
+        @self.app.callback(
+            [
+                Output("upstream-plot", "figure", allow_duplicate=True),
+                Output("downstream-plot", "figure", allow_duplicate=True),
+                Output("live-data-interval", "disabled"),
+            ],
+            [Input({"type": "dataset-live-data", "index": ALL}, "value")],
+            [
+                State("show-gauge-names-upstream", "value"),
+                State("show-gauge-names-downstream", "value"),
+                State("show-error-bars-upstream", "value"),
+                State("show-error-bars-downstream", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def handle_live_data_toggle(
+            live_data_values,
+            show_gauge_names_upstream,
+            show_gauge_names_downstream,
+            show_error_bars_upstream,
+            show_error_bars_downstream,
+        ):
+            # Update the live_data property for each dataset
+            for i, is_live in enumerate(live_data_values):
+                if i < len(self.folder_datasets):
+                    self.folder_datasets[i]["live_data"] = bool(is_live)
+
+            # Check if any dataset has live data enabled
+            any_live_data = any(live_data_values) if live_data_values else False
+
+            # Regenerate plots with updated data
+            return [
+                self._generate_upstream_plot(
+                    show_gauge_names_upstream, show_error_bars_upstream
+                ),
+                self._generate_downstream_plot(
+                    show_gauge_names_downstream, show_error_bars_downstream
+                ),
+                not any_live_data,  # Disable interval if no live data
+            ]
+
+        # Callback for periodic live data updates
+        @self.app.callback(
+            [
+                Output("upstream-plot", "figure", allow_duplicate=True),
+                Output("downstream-plot", "figure", allow_duplicate=True),
+            ],
+            [Input("live-data-interval", "n_intervals")],
+            [
+                State("show-gauge-names-upstream", "value"),
+                State("show-gauge-names-downstream", "value"),
+                State("show-error-bars-upstream", "value"),
+                State("show-error-bars-downstream", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def update_live_data(
+            n_intervals,
+            show_gauge_names_upstream,
+            show_gauge_names_downstream,
+            show_error_bars_upstream,
+            show_error_bars_downstream,
+        ):
+            # Check if any dataset has live data enabled
+            has_live_data = any(
+                dataset.get("live_data", False) for dataset in self.folder_datasets
+            )
+
+            if not has_live_data:
+                raise PreventUpdate
+
+            # Reload data for live datasets
+            for dataset in self.folder_datasets:
+                if dataset.get("live_data", False):
+                    # Save original data in case reload fails
+                    original_upstream = dataset["upstream_gauges"].copy()
+                    original_downstream = dataset["downstream_gauges"].copy()
+
+                    # Clear existing gauge data to force reload
+                    dataset["upstream_gauges"] = []
+                    dataset["downstream_gauges"] = []
+
+                    # Reload data from the folder
+                    reload_success = self._load_folder_data(dataset)
+
+                    # Check if reload was successful
+                    if not reload_success or (
+                        len(dataset["upstream_gauges"]) == 0
+                        and len(dataset["downstream_gauges"]) == 0
+                    ):
+                        # Restore original data if reload failed or no new data
+                        dataset["upstream_gauges"] = original_upstream
+                        dataset["downstream_gauges"] = original_downstream
+
+            # Regenerate plots with updated data
+            return [
+                self._generate_upstream_plot(
+                    show_gauge_names_upstream, show_error_bars_upstream
+                ),
+                self._generate_downstream_plot(
+                    show_gauge_names_downstream, show_error_bars_downstream
+                ),
+            ]
 
     def _generate_plot(
         self,
