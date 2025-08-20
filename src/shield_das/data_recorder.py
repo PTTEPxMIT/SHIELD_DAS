@@ -22,6 +22,7 @@ class DataRecorder:
     Arguments:
         gauges: List of PressureGauge instances to record data from
         thermocouples: List of Thermocouple instances to record temperature data from
+        furnace_setpoint: Setpoint temperature for the furnace
         results_dir: Directory where results will be stored, defaults to "results"
         run_type: Permeation exp, leak test or test mode, defaults to "permeation_exp",
             if in test mode, runs without actual hardware interaction
@@ -31,6 +32,7 @@ class DataRecorder:
     Attributes:
         gauges: List of PressureGauge instances to record data from
         thermocouples: List of Thermocouple instances to record temperature data from
+        furnace_setpoint: Setpoint temperature for the furnace
         results_dir: Directory where results will be stored, defaults to "results"
         run_type: Permeation exp, leak test or test mode, defaults to "permeation_exp",
             if in test mode, runs without actual hardware interaction
@@ -52,6 +54,7 @@ class DataRecorder:
 
     gauges: list[PressureGauge]
     thermocouples: list[Thermocouple]
+    furnace_setpoint: float
     results_dir: str
     run_type: str
     recording_interval: float
@@ -74,6 +77,7 @@ class DataRecorder:
         self,
         gauges: list[PressureGauge],
         thermocouples: list[Thermocouple],
+        furnace_setpoint: float,
         results_dir: str = "results",
         run_type="permeation_exp",
         recording_interval: float = 0.5,
@@ -81,6 +85,7 @@ class DataRecorder:
     ):
         self.gauges = gauges
         self.thermocouples = thermocouples
+        self.furnace_setpoint = furnace_setpoint
         self.results_dir = results_dir
         self.run_type = run_type
         self.recording_interval = recording_interval
@@ -238,6 +243,7 @@ class DataRecorder:
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "run_type": self.run_type,
+                "furnace_setpoint": self.furnace_setpoint,
                 "recording_interval_seconds": self.recording_interval,
                 "backup_interval_seconds": self.backup_interval,
                 "data_filename": "pressure_gauge_data.csv",
