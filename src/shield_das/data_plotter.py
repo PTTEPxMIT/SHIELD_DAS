@@ -2,6 +2,7 @@ import json
 import os
 import threading
 import webbrowser
+from datetime import datetime
 
 import dash
 import dash_bootstrap_components as dbc
@@ -171,7 +172,7 @@ class DataPlotter:
         if version == "0.0":
             self.process_csv_v0_0(metadata, data_folder)
         elif version == "1.0":
-            self.process_csv_v1_0()
+            self.process_csv_v1_0(metadata, data_folder)
         else:
             raise NotImplementedError(
                 f"Unsupported metadata version: {version}. "
@@ -205,15 +206,41 @@ class DataPlotter:
         print(f"  - Upstream: {len(self.upstream_datasets)} datasets")
         print(f"  - Downstream: {len(self.downstream_datasets)} datasets")
 
-    def process_csv_v1_0(self):
+    def process_csv_v1_0(self, metadata: dict, data_folder: str):
         """
         Process CSV data for metadata version 1.0 (single CSV file).
 
         Args:
             metadata: Parsed JSON metadata dictionary
-            data_folder: Path to folder containing CSV data files
+            data_folder: Path to folder containing CSV data file
         """
-        raise NotImplementedError("Version 1.0 processing not yet implemented")
+
+        # Create gauge instances from metadata
+        self.gauge_instances = self.create_gauge_instances(metadata["gauges"])
+
+        csv_path = os.path.join(data_folder, metadata["run_info"]["data_filename"])
+        data = np.genfromtxt(csv_path, delimiter=",", names=True, dtype=None)
+
+        # convert datetime strings to relative time in floats
+        dt_objects = [
+            datetime.strptime(t, "%Y-%m-%d %H:%M:%S.%f") for t in data["RealTimestamp"]
+        ]
+        relative_times = [(dt - dt_objects[0]).total_seconds() for dt in dt_objects]
+
+        for gauge_instance in self.gauge_instances:
+            gauge_instance.time_data = relative_times
+            vectorised_v_to_p = np.vectorize(gauge_instance.voltage_to_pressure)
+            gauge_instance.pressure_data = vectorised_v_to_p(
+                data[f"{gauge_instance.name}_Voltage_V"]
+            )
+
+        # Create datasets for plotting
+        self.create_datasets_from_gauges(self.gauge_instances, data_folder)
+
+        # Log completion
+        print("\nDatasets created:")
+        print(f"  - Upstream: {len(self.upstream_datasets)} datasets")
+        print(f"  - Downstream: {len(self.downstream_datasets)} datasets")
 
     def create_gauge_instances(self, gauges_metadata: dict) -> list[PressureGauge]:
         """Create gauge instances from metadata and load CSV data.
