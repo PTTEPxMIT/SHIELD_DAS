@@ -852,19 +852,25 @@ class DataPlotter:
                                                             ),
                                                         ]
                                                     ),
-                                                    # Label Options Row for Upstream
+                                                    # Options Row for Upstream
                                                     dbc.Row(
                                                         [
                                                             dbc.Col(
                                                                 [
                                                                     html.H6(
-                                                                        "Label Options",
+                                                                        "Options",
                                                                         className="mb-2 mt-3",
                                                                     ),
                                                                     dbc.Checkbox(
                                                                         id="show-gauge-names-upstream",
                                                                         label="Show gauge names",
                                                                         value=False,
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Checkbox(
+                                                                        id="show-error-bars-upstream",
+                                                                        label="Show error bars",
+                                                                        value=True,
                                                                         className="mb-2",
                                                                     ),
                                                                     html.Hr(
@@ -1086,19 +1092,25 @@ class DataPlotter:
                                                             ),
                                                         ]
                                                     ),
-                                                    # Label Options Row for Downstream
+                                                    # Options Row for Downstream
                                                     dbc.Row(
                                                         [
                                                             dbc.Col(
                                                                 [
                                                                     html.H6(
-                                                                        "Label Options",
+                                                                        "Options",
                                                                         className="mb-2 mt-3",
                                                                     ),
                                                                     dbc.Checkbox(
                                                                         id="show-gauge-names-downstream",
                                                                         label="Show gauge names",
                                                                         value=False,
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Checkbox(
+                                                                        id="show-error-bars-downstream",
+                                                                        label="Show error bars",
+                                                                        value=True,
                                                                         className="mb-2",
                                                                     ),
                                                                     html.Hr(
@@ -1366,11 +1378,17 @@ class DataPlotter:
             [
                 State("show-gauge-names-upstream", "value"),
                 State("show-gauge-names-downstream", "value"),
+                State("show-error-bars-upstream", "value"),
+                State("show-error-bars-downstream", "value"),
             ],
             prevent_initial_call=True,
         )
         def update_dataset_names(
-            names, show_gauge_names_upstream, show_gauge_names_downstream
+            names,
+            show_gauge_names_upstream,
+            show_gauge_names_downstream,
+            show_error_bars_upstream,
+            show_error_bars_downstream,
         ):
             # Update dataset names
             for i, name in enumerate(names):
@@ -1400,8 +1418,12 @@ class DataPlotter:
             # Return updated table and plots
             return [
                 self.create_dataset_table(),
-                self._generate_upstream_plot(),
-                self._generate_downstream_plot(),
+                self._generate_upstream_plot(
+                    show_gauge_names_upstream, show_error_bars_upstream
+                ),
+                self._generate_downstream_plot(
+                    show_gauge_names_downstream, show_error_bars_downstream
+                ),
             ]
 
         # Callback for dataset color changes
@@ -1577,10 +1599,15 @@ class DataPlotter:
         # Callback for upstream show gauge names checkbox
         @self.app.callback(
             [Output("upstream-plot", "figure", allow_duplicate=True)],
-            [Input("show-gauge-names-upstream", "value")],
+            [
+                Input("show-gauge-names-upstream", "value"),
+                Input("show-error-bars-upstream", "value"),
+            ],
             prevent_initial_call=True,
         )
-        def update_upstream_label_display(show_gauge_names_upstream):
+        def update_upstream_label_display(
+            show_gauge_names_upstream, show_error_bars_upstream
+        ):
             # Update display names for upstream gauges only
             for folder_dataset in self.folder_datasets:
                 dataset_name = folder_dataset["name"]
@@ -1595,15 +1622,24 @@ class DataPlotter:
                         gauge_dataset["display_name"] = dataset_name
 
             # Return updated upstream plot
-            return [self._generate_upstream_plot()]
+            return [
+                self._generate_upstream_plot(
+                    show_gauge_names_upstream, show_error_bars_upstream
+                )
+            ]
 
         # Callback for downstream show gauge names checkbox
         @self.app.callback(
             [Output("downstream-plot", "figure", allow_duplicate=True)],
-            [Input("show-gauge-names-downstream", "value")],
+            [
+                Input("show-gauge-names-downstream", "value"),
+                Input("show-error-bars-downstream", "value"),
+            ],
             prevent_initial_call=True,
         )
-        def update_downstream_label_display(show_gauge_names_downstream):
+        def update_downstream_label_display(
+            show_gauge_names_downstream, show_error_bars_downstream
+        ):
             # Update display names for downstream gauges only
             for folder_dataset in self.folder_datasets:
                 dataset_name = folder_dataset["name"]
@@ -1618,7 +1654,11 @@ class DataPlotter:
                         gauge_dataset["display_name"] = dataset_name
 
             # Return updated downstream plot
-            return [self._generate_downstream_plot()]
+            return [
+                self._generate_downstream_plot(
+                    show_gauge_names_downstream, show_error_bars_downstream
+                )
+            ]
 
         # Callback for adding new dataset
         @self.app.callback(
@@ -1973,6 +2013,8 @@ class DataPlotter:
 
     def _generate_upstream_plot(
         self,
+        show_gauge_names=False,
+        show_error_bars=True,
         x_scale=None,
         y_scale=None,
         x_min=None,
@@ -2008,25 +2050,29 @@ class DataPlotter:
                     pressure_data = data["Pressure_Torr"]
                     pressure_error = data["Pressure_Error"]
 
-                    # Use plotly-resampler for automatic downsampling
-                    fig.add_trace(
-                        go.Scatter(
-                            x=time_data,
-                            y=pressure_data,
-                            mode="lines+markers",
-                            name=display_name,
-                            line=dict(color=color, width=1.5),
-                            marker=dict(size=3),
-                            error_y=dict(
-                                type="data",
-                                array=pressure_error,
-                                visible=True,
-                                color=color,
-                                thickness=1.5,
-                                width=3,
-                            ),
+                    # Create scatter trace
+                    scatter_kwargs = {
+                        "x": time_data,
+                        "y": pressure_data,
+                        "mode": "lines+markers",
+                        "name": display_name,
+                        "line": dict(color=color, width=1.5),
+                        "marker": dict(size=3),
+                    }
+
+                    # Add error bars if enabled
+                    if show_error_bars:
+                        scatter_kwargs["error_y"] = dict(
+                            type="data",
+                            array=pressure_error,
+                            visible=True,
+                            color=color,
+                            thickness=1.5,
+                            width=3,
                         )
-                    )
+
+                    # Use plotly-resampler for automatic downsampling
+                    fig.add_trace(go.Scatter(**scatter_kwargs))
 
         # Configure the layout
         fig.update_layout(
@@ -2069,6 +2115,8 @@ class DataPlotter:
 
     def _generate_downstream_plot(
         self,
+        show_gauge_names=False,
+        show_error_bars=True,
         x_scale=None,
         y_scale=None,
         x_min=None,
@@ -2104,25 +2152,29 @@ class DataPlotter:
                     pressure_data = data["Pressure_Torr"]
                     pressure_error = data["Pressure_Error"]
 
-                    # Use plotly-resampler for automatic downsampling
-                    fig.add_trace(
-                        go.Scatter(
-                            x=time_data,
-                            y=pressure_data,
-                            mode="lines+markers",
-                            name=display_name,
-                            line=dict(color=color, width=1.5),
-                            marker=dict(size=3),
-                            error_y=dict(
-                                type="data",
-                                array=pressure_error,
-                                visible=True,
-                                color=color,
-                                thickness=1.5,
-                                width=3,
-                            ),
+                    # Create scatter trace
+                    scatter_kwargs = {
+                        "x": time_data,
+                        "y": pressure_data,
+                        "mode": "lines+markers",
+                        "name": display_name,
+                        "line": dict(color=color, width=1.5),
+                        "marker": dict(size=3),
+                    }
+
+                    # Add error bars if enabled
+                    if show_error_bars:
+                        scatter_kwargs["error_y"] = dict(
+                            type="data",
+                            array=pressure_error,
+                            visible=True,
+                            color=color,
+                            thickness=1.5,
+                            width=3,
                         )
-                    )
+
+                    # Use plotly-resampler for automatic downsampling
+                    fig.add_trace(go.Scatter(**scatter_kwargs))
 
         # Configure the layout
         fig.update_layout(
@@ -2163,7 +2215,9 @@ class DataPlotter:
 
         return fig
 
-    def _generate_upstream_plot_full_data(self, show_gauge_names=False):
+    def _generate_upstream_plot_full_data(
+        self, show_gauge_names=False, show_error_bars=True
+    ):
         """Generate the upstream pressure plot with FULL DATA (no resampling)"""
         # Use regular plotly Figure WITHOUT FigureResampler
         fig = go.Figure()
@@ -2191,25 +2245,29 @@ class DataPlotter:
                     pressure_data = data["Pressure_Torr"]
                     pressure_error = data["Pressure_Error"]
 
-                    # Add ALL data points (no resampling)
-                    fig.add_trace(
-                        go.Scatter(
-                            x=time_data,
-                            y=pressure_data,
-                            mode="lines+markers",
-                            name=display_name,
-                            line=dict(color=color, width=1.5),
-                            marker=dict(size=3),
-                            error_y=dict(
-                                type="data",
-                                array=pressure_error,
-                                visible=True,
-                                color=color,
-                                thickness=1.5,
-                                width=3,
-                            ),
+                    # Create scatter trace
+                    scatter_kwargs = {
+                        "x": time_data,
+                        "y": pressure_data,
+                        "mode": "lines+markers",
+                        "name": display_name,
+                        "line": dict(color=color, width=1.5),
+                        "marker": dict(size=3),
+                    }
+
+                    # Add error bars if enabled
+                    if show_error_bars:
+                        scatter_kwargs["error_y"] = dict(
+                            type="data",
+                            array=pressure_error,
+                            visible=True,
+                            color=color,
+                            thickness=1.5,
+                            width=3,
                         )
-                    )
+
+                    # Add ALL data points (no resampling)
+                    fig.add_trace(go.Scatter(**scatter_kwargs))
 
         # Configure the layout
         fig.update_layout(
@@ -2231,7 +2289,9 @@ class DataPlotter:
 
         return fig
 
-    def _generate_downstream_plot_full_data(self, show_gauge_names=False):
+    def _generate_downstream_plot_full_data(
+        self, show_gauge_names=False, show_error_bars=True
+    ):
         """Generate the downstream pressure plot with FULL DATA (no resampling)"""
         # Use regular plotly Figure WITHOUT FigureResampler
         fig = go.Figure()
@@ -2259,25 +2319,29 @@ class DataPlotter:
                     pressure_data = data["Pressure_Torr"]
                     pressure_error = data["Pressure_Error"]
 
-                    # Add ALL data points (no resampling)
-                    fig.add_trace(
-                        go.Scatter(
-                            x=time_data,
-                            y=pressure_data,
-                            mode="lines+markers",
-                            name=display_name,
-                            line=dict(color=color, width=1.5),
-                            marker=dict(size=3),
-                            error_y=dict(
-                                type="data",
-                                array=pressure_error,
-                                visible=True,
-                                color=color,
-                                thickness=1.5,
-                                width=3,
-                            ),
+                    # Create scatter trace
+                    scatter_kwargs = {
+                        "x": time_data,
+                        "y": pressure_data,
+                        "mode": "lines+markers",
+                        "name": display_name,
+                        "line": dict(color=color, width=1.5),
+                        "marker": dict(size=3),
+                    }
+
+                    # Add error bars if enabled
+                    if show_error_bars:
+                        scatter_kwargs["error_y"] = dict(
+                            type="data",
+                            array=pressure_error,
+                            visible=True,
+                            color=color,
+                            thickness=1.5,
+                            width=3,
                         )
-                    )
+
+                    # Add ALL data points (no resampling)
+                    fig.add_trace(go.Scatter(**scatter_kwargs))
 
         # Configure the layout
         fig.update_layout(
