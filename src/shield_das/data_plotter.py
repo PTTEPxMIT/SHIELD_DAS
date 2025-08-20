@@ -198,6 +198,11 @@ class DataPlotter:
             gauge_instance.time_data = data["RelativeTime"]
             gauge_instance.pressure_data = data["Pressure_Torr"]
 
+            # Calculate error bars
+            gauge_instance.pressure_error = gauge_instance.calculate_error(
+                gauge_instance.pressure_data
+            )
+
         # Create datasets for plotting
         self.create_datasets_from_gauges(self.gauge_instances, data_folder)
 
@@ -229,9 +234,13 @@ class DataPlotter:
 
         for gauge_instance in self.gauge_instances:
             gauge_instance.time_data = relative_times
-            vectorised_v_to_p = np.vectorize(gauge_instance.voltage_to_pressure)
-            gauge_instance.pressure_data = vectorised_v_to_p(
+            gauge_instance.pressure_data = gauge_instance.voltage_to_pressure(
                 data[f"{gauge_instance.name}_Voltage_V"]
+            )
+
+            # Calculate error bars
+            gauge_instance.pressure_error = gauge_instance.calculate_error(
+                gauge_instance.pressure_data
             )
 
         # Create datasets for plotting
@@ -331,6 +340,7 @@ class DataPlotter:
                 "data": {
                     "RelativeTime": gauge.time_data,
                     "Pressure_Torr": gauge.pressure_data,
+                    "Pressure_Error": getattr(gauge, "pressure_error", None),
                 },
                 "name": gauge.name,
                 "display_name": dataset_name,
@@ -1996,18 +2006,31 @@ class DataPlotter:
                     # Extract data directly from our structure
                     time_data = data["RelativeTime"]
                     pressure_data = data["Pressure_Torr"]
+                    pressure_error = data.get("Pressure_Error")
+
+                    # Create scatter trace with error bars if available
+                    scatter_kwargs = {
+                        "x": time_data,
+                        "y": pressure_data,
+                        "mode": "lines+markers",
+                        "name": display_name,
+                        "line": dict(color=color, width=1.5),
+                        "marker": dict(size=3),
+                    }
+
+                    # Add error bars if available
+                    if pressure_error is not None:
+                        scatter_kwargs["error_y"] = dict(
+                            type="data",
+                            array=pressure_error,
+                            visible=True,
+                            color=color,
+                            thickness=1.5,
+                            width=3,
+                        )
 
                     # Use plotly-resampler for automatic downsampling
-                    fig.add_trace(
-                        go.Scatter(
-                            x=time_data,
-                            y=pressure_data,
-                            mode="lines+markers",
-                            name=display_name,
-                            line=dict(color=color, width=1.5),
-                            marker=dict(size=3),
-                        )
-                    )
+                    fig.add_trace(go.Scatter(**scatter_kwargs))
 
         # Configure the layout
         fig.update_layout(
@@ -2083,18 +2106,31 @@ class DataPlotter:
                     # Extract data directly from our structure
                     time_data = data["RelativeTime"]
                     pressure_data = data["Pressure_Torr"]
+                    pressure_error = data.get("Pressure_Error")
+
+                    # Create scatter trace with error bars if available
+                    scatter_kwargs = {
+                        "x": time_data,
+                        "y": pressure_data,
+                        "mode": "lines+markers",
+                        "name": display_name,
+                        "line": dict(color=color, width=1.5),
+                        "marker": dict(size=3),
+                    }
+
+                    # Add error bars if available
+                    if pressure_error is not None:
+                        scatter_kwargs["error_y"] = dict(
+                            type="data",
+                            array=pressure_error,
+                            visible=True,
+                            color=color,
+                            thickness=1.5,
+                            width=3,
+                        )
 
                     # Use plotly-resampler for automatic downsampling
-                    fig.add_trace(
-                        go.Scatter(
-                            x=time_data,
-                            y=pressure_data,
-                            mode="lines+markers",
-                            name=display_name,
-                            line=dict(color=color, width=1.5),
-                            marker=dict(size=3),
-                        )
-                    )
+                    fig.add_trace(go.Scatter(**scatter_kwargs))
 
         # Configure the layout
         fig.update_layout(
@@ -2161,18 +2197,31 @@ class DataPlotter:
                     # Extract data directly from our structure
                     time_data = data["RelativeTime"]
                     pressure_data = data["Pressure_Torr"]
+                    pressure_error = data.get("Pressure_Error")
+
+                    # Create scatter trace with error bars if available
+                    scatter_kwargs = {
+                        "x": time_data,
+                        "y": pressure_data,
+                        "mode": "lines+markers",
+                        "name": display_name,
+                        "line": dict(color=color, width=1.5),
+                        "marker": dict(size=3),
+                    }
+
+                    # Add error bars if available
+                    if pressure_error is not None:
+                        scatter_kwargs["error_y"] = dict(
+                            type="data",
+                            array=pressure_error,
+                            visible=True,
+                            color=color,
+                            thickness=1.5,
+                            width=3,
+                        )
 
                     # Add ALL data points (no resampling)
-                    fig.add_trace(
-                        go.Scatter(
-                            x=time_data,
-                            y=pressure_data,
-                            mode="lines+markers",
-                            name=display_name,
-                            line=dict(color=color, width=1.5),
-                            marker=dict(size=3),
-                        )
-                    )
+                    fig.add_trace(go.Scatter(**scatter_kwargs))
 
         # Configure the layout
         fig.update_layout(
@@ -2220,18 +2269,31 @@ class DataPlotter:
                     # Extract data directly from our structure
                     time_data = data["RelativeTime"]
                     pressure_data = data["Pressure_Torr"]
+                    pressure_error = data.get("Pressure_Error")
+
+                    # Create scatter trace with error bars if available
+                    scatter_kwargs = {
+                        "x": time_data,
+                        "y": pressure_data,
+                        "mode": "lines+markers",
+                        "name": display_name,
+                        "line": dict(color=color, width=1.5),
+                        "marker": dict(size=3),
+                    }
+
+                    # Add error bars if available
+                    if pressure_error is not None:
+                        scatter_kwargs["error_y"] = dict(
+                            type="data",
+                            array=pressure_error,
+                            visible=True,
+                            color=color,
+                            thickness=1.5,
+                            width=3,
+                        )
 
                     # Add ALL data points (no resampling)
-                    fig.add_trace(
-                        go.Scatter(
-                            x=time_data,
-                            y=pressure_data,
-                            mode="lines+markers",
-                            name=display_name,
-                            line=dict(color=color, width=1.5),
-                            marker=dict(size=3),
-                        )
-                    )
+                    fig.add_trace(go.Scatter(**scatter_kwargs))
 
         # Configure the layout
         fig.update_layout(
