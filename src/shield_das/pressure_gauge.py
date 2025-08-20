@@ -1,4 +1,5 @@
 import numpy as np
+import numpy.typing as npt
 
 
 class PressureGauge:
@@ -111,7 +112,7 @@ class WGM701_Gauge(PressureGauge):
     ):
         super().__init__(name, ain_channel, gauge_location)
 
-    def voltage_to_pressure(self, voltage: float) -> float:
+    def voltage_to_pressure(self, voltage: npt.NDArray) -> npt.NDArray:
         """
         Converts the voltage reading from a Instrutech WGM701 pressure gauge
         to pressure in Torr.
@@ -125,11 +126,9 @@ class WGM701_Gauge(PressureGauge):
         # Convert voltage to pressure in Torr
         pressure = 10 ** ((voltage - 5.5) / 0.5)
 
-        # Ensure pressure is within the valid range
-        if pressure > 760:
-            pressure = 760
-        elif pressure < 7.6e-10:
-            pressure = 0
+        # Apply valid range: set very small values to 0, and cap at 760 Torr
+        pressure = np.where(pressure < 7.6e-10, 0, pressure)
+        pressure = np.clip(pressure, 0, 760)
 
         return pressure
 
@@ -144,12 +143,14 @@ class WGM701_Gauge(PressureGauge):
             float: The error in the pressure reading
         """
 
-        if 7.6e-09 < pressure_value < 7.6e-03:
-            error = pressure_value * 0.3
-        elif 7.6e-03 < pressure_value < 75:
-            error = pressure_value * 0.15
-        else:
-            error = pressure_value * 0.5
+        p = np.asarray(pressure_value, dtype=float)
+
+        # Initialise with default error (0.5 * pressure)
+        error = p * 0.5
+
+        # Apply conditions with np.where
+        error = np.where((7.6e-09 < p) & (p < 7.6e-03), p * 0.3, error)
+        error = np.where((7.6e-03 < p) & (p < 75), p * 0.15, error)
 
         return error
 
@@ -167,7 +168,7 @@ class CVM211_Gauge(PressureGauge):
     ):
         super().__init__(name, ain_channel, gauge_location)
 
-    def voltage_to_pressure(self, voltage: float) -> float:
+    def voltage_to_pressure(self, voltage: npt.NDArray) -> npt.NDArray:
         """
         Converts the voltage reading from a Instrutech WGM701 pressure gauge
         to pressure in Torr.
@@ -181,11 +182,9 @@ class CVM211_Gauge(PressureGauge):
         # Convert voltage to pressure in Torr
         pressure = 10 ** (voltage - 5)
 
-        # Ensure pressure is within the valid range
-        if pressure > 1000:
-            pressure = 1000
-        elif pressure < 1e-04:
-            pressure = 0
+        # Apply valid range: set very small values to 0, and cap at 1000 Torr
+        pressure = np.where(pressure < 1e-04, 0, pressure)
+        pressure = np.clip(pressure, 0, 1000)
 
         return pressure
 
@@ -193,19 +192,21 @@ class CVM211_Gauge(PressureGauge):
         """
         Calculate the error in the pressure reading.
 
-        Args:`
+        Args:
             pressure_value: The pressure reading in Torr
 
         Returns:
             float: The error in the pressure reading
         """
 
-        if 1e-04 < pressure_value < 1e-03:
-            error = 0.1e-03
-        elif 1e-03 < pressure_value < 400:
-            error = pressure_value * 0.1
-        else:
-            error = pressure_value * 0.025
+        p = np.asarray(pressure_value, dtype=float)
+
+        # Initialize with default error (2.5% of pressure)
+        error = p * 0.025
+
+        # Apply conditions with np.where
+        error = np.where((1e-04 < p) & (p < 1e-03), 0.1e-03, error)
+        error = np.where((1e-03 < p) & (p < 400), p * 0.1, error)
 
         return error
 
@@ -253,7 +254,7 @@ class Baratron626D_Gauge(PressureGauge):
             )
         self._full_scale_Torr = val
 
-    def voltage_to_pressure(self, voltage: float) -> float:
+    def voltage_to_pressure(self, voltage: npt.NDArray) -> npt.NDArray:
         """
         Converts the voltage reading from a Instrutech WGM701 pressure gauge
         to pressure in Torr.
@@ -267,18 +268,13 @@ class Baratron626D_Gauge(PressureGauge):
         # Convert voltage to pressure in Torr
         pressure = voltage * (self.full_scale_Torr / 10.0)
 
-        # Ensure pressure is within the valid range
+        # Apply valid range based on full scale
         if self.full_scale_Torr == 1000:
-            if pressure > 1000:
-                pressure = 1000
-            elif pressure < 0.5:
-                pressure = 0
-
+            pressure = np.where(pressure < 0.5, 0, pressure)
+            pressure = np.clip(pressure, 0, 1000)
         elif self.full_scale_Torr == 1:
-            if pressure > 1:
-                pressure = 1
-            elif pressure < 0.0005:
-                pressure = 0
+            pressure = np.where(pressure < 0.0005, 0, pressure)
+            pressure = np.clip(pressure, 0, 1)
 
         return pressure
 
@@ -293,9 +289,12 @@ class Baratron626D_Gauge(PressureGauge):
             float: The error in the pressure reading
         """
 
-        if 1 < pressure_value:
-            error = pressure_value * 0.0025
-        else:
-            error = pressure_value * 0.005
+        p = np.asarray(pressure_value, dtype=float)
+
+        # Initialize with default error (0.5% of pressure)
+        error = p * 0.005
+
+        # Apply conditions with np.where
+        error = np.where(p > 1, p * 0.0025, error)
 
         return error
