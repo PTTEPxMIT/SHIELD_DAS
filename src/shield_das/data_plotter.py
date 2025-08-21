@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import threading
 import webbrowser
@@ -7,18 +8,14 @@ from datetime import datetime
 import dash
 import dash_bootstrap_components as dbc
 import numpy as np
+import numpy.typing as npt
 import plotly.graph_objects as go
 from dash import ALL, dcc, html
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 from plotly_resampler import FigureResampler
 
-from .pressure_gauge import (
-    Baratron626D_Gauge,
-    CVM211_Gauge,
-    PressureGauge,
-    WGM701_Gauge,
-)
+from .helpers import calculate_error, voltage_to_pressure
 
 
 class DataPlotter:
@@ -47,6 +44,7 @@ class DataPlotter:
     port: int
 
     app: dash.Dash
+    datasets = dict
     upstream_datasets: list[dict]
     downstream_datasets: list[dict]
     folder_datasets: list[dict]
@@ -72,6 +70,8 @@ class DataPlotter:
         # Store folder-level datasets for management
         # Each folder = 1 dataset with upstream/downstream gauges
         self.folder_datasets = []
+
+        self.datasets = {}
 
         # Store FigureResampler instances for callback registration
         self.figure_resamplers = {}
@@ -142,45 +142,55 @@ class DataPlotter:
 
         self._dataset_names = value
 
-    def load_data(self):
+    def load_data(self, dataset_path: str, dataset_name: str):
         """
-        Load and process data from all specified data paths.
+        Load and process data from all specified data path.
         """
-        print(f"Loading data from {len(self.dataset_paths)} dataset(s)")
 
-        for i, dataset_path in enumerate(self.dataset_paths):
-            print(
-                f"\n--- Processing dataset {i + 1}/{len(self.dataset_paths)}: "
-                f"{dataset_path} ---"
-            )
+        # Read metadata file
+        metadata_path = os.path.join(dataset_path, "run_metadata.json")
+        with open(metadata_path) as f:
+            metadata = json.load(f)
 
-            # Read metadata file
-            metadata_path = os.path.join(dataset_path, "run_metadata.json")
-            with open(metadata_path) as f:
-                metadata = json.load(f)
+        # Process CSV data based on version
+        time_data, upstream_data, downstream_data = self.process_csv_data(
+            metadata, dataset_path
+        )
 
-            # Process CSV data based on version
-            self.process_csv_data(metadata, dataset_path)
+        # Create datasets for plotting
+        self.create_dataset(
+            dataset_path, dataset_name, time_data, upstream_data, downstream_data
+        )
 
-    def process_csv_data(self, metadata: dict, data_folder: str):
+    def process_csv_data(
+        self, metadata: dict, data_folder: str
+    ) -> tuple[npt.NDArray, dict, dict]:
         """
         Process CSV data based on metadata version.
 
         Args:
             metadata: Parsed JSON metadata dictionary
             data_folder: Path to folder containing CSV data files
+            gauge_instances: List of gauge instances to populate with data
         """
+
         version = metadata.get("version")
 
         if version == "0.0":
-            self.process_csv_v0_0(metadata, data_folder)
+            time_data, upstream_data, downstream_data = self.process_csv_v0_0(
+                metadata, data_folder
+            )
         elif version == "1.0":
-            self.process_csv_v1_0(metadata, data_folder)
+            time_data, upstream_data, downstream_data = self.process_csv_v1_0(
+                metadata, data_folder
+            )
         else:
             raise NotImplementedError(
                 f"Unsupported metadata version: {version}. "
                 f"Only versions '0.0' and '1.0' are supported."
             )
+
+        return time_data, upstream_data, downstream_data
 
     def _load_folder_data(self, dataset: dict):
         """
@@ -284,7 +294,9 @@ class DataPlotter:
             traceback.print_exc()
             return False
 
-    def process_csv_v0_0(self, metadata: dict, data_folder: str):
+    def process_csv_v0_0(
+        self, metadata: dict, data_folder: str
+    ) -> tuple[npt.NDArray, dict, dict]:
         """
         Process CSV data for metadata version 0.0 (multiple CSV files).
 
@@ -293,30 +305,40 @@ class DataPlotter:
             data_folder: Path to folder containing CSV data files
         """
 
-        # Create gauge instances from metadata
-        self.gauge_instances = self.create_gauge_instances(metadata["gauges"])
+        # just use first gauge for time data
+        csv_path = os.path.join(data_folder, metadata["gauges"][0]["filename"])
+        data = np.genfromtxt(csv_path, delimiter=",", names=True)
+        time_data = data["RelativeTime"]
 
-        # Load data for each gauge
-        for gauge_instance, gauge in zip(self.gauge_instances, metadata["gauges"]):
-            csv_path = os.path.join(data_folder, gauge["filename"])
-            data = np.genfromtxt(csv_path, delimiter=",", names=True)
-            gauge_instance.time_data = data["RelativeTime"]
-            gauge_instance.pressure_data = data["Pressure_Torr"]
+        # Load upstream and downstream data for each gauge
+        for gauge in metadata["gauges"]:
+            if gauge["type"] == "Baratron626D_Gauge":
+                if gauge["gauge_location"] == "upstream":
+                    csv_path = os.path.join(data_folder, gauge["filename"])
+                    data = np.genfromtxt(csv_path, delimiter=",", names=True)
+                    upstream_pressure_data = data["Pressure_Torr"]
+                if gauge["gauge_location"] == "downstream":
+                    csv_path = os.path.join(data_folder, gauge["filename"])
+                    data = np.genfromtxt(csv_path, delimiter=",", names=True)
+                    downstream_pressure_data = data["Pressure_Torr"]
 
-            # Calculate error bars
-            gauge_instance.pressure_error = gauge_instance.calculate_error(
-                gauge_instance.pressure_data
-            )
+        upstream_error = calculate_error(upstream_pressure_data)
+        downstream_error = calculate_error(downstream_pressure_data)
 
-        # Create datasets for plotting
-        self.create_datasets_from_gauges(self.gauge_instances, data_folder)
+        upstream_data = {
+            "pressure_data": upstream_pressure_data,
+            "error_data": upstream_error,
+        }
+        downstream_data = {
+            "pressure_data": downstream_pressure_data,
+            "error_data": downstream_error,
+        }
 
-        # Log completion
-        print("\nDatasets created:")
-        print(f"  - Upstream: {len(self.upstream_datasets)} datasets")
-        print(f"  - Downstream: {len(self.downstream_datasets)} datasets")
+        return time_data, upstream_data, downstream_data
 
-    def process_csv_v1_0(self, metadata: dict, data_folder: str):
+    def process_csv_v1_0(
+        self, metadata: dict, data_folder: str
+    ) -> tuple[npt.NDArray, dict, dict]:
         """
         Process CSV data for metadata version 1.0 (single CSV file).
 
@@ -325,91 +347,37 @@ class DataPlotter:
             data_folder: Path to folder containing CSV data file
         """
 
-        # Create gauge instances from metadata
-        self.gauge_instances = self.create_gauge_instances(metadata["gauges"])
+        # csv_path = os.path.join(data_folder, metadata["run_info"]["data_filename"])
+        # data = np.genfromtxt(csv_path, delimiter=",", names=True, dtype=None)
 
-        csv_path = os.path.join(data_folder, metadata["run_info"]["data_filename"])
-        data = np.genfromtxt(csv_path, delimiter=",", names=True, dtype=None)
+        # # convert datetime strings to relative time in floats
+        # dt_objects = [
+        #     datetime.strptime(t, "%Y-%m-%d %H:%M:%S.%f") for t in data["RealTimestamp"]
+        # ]
+        # relative_times = [(dt - dt_objects[0]).total_seconds() for dt in dt_objects]
+        # print(relative_times)
+        # exit()
 
-        # convert datetime strings to relative time in floats
-        dt_objects = [
-            datetime.strptime(t, "%Y-%m-%d %H:%M:%S.%f") for t in data["RealTimestamp"]
-        ]
-        relative_times = [(dt - dt_objects[0]).total_seconds() for dt in dt_objects]
+        # for gauge_instance in gauge_instances:
+        #     gauge_instance.time_data = relative_times
+        #     gauge_instance.pressure_data = gauge_instance.voltage_to_pressure(
+        #         data[f"{gauge_instance.name}_Voltage_V"]
+        #     )
 
-        for gauge_instance in self.gauge_instances:
-            gauge_instance.time_data = relative_times
-            gauge_instance.pressure_data = gauge_instance.voltage_to_pressure(
-                data[f"{gauge_instance.name}_Voltage_V"]
-            )
+        #     # Calculate error bars
+        #     gauge_instance.pressure_error = gauge_instance.calculate_error(
+        #         gauge_instance.pressure_data
+        #     )
 
-            # Calculate error bars
-            gauge_instance.pressure_error = gauge_instance.calculate_error(
-                gauge_instance.pressure_data
-            )
+        return None, None, None
 
-        # Create datasets for plotting
-        self.create_datasets_from_gauges(self.gauge_instances, data_folder)
-
-        # Log completion
-        print("\nDatasets created:")
-        print(f"  - Upstream: {len(self.upstream_datasets)} datasets")
-        print(f"  - Downstream: {len(self.downstream_datasets)} datasets")
-
-    def create_gauge_instances(self, gauges_metadata: dict) -> list[PressureGauge]:
-        """Create gauge instances from metadata and load CSV data.
-
-        Args:
-            gauges_metadata: Metadata for gauges
-
-        returns:
-            List of PressureGauge instances
-        """
-        gauge_instances = []
-
-        # Mapping of gauge types to classes
-        gauge_type_map = {
-            "WGM701_Gauge": WGM701_Gauge,
-            "CVM211_Gauge": CVM211_Gauge,
-            "Baratron626D_Gauge": Baratron626D_Gauge,
-        }
-
-        for gauge_data in gauges_metadata:
-            gauge_type = gauge_data.get("type")
-
-            if gauge_type not in gauge_type_map:
-                raise ValueError(f"Unknown gauge type: {gauge_type}")
-
-            gauge_class = gauge_type_map[gauge_type]
-
-            # Extract common parameters
-            name = gauge_data.get("name")
-            ain_channel = gauge_data.get("ain_channel")
-            gauge_location = gauge_data.get("gauge_location")
-
-            # Create instance based on gauge type
-            if gauge_type == "Baratron626D_Gauge":
-                full_scale_torr = gauge_data.get("full_scale_torr")
-                gauge_instance = gauge_class(
-                    ain_channel=ain_channel,
-                    name=name,
-                    gauge_location=gauge_location,
-                    full_scale_Torr=full_scale_torr,
-                )
-            else:
-                # WGM701 and CVM211 use the same constructor parameters
-                gauge_instance = gauge_class(
-                    name=name, ain_channel=ain_channel, gauge_location=gauge_location
-                )
-
-            gauge_instances.append(gauge_instance)
-
-        return gauge_instances
-
-    def create_datasets_from_gauges(
+    def create_dataset(
         self,
-        gauges: list[PressureGauge],
-        data_folder: str,
+        dataset_path: str,
+        dataset_name: str,
+        time_data: npt.NDArray,
+        upstream_data: dict,
+        downstream_data: dict,
     ):
         """
         Create dataset dictionaries from gauge instances for plotting.
@@ -419,56 +387,22 @@ class DataPlotter:
             downstream_gauges: List of gauge instances with downstream location
             data_folder: Path to folder containing the data
         """
-        # Create a single folder-level dataset
-        # Use custom dataset name if provided, otherwise use default naming
-        dataset_index = len(self.folder_datasets)
-        if self.dataset_names and dataset_index < len(self.dataset_names):
-            dataset_name = self.dataset_names[dataset_index]
-        else:
-            dataset_name = f"Dataset_{dataset_index + 1}"
-        dataset_color = self.get_next_color(len(self.folder_datasets))
 
-        folder_dataset = {
-            "name": dataset_name,
-            "color": dataset_color,
-            "folder": data_folder,
-            "live_data": False,  # Default to not live
-            "upstream_gauges": [],
-            "downstream_gauges": [],
+        dataset_color = self.get_next_color(len(self.datasets))
+
+        print(f"Creating dataset '{dataset_name}' with color {dataset_color}")
+
+        dataset = {
+            "colour": dataset_color,
+            "dataset_path": dataset_path,
+            "live_data": False,
+            "time_data": time_data,
+            "upstream_data": upstream_data,
+            "downstream_data": downstream_data,
         }
 
-        # Create upstream datasets with folder dataset reference
-        for gauge in gauges:
-            # Only Baratron626D_Gauge is visible by default
-            is_visible = gauge.__class__.__name__ == "Baratron626D_Gauge"
-
-            dataset = {
-                "data": {
-                    "RelativeTime": gauge.time_data,
-                    "Pressure_Torr": gauge.pressure_data,
-                    "Pressure_Error": gauge.pressure_error,
-                },
-                "name": gauge.name,
-                "display_name": dataset_name,
-                "color": dataset_color,
-                "visible": is_visible,
-                "gauge_type": gauge.__class__.__name__,
-                "folder_dataset": dataset_name,
-            }
-            if gauge.gauge_location == "upstream":
-                self.upstream_datasets.append(dataset)
-                folder_dataset["upstream_gauges"].append(dataset)
-            else:
-                self.downstream_datasets.append(dataset)
-                folder_dataset["downstream_gauges"].append(dataset)
-
-            print(
-                f"Added to {gauge.gauge_location} dataset: {dataset['display_name']}"
-                f"(visible: {is_visible})"
-            )
-
         # Add the folder dataset to our list
-        self.folder_datasets.append(folder_dataset)
+        self.datasets[f"{dataset_name}"] = dataset
 
     def get_next_color(self, index: int) -> str:
         """
@@ -1837,8 +1771,6 @@ class DataPlotter:
                 ]
 
             # Check if path exists and contains valid data
-            import os
-
             if not os.path.exists(new_path):
                 return [
                     self.create_dataset_table(),
@@ -1853,36 +1785,21 @@ class DataPlotter:
                     ),
                 ]
 
-            try:
-                # Try to load the dataset
-                self.load_data(new_path)
+            # Try to load the dataset
+            self.load_data(new_path)
 
-                return [
-                    self.create_dataset_table(),
-                    self._generate_upstream_plot(),
-                    self._generate_downstream_plot(),
-                    "",  # Clear the input field
-                    dbc.Alert(
-                        f"Dataset added successfully from {new_path}",
-                        color="success",
-                        dismissable=True,
-                        duration=3000,
-                    ),
-                ]
-
-            except Exception as e:
-                return [
-                    self.create_dataset_table(),
-                    self._generate_upstream_plot(),
-                    self._generate_downstream_plot(),
-                    new_path,
-                    dbc.Alert(
-                        f"Error loading dataset: {e!s}",
-                        color="danger",
-                        dismissable=True,
-                        duration=5000,
-                    ),
-                ]
+            return [
+                self.create_dataset_table(),
+                self._generate_upstream_plot(),
+                self._generate_downstream_plot(),
+                "",  # Clear the input field
+                dbc.Alert(
+                    f"Dataset added successfully from {new_path}",
+                    color="success",
+                    dismissable=True,
+                    duration=3000,
+                ),
+            ]
 
         # Callback for deleting datasets
         @self.app.callback(
@@ -2228,99 +2145,8 @@ class DataPlotter:
                     return fig_resampler.construct_update_data_patch(relayoutData)
             return dash.no_update
 
-    def _generate_plot(
-        self,
-        x_scale=None,
-        y_scale=None,
-        x_min=None,
-        x_max=None,
-        y_min=None,
-        y_max=None,
-    ):
-        """Generate the plot based on current dataset state and settings"""
-        # Use FigureResampler with parameters to hide resampling annotations
-        fig = FigureResampler(
-            go.Figure(),
-            show_dash_kwargs={"mode": "disabled"},
-            show_mean_aggregation_size=False,
-            verbose=False,
-        )
-
-        # Iterate through folder datasets and all their gauges
-        for folder_dataset in self.folder_datasets:
-            all_gauges = (
-                folder_dataset["upstream_gauges"] + folder_dataset["downstream_gauges"]
-            )
-            for dataset in all_gauges:
-                # Skip invisible datasets
-                if not dataset.get("visible", True):
-                    continue
-
-                data = dataset["data"]
-                display_name = dataset.get(
-                    "display_name", dataset.get("name", "Unknown Dataset")
-                )
-                color = dataset["color"]
-
-                if len(data.get("RelativeTime", [])) > 0:
-                    # Extract data directly from our structure
-                    time_data = np.ascontiguousarray(data["RelativeTime"])
-                    pressure_data = np.ascontiguousarray(data["Pressure_Torr"])
-
-                    # Use plotly-resampler for automatic downsampling
-                    fig.add_trace(
-                        go.Scatter(
-                            mode="lines+markers",
-                            name=display_name,
-                            line=dict(color=color, width=1.5),
-                            marker=dict(size=3),
-                        ),
-                        hf_x=time_data,
-                        hf_y=pressure_data,
-                    )
-
-        # Configure the layout
-        fig.update_layout(
-            height=600,
-            xaxis_title="Relative Time (s)",
-            yaxis_title="Pressure (Torr)",
-            template="plotly_white",
-            margin=dict(l=60, r=30, t=40, b=60),
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
-            ),
-        )
-
-        # Apply axis scaling
-        x_axis_type = x_scale if x_scale else "linear"
-        y_axis_type = y_scale if y_scale else "linear"
-
-        fig.update_xaxes(type=x_axis_type)
-        fig.update_yaxes(type=y_axis_type)
-
-        # Apply axis ranges if specified
-        if x_min is not None and x_max is not None:
-            fig.update_xaxes(range=[x_min, x_max])
-
-        if y_min is not None and y_max is not None:
-            if y_axis_type == "log":
-                # For log scale, use log10 of the values
-                import math
-
-                fig.update_yaxes(range=[math.log10(y_min), math.log10(y_max)])
-            else:
-                fig.update_yaxes(range=[y_min, y_max])
-
-        # Clean up trace names to remove [R] annotations
-        for trace in fig.data:
-            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
-                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
-
-        return fig
-
     def _generate_upstream_plot(
         self,
-        show_gauge_names=False,
         show_error_bars=True,
         x_scale=None,
         y_scale=None,
@@ -2341,53 +2167,49 @@ class DataPlotter:
         # Store the FigureResampler instance
         self.figure_resamplers["upstream-plot"] = fig
 
-        # Iterate through folder datasets and their upstream gauges
-        for folder_dataset in self.folder_datasets:
-            for dataset in folder_dataset["upstream_gauges"]:
-                # Skip invisible datasets
-                if not dataset.get("visible", True):
-                    continue
+        # Iterate through datasets and obtain the upstream data
+        for dataset_name in self.datasets.keys():
+            time_data = self.datasets[f"{dataset_name}"]["time_data"]
+            time_data = np.ascontiguousarray(time_data)
+            pressure_data = self.datasets[f"{dataset_name}"]["upstream_data"][
+                "pressure_data"
+            ]
+            pressure_data = np.ascontiguousarray(pressure_data)
+            pressure_error = self.datasets[f"{dataset_name}"]["upstream_data"][
+                "error_data"
+            ]
+            pressure_error = np.ascontiguousarray(pressure_error)
 
-                data = dataset["data"]
-                display_name = dataset.get(
-                    "display_name", dataset.get("name", "Unknown Dataset")
+            colour = self.datasets[f"{dataset_name}"]["colour"]
+
+            # Create scatter trace
+            scatter_kwargs = {
+                "mode": "lines+markers",
+                "name": dataset_name,
+                "line": dict(color=colour, width=1.5),
+                "marker": dict(size=3),
+            }
+
+            # Add error bars if enabled
+            if show_error_bars:
+                scatter_kwargs["error_y"] = dict(
+                    type="data",
+                    array=pressure_error,
+                    visible=True,
+                    color=colour,
+                    thickness=1.5,
+                    width=3,
                 )
-                color = dataset["color"]
 
-                if len(data.get("RelativeTime", [])) > 0:
-                    # Extract data directly from our structure
-                    time_data = np.ascontiguousarray(data["RelativeTime"])
-                    pressure_data = np.ascontiguousarray(data["Pressure_Torr"])
-                    pressure_error = data["Pressure_Error"]
-
-                    # Create scatter trace
-                    scatter_kwargs = {
-                        "mode": "lines+markers",
-                        "name": display_name,
-                        "line": dict(color=color, width=1.5),
-                        "marker": dict(size=3),
-                    }
-
-                    # Add error bars if enabled
-                    if show_error_bars:
-                        scatter_kwargs["error_y"] = dict(
-                            type="data",
-                            array=pressure_error,
-                            visible=True,
-                            color=color,
-                            thickness=1.5,
-                            width=3,
-                        )
-
-                    # Use plotly-resampler for automatic downsampling
-                    fig.add_trace(
-                        go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
-                    )
+            # Use plotly-resampler for automatic downsampling
+            fig.add_trace(
+                go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
+            )
 
         # Configure the layout
         fig.update_layout(
             height=500,
-            xaxis_title="Relative Time (s)",
+            xaxis_title="Time (s)",
             yaxis_title="Pressure (Torr)",
             template="plotly_white",
             margin=dict(l=60, r=30, t=40, b=60),
@@ -2446,53 +2268,49 @@ class DataPlotter:
         # Store the FigureResampler instance
         self.figure_resamplers["downstream-plot"] = fig
 
-        # Iterate through folder datasets and their downstream gauges
-        for folder_dataset in self.folder_datasets:
-            for dataset in folder_dataset["downstream_gauges"]:
-                # Skip invisible datasets
-                if not dataset.get("visible", True):
-                    continue
+        # Iterate through datasets and obtain the upstream data
+        for dataset_name in self.datasets.keys():
+            time_data = self.datasets[f"{dataset_name}"]["time_data"]
+            time_data = np.ascontiguousarray(time_data)
+            pressure_data = self.datasets[f"{dataset_name}"]["downstream_data"][
+                "pressure_data"
+            ]
+            pressure_data = np.ascontiguousarray(pressure_data)
+            pressure_error = self.datasets[f"{dataset_name}"]["downstream_data"][
+                "error_data"
+            ]
+            pressure_error = np.ascontiguousarray(pressure_error)
 
-                data = dataset["data"]
-                display_name = dataset.get(
-                    "display_name", dataset.get("name", "Unknown Dataset")
+            colour = self.datasets[f"{dataset_name}"]["colour"]
+
+            # Create scatter trace
+            scatter_kwargs = {
+                "mode": "lines+markers",
+                "name": dataset_name,
+                "line": dict(color=colour, width=1.5),
+                "marker": dict(size=3),
+            }
+
+            # Add error bars if enabled
+            if show_error_bars:
+                scatter_kwargs["error_y"] = dict(
+                    type="data",
+                    array=pressure_error,
+                    visible=True,
+                    color=colour,
+                    thickness=1.5,
+                    width=3,
                 )
-                color = dataset["color"]
 
-                if len(data.get("RelativeTime", [])) > 0:
-                    # Extract data directly from our structure
-                    time_data = np.ascontiguousarray(data["RelativeTime"])
-                    pressure_data = np.ascontiguousarray(data["Pressure_Torr"])
-                    pressure_error = data["Pressure_Error"]
-
-                    # Create scatter trace
-                    scatter_kwargs = {
-                        "mode": "lines+markers",
-                        "name": display_name,
-                        "line": dict(color=color, width=1.5),
-                        "marker": dict(size=3),
-                    }
-
-                    # Add error bars if enabled
-                    if show_error_bars:
-                        scatter_kwargs["error_y"] = dict(
-                            type="data",
-                            array=pressure_error,
-                            visible=True,
-                            color=color,
-                            thickness=1.5,
-                            width=3,
-                        )
-
-                    # Use plotly-resampler for automatic downsampling
-                    fig.add_trace(
-                        go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
-                    )
+            # Use plotly-resampler for automatic downsampling
+            fig.add_trace(
+                go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
+            )
 
         # Configure the layout
         fig.update_layout(
             height=500,
-            xaxis_title="Relative Time (s)",
+            xaxis_title="Time (s)",
             yaxis_title="Pressure (Torr)",
             template="plotly_white",
             margin=dict(l=60, r=30, t=40, b=60),
@@ -2500,7 +2318,6 @@ class DataPlotter:
                 orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
             ),
         )
-
         # Apply axis scaling
         x_axis_type = x_scale if x_scale else "linear"
         y_axis_type = y_scale if y_scale else "linear"
@@ -2515,8 +2332,6 @@ class DataPlotter:
         if y_min is not None and y_max is not None:
             if y_axis_type == "log":
                 # For log scale, use log10 of the values
-                import math
-
                 fig.update_yaxes(range=[math.log10(y_min), math.log10(y_max)])
             else:
                 fig.update_yaxes(range=[y_min, y_max])
@@ -2528,159 +2343,12 @@ class DataPlotter:
 
         return fig
 
-    def _generate_upstream_plot_full_data(
-        self, show_gauge_names=False, show_error_bars=True
-    ):
-        """Generate the upstream pressure plot with FULL DATA (no resampling)"""
-        # Use regular plotly Figure WITHOUT FigureResampler
-        fig = go.Figure()
-
-        # Iterate through folder datasets and their upstream gauges
-        for folder_dataset in self.folder_datasets:
-            for dataset in folder_dataset["upstream_gauges"]:
-                # Skip invisible datasets
-                if not dataset.get("visible", True):
-                    continue
-
-                data = dataset["data"]
-                # Determine display name based on checkbox state
-                if show_gauge_names:
-                    display_name = dataset.get(
-                        "display_name", dataset.get("name", "Unknown Dataset")
-                    )
-                else:
-                    display_name = folder_dataset["name"]
-                color = dataset["color"]
-
-                if len(data.get("RelativeTime", [])) > 0:
-                    # Extract data directly from our structure
-                    time_data = data["RelativeTime"]
-                    pressure_data = data["Pressure_Torr"]
-                    pressure_error = data["Pressure_Error"]
-
-                    # Create scatter trace
-                    scatter_kwargs = {
-                        "x": time_data,
-                        "y": pressure_data,
-                        "mode": "lines+markers",
-                        "name": display_name,
-                        "line": dict(color=color, width=1.5),
-                        "marker": dict(size=3),
-                    }
-
-                    # Add error bars if enabled
-                    if show_error_bars:
-                        scatter_kwargs["error_y"] = dict(
-                            type="data",
-                            array=pressure_error,
-                            visible=True,
-                            color=color,
-                            thickness=1.5,
-                            width=3,
-                        )
-
-                    # Add ALL data points (no resampling)
-                    fig.add_trace(go.Scatter(**scatter_kwargs))
-
-        # Configure the layout
-        fig.update_layout(
-            title="Upstream Pressure (Full Data)",
-            height=500,
-            xaxis_title="Relative Time (s)",
-            yaxis_title="Pressure (Torr)",
-            template="plotly_white",
-            margin=dict(l=60, r=30, t=40, b=60),
-            legend=dict(
-                orientation="v",
-                yanchor="top",
-                y=1,
-                xanchor="left",
-                x=1.05,
-            ),
-            hovermode="x unified",
-        )
-
-        return fig
-
-    def _generate_downstream_plot_full_data(
-        self, show_gauge_names=False, show_error_bars=True
-    ):
-        """Generate the downstream pressure plot with FULL DATA (no resampling)"""
-        # Use regular plotly Figure WITHOUT FigureResampler
-        fig = go.Figure()
-
-        # Iterate through folder datasets and their downstream gauges
-        for folder_dataset in self.folder_datasets:
-            for dataset in folder_dataset["downstream_gauges"]:
-                # Skip invisible datasets
-                if not dataset.get("visible", True):
-                    continue
-
-                data = dataset["data"]
-                # Determine display name based on checkbox state
-                if show_gauge_names:
-                    display_name = dataset.get(
-                        "display_name", dataset.get("name", "Unknown Dataset")
-                    )
-                else:
-                    display_name = folder_dataset["name"]
-                color = dataset["color"]
-
-                if len(data.get("RelativeTime", [])) > 0:
-                    # Extract data directly from our structure
-                    time_data = data["RelativeTime"]
-                    pressure_data = data["Pressure_Torr"]
-                    pressure_error = data["Pressure_Error"]
-
-                    # Create scatter trace
-                    scatter_kwargs = {
-                        "x": time_data,
-                        "y": pressure_data,
-                        "mode": "lines+markers",
-                        "name": display_name,
-                        "line": dict(color=color, width=1.5),
-                        "marker": dict(size=3),
-                    }
-
-                    # Add error bars if enabled
-                    if show_error_bars:
-                        scatter_kwargs["error_y"] = dict(
-                            type="data",
-                            array=pressure_error,
-                            visible=True,
-                            color=color,
-                            thickness=1.5,
-                            width=3,
-                        )
-
-                    # Add ALL data points (no resampling)
-                    fig.add_trace(go.Scatter(**scatter_kwargs))
-
-        # Configure the layout
-        fig.update_layout(
-            title="Downstream Pressure (Full Data)",
-            height=500,
-            xaxis_title="Relative Time (s)",
-            yaxis_title="Pressure (Torr)",
-            template="plotly_white",
-            margin=dict(l=60, r=30, t=40, b=60),
-            legend=dict(
-                orientation="v",
-                yanchor="top",
-                y=1,
-                xanchor="left",
-                x=1.05,
-            ),
-            hovermode="x unified",
-        )
-
-        return fig
-
     def start(self):
         """Process data and start the Dash web server"""
 
         # Process data
-        self.load_data()
+        for dataset_path, dataset_name in zip(self.dataset_paths, self.dataset_names):
+            self.load_data(dataset_path, dataset_name)
 
         # Setup the app layout
         self.app.layout = self.create_layout()
