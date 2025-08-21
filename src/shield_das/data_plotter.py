@@ -63,14 +63,7 @@ class DataPlotter:
             ],
         )
 
-        # Store multiple datasets - separate lists for upstream and downstream
-        self.upstream_datasets = []
-        self.downstream_datasets = []
-
-        # Store folder-level datasets for management
-        # Each folder = 1 dataset with upstream/downstream gauges
-        self.folder_datasets = []
-
+        # Store datasets
         self.datasets = {}
 
         # Store FigureResampler instances for callback registration
@@ -220,10 +213,6 @@ class DataPlotter:
             # Read metadata
             with open(metadata_path) as f:
                 metadata = json.load(f)
-
-            # Import required modules
-            import numpy as np
-            from datetime import datetime
 
             # Create gauge instances from metadata
             gauge_instances = self.create_gauge_instances(metadata["gauges"])
@@ -389,8 +378,6 @@ class DataPlotter:
         """
 
         dataset_color = self.get_next_color(len(self.datasets))
-
-        print(f"Creating dataset '{dataset_name}' with color {dataset_color}")
 
         dataset = {
             "colour": dataset_color,
@@ -1213,9 +1200,6 @@ class DataPlotter:
 
     def create_dataset_table(self):
         """Create a table showing folder-level datasets with editable name and color"""
-        if not self.folder_datasets:
-            return html.Div("No datasets loaded", className="text-muted")
-
         # Create table rows
         rows = []
 
@@ -1281,14 +1265,14 @@ class DataPlotter:
         rows.append(header_row)
 
         # Add dataset rows
-        for i, dataset in enumerate(self.folder_datasets):
+        for i, dataset_name in enumerate(self.datasets.keys()):
             row = html.Tr(
                 [
                     html.Td(
                         [
                             dcc.Input(
                                 id={"type": "dataset-name", "index": i},
-                                value=dataset["name"],
+                                value=dataset_name,
                                 style={
                                     "width": "95%",
                                     "border": "1px solid #ccc",
@@ -1306,14 +1290,18 @@ class DataPlotter:
                             html.Div(
                                 [
                                     html.Span(
-                                        dataset["folder"],
+                                        self.datasets[f"{dataset_name}"][
+                                            "dataset_path"
+                                        ],
                                         style={
                                             "font-family": "monospace",
                                             "font-size": "0.9em",
                                             "color": "#666",
                                             "word-break": "break-all",
                                         },
-                                        title=dataset["folder"],  # Full path on hover
+                                        title=self.datasets[f"{dataset_name}"][
+                                            "dataset_path"
+                                        ],  # Full path on hover
                                     )
                                 ],
                                 style={
@@ -1332,7 +1320,9 @@ class DataPlotter:
                             html.Span("  "),  # Manual spacing
                             dbc.Checkbox(
                                 id={"type": "dataset-live-data", "index": i},
-                                value=dataset.get("live_data", False),
+                                value=self.datasets[f"{dataset_name}"].get(
+                                    "live_data", False
+                                ),
                                 style={
                                     "transform": "scale(1.2)",
                                     "display": "inline-block",
@@ -1350,7 +1340,7 @@ class DataPlotter:
                             dcc.Input(
                                 id={"type": "dataset-color", "index": i},
                                 type="color",
-                                value=dataset["color"],
+                                value=self.datasets[f"{dataset_name}"]["colour"],
                                 style={
                                     "width": "32px",
                                     "height": "32px",
@@ -1392,7 +1382,7 @@ class DataPlotter:
                                     "align-items": "center",
                                     "justify-content": "center",
                                 },
-                                title=f"Download {dataset['name']}",
+                                title=f"Download {dataset_name}",
                             ),
                         ],
                         style={
@@ -1425,7 +1415,7 @@ class DataPlotter:
                                     "align-items": "center",
                                     "justify-content": "center",
                                 },
-                                title=f"Delete {dataset['name']}",
+                                title=f"Delete {dataset_name}",
                             ),
                         ],
                         style={
