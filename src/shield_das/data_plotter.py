@@ -73,6 +73,9 @@ class DataPlotter:
         # Each folder = 1 dataset with upstream/downstream gauges
         self.folder_datasets = []
 
+        # Store FigureResampler instances for callback registration
+        self.figure_resamplers = {}
+
     @property
     def dataset_paths(self) -> list[str]:
         return self._dataset_paths
@@ -2176,6 +2179,55 @@ class DataPlotter:
                 ),
             ]
 
+        # FigureResampler callbacks for interactive zooming/panning
+        @self.app.callback(
+            Output("upstream-plot", "figure", allow_duplicate=True),
+            Input("upstream-plot", "relayoutData"),
+            prevent_initial_call=True,
+        )
+        def update_upstream_plot_on_relayout(relayoutData):
+            if "upstream-plot" in self.figure_resamplers and relayoutData:
+                fig_resampler = self.figure_resamplers["upstream-plot"]
+
+                # Check if this is an autoscale/reset zoom event (double-click)
+                if (
+                    "autosize" in relayoutData
+                    or "xaxis.autorange" in relayoutData
+                    or "yaxis.autorange" in relayoutData
+                    or relayoutData.get("xaxis.autorange") is True
+                    or relayoutData.get("yaxis.autorange") is True
+                ):
+                    # Regenerate the full plot for autoscale
+                    return self._generate_upstream_plot()
+                else:
+                    # Normal zoom/pan - use resampling
+                    return fig_resampler.construct_update_data_patch(relayoutData)
+            return dash.no_update
+
+        @self.app.callback(
+            Output("downstream-plot", "figure", allow_duplicate=True),
+            Input("downstream-plot", "relayoutData"),
+            prevent_initial_call=True,
+        )
+        def update_downstream_plot_on_relayout(relayoutData):
+            if "downstream-plot" in self.figure_resamplers and relayoutData:
+                fig_resampler = self.figure_resamplers["downstream-plot"]
+
+                # Check if this is an autoscale/reset zoom event (double-click)
+                if (
+                    "autosize" in relayoutData
+                    or "xaxis.autorange" in relayoutData
+                    or "yaxis.autorange" in relayoutData
+                    or relayoutData.get("xaxis.autorange") is True
+                    or relayoutData.get("yaxis.autorange") is True
+                ):
+                    # Regenerate the full plot for autoscale
+                    return self._generate_downstream_plot()
+                else:
+                    # Normal zoom/pan - use resampling
+                    return fig_resampler.construct_update_data_patch(relayoutData)
+            return dash.no_update
+
     def _generate_plot(
         self,
         x_scale=None,
@@ -2212,19 +2264,19 @@ class DataPlotter:
 
                 if len(data.get("RelativeTime", [])) > 0:
                     # Extract data directly from our structure
-                    time_data = data["RelativeTime"]
-                    pressure_data = data["Pressure_Torr"]
+                    time_data = np.ascontiguousarray(data["RelativeTime"])
+                    pressure_data = np.ascontiguousarray(data["Pressure_Torr"])
 
                     # Use plotly-resampler for automatic downsampling
                     fig.add_trace(
                         go.Scatter(
-                            x=time_data,
-                            y=pressure_data,
                             mode="lines+markers",
                             name=display_name,
                             line=dict(color=color, width=1.5),
                             marker=dict(size=3),
-                        )
+                        ),
+                        hf_x=time_data,
+                        hf_y=pressure_data,
                     )
 
         # Configure the layout
@@ -2286,6 +2338,9 @@ class DataPlotter:
             verbose=False,
         )
 
+        # Store the FigureResampler instance
+        self.figure_resamplers["upstream-plot"] = fig
+
         # Iterate through folder datasets and their upstream gauges
         for folder_dataset in self.folder_datasets:
             for dataset in folder_dataset["upstream_gauges"]:
@@ -2301,14 +2356,12 @@ class DataPlotter:
 
                 if len(data.get("RelativeTime", [])) > 0:
                     # Extract data directly from our structure
-                    time_data = data["RelativeTime"]
-                    pressure_data = data["Pressure_Torr"]
+                    time_data = np.ascontiguousarray(data["RelativeTime"])
+                    pressure_data = np.ascontiguousarray(data["Pressure_Torr"])
                     pressure_error = data["Pressure_Error"]
 
                     # Create scatter trace
                     scatter_kwargs = {
-                        "x": time_data,
-                        "y": pressure_data,
                         "mode": "lines+markers",
                         "name": display_name,
                         "line": dict(color=color, width=1.5),
@@ -2327,7 +2380,9 @@ class DataPlotter:
                         )
 
                     # Use plotly-resampler for automatic downsampling
-                    fig.add_trace(go.Scatter(**scatter_kwargs))
+                    fig.add_trace(
+                        go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
+                    )
 
         # Configure the layout
         fig.update_layout(
@@ -2388,6 +2443,9 @@ class DataPlotter:
             verbose=False,
         )
 
+        # Store the FigureResampler instance
+        self.figure_resamplers["downstream-plot"] = fig
+
         # Iterate through folder datasets and their downstream gauges
         for folder_dataset in self.folder_datasets:
             for dataset in folder_dataset["downstream_gauges"]:
@@ -2403,14 +2461,12 @@ class DataPlotter:
 
                 if len(data.get("RelativeTime", [])) > 0:
                     # Extract data directly from our structure
-                    time_data = data["RelativeTime"]
-                    pressure_data = data["Pressure_Torr"]
+                    time_data = np.ascontiguousarray(data["RelativeTime"])
+                    pressure_data = np.ascontiguousarray(data["Pressure_Torr"])
                     pressure_error = data["Pressure_Error"]
 
                     # Create scatter trace
                     scatter_kwargs = {
-                        "x": time_data,
-                        "y": pressure_data,
                         "mode": "lines+markers",
                         "name": display_name,
                         "line": dict(color=color, width=1.5),
@@ -2429,7 +2485,9 @@ class DataPlotter:
                         )
 
                     # Use plotly-resampler for automatic downsampling
-                    fig.add_trace(go.Scatter(**scatter_kwargs))
+                    fig.add_trace(
+                        go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
+                    )
 
         # Configure the layout
         fig.update_layout(
