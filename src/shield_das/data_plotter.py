@@ -1947,21 +1947,27 @@ class DataPlotter:
         @self.app.callback(
             Output("download-upstream-plot", "data", allow_duplicate=True),
             [Input("export-upstream-plot", "n_clicks")],
+            [State("upstream-plot", "figure")],
             prevent_initial_call=True,
         )
-        def export_upstream_plot(n_clicks):
+        def export_upstream_plot(n_clicks, current_fig):
             if not n_clicks:
                 raise PreventUpdate
 
-            # Generate the upstream plot with FULL DATA (no resampling)
-            fig = self._generate_upstream_plot_full_data(False)
+            # Use the current rendered figure (as dict) and convert to HTML
+            if not current_fig:
+                raise PreventUpdate
 
-            # Convert to HTML
-            html_str = fig.to_html(include_plotlyjs="inline")
+            # Convert dict->plotly Figure then to HTML
+            try:
+                fig = go.Figure(current_fig)
+                html_str = fig.to_html(include_plotlyjs="inline")
+            except Exception:
+                raise PreventUpdate
 
             return dict(
                 content=html_str,
-                filename="upstream_plot_full_data.html",
+                filename="upstream_plot.html",
                 type="text/html",
             )
 
