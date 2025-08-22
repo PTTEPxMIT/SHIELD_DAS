@@ -1,8 +1,10 @@
+import io
 import json
 import math
 import os
 import threading
 import webbrowser
+import zipfile
 from datetime import datetime
 
 import dash
@@ -1910,38 +1912,91 @@ class DataPlotter:
                     dataset = self.folder_datasets[download_index]
 
             if dataset:
-                # Create CSV data combining upstream/downstream data
-                import pandas as pd
-
-                time_data = dataset.get("time_data")
-                upstream = dataset.get("upstream_data", {})
-                downstream = dataset.get("downstream_data", {})
-
-                # If upstream/downstream are simple arrays, convert to dataframe
-                result_data = {}
-                if time_data is not None:
-                    result_data["RelativeTime"] = list(time_data)
-
-                # Add upstream/downstream columns if present
-                if upstream.get("pressure_data") is not None:
-                    result_data["Upstream_Pressure_Torr"] = list(
-                        upstream["pressure_data"]
-                    )
-                if downstream.get("pressure_data") is not None:
-                    result_data["Downstream_Pressure_Torr"] = list(
-                        downstream["pressure_data"]
-                    )
-
-                if result_data:
-                    df = pd.DataFrame(result_data)
-                    csv_data = df.to_csv(index=False)
-                    return dict(
-                        content=csv_data,
-                        filename=f"{dataset.get('name', 'dataset')}_data.csv",
-                        type="text/csv",
-                    )
+                # Prefer explicit dataset folder path
+                dataset_path = dataset.get("dataset_path") or dataset.get("folder")
+                if dataset_path and os.path.exists(dataset_path):
+                    packaged = self._create_dataset_download(dataset_path)
+                    if packaged is not None:
+                        # If packaged content is binary (zip or bytes), use dcc.send_bytes
+                        content = packaged.get("content")
+                        filename = packaged.get("filename")
+                        if isinstance(content, (bytes, bytearray)):
+                            return dcc.send_bytes(
+                                lambda f, data=content: f.write(data), filename
+                            )
+                        # If content is text (string), return as dict like before
+                        return dict(
+                            content=content,
+                            filename=filename,
+                            type=packaged.get("type", "text/csv"),
+                        )
 
             raise PreventUpdate
+
+    def _create_dataset_download(self, dataset_path: str):
+        """Package original dataset files for download based on metadata version.
+
+        For version '0.0' zip all CSV files in the folder and return as bytes.
+        For version '1.0' return the single CSV file named in run_info.data_filename
+
+        Returns a dict suitable for dcc.send_bytes or dcc.send_file style use.
+        """
+
+        metadata_path = os.path.join(dataset_path, "run_metadata.json")
+        if not os.path.exists(metadata_path):
+            return None
+
+        with open(metadata_path) as f:
+            try:
+                metadata = json.load(f)
+            except Exception:
+                return None
+
+        version = metadata.get("version")
+
+        if version == "0.0":
+            # Zip the entire dataset folder (all files and subfolders), preserving
+            # the relative directory structure inside the archive.
+            mem_zip = io.BytesIO()
+            with zipfile.ZipFile(
+                mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED
+            ) as zf:
+                for root, _dirs, files in os.walk(dataset_path):
+                    for fname in files:
+                        file_path = os.path.join(root, fname)
+                        try:
+                            arcname = os.path.relpath(file_path, dataset_path)
+                            zf.write(file_path, arcname)
+                        except Exception:
+                            # Skip files we fail to read/write into the archive
+                            continue
+            mem_zip.seek(0)
+            # Use a normalized basename in case dataset_path ends with a slash
+            base = os.path.basename(os.path.normpath(dataset_path))
+            return dict(
+                content=mem_zip.getvalue(),
+                filename=f"{base}.zip",
+                type="application/zip",
+            )
+
+        elif version == "1.0":
+            # Expect single CSV named in metadata->run_info->data_filename
+            data_filename = metadata.get("run_info", {}).get("data_filename")
+            if not data_filename:
+                return None
+            csv_path = os.path.join(dataset_path, data_filename)
+            if not os.path.exists(csv_path):
+                return None
+
+            with open(csv_path, "rb") as fh:
+                data = fh.read()
+
+            return dict(
+                content=data, filename=os.path.basename(csv_path), type="text/csv"
+            )
+
+        # Unsupported version
+        return None
 
         # Callback for exporting upstream plot
         @self.app.callback(
@@ -2260,8 +2315,6 @@ class DataPlotter:
 
         # Determine x-axis range from data (or use provided bounds when valid)
         if x_axis_type == "log":
-            import math
-
             if (
                 x_min is not None
                 and x_max is not None
@@ -2306,8 +2359,6 @@ class DataPlotter:
 
         # Determine y-axis range from upstream data (or use provided bounds when valid)
         if y_axis_type == "log":
-            import math
-
             if (
                 y_min is not None
                 and y_max is not None
@@ -2441,7 +2492,6 @@ class DataPlotter:
         # Apply axis ranges if specified
         if x_min is not None and x_max is not None:
             if x_axis_type == "log":
-                import math
 
                 def _safe_x_log_range_ds(xmin_val, xmax_val):
                     try:
@@ -2481,7 +2531,6 @@ class DataPlotter:
             if y_axis_type == "log":
                 # For log scale, ensure positive bounds; if provided bounds are
                 # non-positive, derive a safe range from the data.
-                import math
 
                 def _safe_log_range_ds(
                     downstream_or_upstream: str, y_min_val, y_max_val
