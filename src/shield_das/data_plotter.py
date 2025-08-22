@@ -1443,8 +1443,6 @@ class DataPlotter:
             ],
             [Input({"type": "dataset-name", "index": ALL}, "value")],
             [
-                State("show-gauge-names-upstream", "value"),
-                State("show-gauge-names-downstream", "value"),
                 State("show-error-bars-upstream", "value"),
                 State("show-error-bars-downstream", "value"),
             ],
@@ -1452,8 +1450,6 @@ class DataPlotter:
         )
         def update_dataset_names(
             names,
-            show_gauge_names_upstream,
-            show_gauge_names_downstream,
             show_error_bars_upstream,
             show_error_bars_downstream,
         ):
@@ -1591,7 +1587,10 @@ class DataPlotter:
 
         # Callback for upstream plot settings changes
         @self.app.callback(
-            [Output("upstream-plot", "figure", allow_duplicate=True)],
+            [
+                Output("upstream-plot", "figure", allow_duplicate=True),
+                Output("upstream-settings-store", "data"),
+            ],
             [
                 Input("upstream-x-scale", "value"),
                 Input("upstream-y-scale", "value"),
@@ -1601,7 +1600,10 @@ class DataPlotter:
                 Input("upstream-y-max", "value"),
                 Input("show-error-bars-upstream", "value"),
             ],
-            [State("upstream-plot", "figure")],
+            [
+                State("upstream-plot", "figure"),
+                State("upstream-settings-store", "data"),
+            ],
             prevent_initial_call=True,
         )
         def update_upstream_plot_settings(
@@ -1613,6 +1615,7 @@ class DataPlotter:
             y_max,
             show_error_bars_upstream,
             current_fig,
+            store_data,
         ):
             # Helper to extract axis ranges from an existing figure
             def _extract_axis_range(fig, axis_name):
@@ -1628,16 +1631,18 @@ class DataPlotter:
                             return r[0], r[1]
                 return None, None
 
-            # If explicit min/max inputs are not provided, prefer current figure ranges
-            cur_x_min, cur_x_max = _extract_axis_range(current_fig, "xaxis")
-            cur_y_min, cur_y_max = _extract_axis_range(current_fig, "yaxis")
-
-            x_min_use = x_min if x_min is not None else cur_x_min
-            x_max_use = x_max if x_max is not None else cur_x_max
-            y_min_use = y_min if y_min is not None else cur_y_min
-            y_max_use = y_max if y_max is not None else cur_y_max
+            # Simpler behavior: always reset the figure when scale or error-bar
+            # options change. Do not preserve current zoom. If inputs are None
+            # pass None so the generator autosizes.
+            x_min_use = x_min if x_min is not None else None
+            x_max_use = x_max if x_max is not None else None
+            y_min_use = y_min if y_min is not None else None
+            y_max_use = y_max if y_max is not None else None
 
             # Generate updated upstream plot with new settings (use keywords)
+            # Update store data with current scale settings
+            new_store = {"y_scale": y_scale}
+
             return [
                 self._generate_upstream_plot(
                     show_error_bars=bool(show_error_bars_upstream),
@@ -1647,12 +1652,16 @@ class DataPlotter:
                     x_max=x_max_use,
                     y_min=y_min_use,
                     y_max=y_max_use,
-                )
+                ),
+                new_store,
             ]
 
         # Callback for downstream plot settings changes
         @self.app.callback(
-            [Output("downstream-plot", "figure", allow_duplicate=True)],
+            [
+                Output("downstream-plot", "figure", allow_duplicate=True),
+                Output("downstream-settings-store", "data"),
+            ],
             [
                 Input("downstream-x-scale", "value"),
                 Input("downstream-y-scale", "value"),
@@ -1662,7 +1671,10 @@ class DataPlotter:
                 Input("downstream-y-max", "value"),
                 Input("show-error-bars-downstream", "value"),
             ],
-            [State("downstream-plot", "figure")],
+            [
+                State("downstream-plot", "figure"),
+                State("downstream-settings-store", "data"),
+            ],
             prevent_initial_call=True,
         )
         def update_downstream_plot_settings(
@@ -1674,6 +1686,7 @@ class DataPlotter:
             y_max,
             show_error_bars_downstream,
             current_fig,
+            store_data,
         ):
             # Helper to extract axis ranges from an existing figure
             def _extract_axis_range(fig, axis_name):
@@ -1688,14 +1701,15 @@ class DataPlotter:
                             return r[0], r[1]
                 return None, None
 
-            # If explicit min/max inputs are not provided, prefer current figure ranges
-            cur_x_min, cur_x_max = _extract_axis_range(current_fig, "xaxis")
-            cur_y_min, cur_y_max = _extract_axis_range(current_fig, "yaxis")
+            # Simpler behavior: always reset the figure when scale or error-bar
+            # options change. Do not preserve current zoom. If inputs are None
+            # pass None so the generator autosizes.
+            x_min_use = x_min if x_min is not None else None
+            x_max_use = x_max if x_max is not None else None
+            y_min_use = y_min if y_min is not None else None
+            y_max_use = y_max if y_max is not None else None
 
-            x_min_use = x_min if x_min is not None else cur_x_min
-            x_max_use = x_max if x_max is not None else cur_x_max
-            y_min_use = y_min if y_min is not None else cur_y_min
-            y_max_use = y_max if y_max is not None else cur_y_max
+            new_store = {"y_scale": y_scale}
 
             # Generate updated downstream plot with new settings (use keywords)
             return [
@@ -1707,7 +1721,8 @@ class DataPlotter:
                     x_max=x_max_use,
                     y_min=y_min_use,
                     y_max=y_max_use,
-                )
+                ),
+                new_store,
             ]
 
         # Callbacks to update min values based on scale mode
@@ -1939,7 +1954,6 @@ class DataPlotter:
                 raise PreventUpdate
 
             # Generate the upstream plot with FULL DATA (no resampling)
-            # show-gauge-names removed -> pass False
             fig = self._generate_upstream_plot_full_data(False)
 
             # Convert to HTML
@@ -1962,7 +1976,6 @@ class DataPlotter:
                 raise PreventUpdate
 
             # Generate the downstream plot with FULL DATA (no resampling)
-            # show-gauge-names removed -> pass False
             fig = self._generate_downstream_plot_full_data(False)
 
             # Convert to HTML
@@ -2029,7 +2042,6 @@ class DataPlotter:
             # Regenerate plots with updated data
             return [
                 self._generate_upstream_plot(show_error_bars_upstream),
-                # show-gauge-names removed -> pass show_error_bars by keyword
                 self._generate_downstream_plot(
                     show_error_bars=show_error_bars_downstream
                 ),
@@ -2103,7 +2115,7 @@ class DataPlotter:
                             dataset["upstream_gauges"] = original_upstream
                             dataset["downstream_gauges"] = original_downstream
 
-            # Regenerate plots with updated data; show-gauge-names removed
+            # Regenerate plots with updated data;
             return [
                 self._generate_upstream_plot(show_error_bars_upstream),
                 self._generate_downstream_plot(
@@ -2240,18 +2252,99 @@ class DataPlotter:
         fig.update_xaxes(type=x_axis_type)
         fig.update_yaxes(type=y_axis_type)
 
-        # Apply axis ranges if specified
-        if x_min is not None and x_max is not None:
-            fig.update_xaxes(range=[x_min, x_max])
+        # Determine x-axis range from data (or use provided bounds when valid)
+        if x_axis_type == "log":
+            import math
 
-        if y_min is not None and y_max is not None:
-            if y_axis_type == "log":
-                # For log scale, use log10 of the values
-                import math
-
-                fig.update_yaxes(range=[math.log10(y_min), math.log10(y_max)])
+            if (
+                x_min is not None
+                and x_max is not None
+                and x_min > 0
+                and x_max > 0
+                and x_min < x_max
+            ):
+                xmin_lin, xmax_lin = float(x_min), float(x_max)
             else:
+                pos_vals = []
+                for ds in self.datasets.values():
+                    try:
+                        vals = np.asarray(ds.get("time_data", []), dtype=float)
+                        vals = vals[vals > 0]
+                        if vals.size:
+                            pos_vals.extend(vals.tolist())
+                    except Exception:
+                        continue
+                if pos_vals:
+                    xmin_lin = float(min(pos_vals))
+                    xmax_lin = float(max(pos_vals))
+                    if xmin_lin >= xmax_lin:
+                        xmax_lin = xmin_lin * 10.0
+                else:
+                    xmin_lin, xmax_lin = 1e-12, 1e-6
+
+            fig.update_xaxes(range=[math.log10(xmin_lin), math.log10(xmax_lin)])
+        else:
+            if x_min is not None and x_max is not None and x_min < x_max:
+                fig.update_xaxes(range=[x_min, x_max])
+            else:
+                # derive from data
+                vals = []
+                for ds in self.datasets.values():
+                    try:
+                        v = ds.get("time_data", [])
+                        vals.extend([float(x) for x in v])
+                    except Exception:
+                        continue
+                if vals:
+                    fig.update_xaxes(range=[min(vals), max(vals)])
+
+        # Determine y-axis range from upstream data (or use provided bounds when valid)
+        if y_axis_type == "log":
+            import math
+
+            if (
+                y_min is not None
+                and y_max is not None
+                and y_min > 0
+                and y_max > 0
+                and y_min < y_max
+            ):
+                ymin_lin, ymax_lin = float(y_min), float(y_max)
+            else:
+                pos_vals = []
+                for ds in self.datasets.values():
+                    try:
+                        vals = np.asarray(
+                            ds.get("upstream_data", {}).get("pressure_data", []),
+                            dtype=float,
+                        )
+                        vals = vals[vals > 0]
+                        if vals.size:
+                            pos_vals.extend(vals.tolist())
+                    except Exception:
+                        continue
+                if pos_vals:
+                    ymin_lin = float(min(pos_vals))
+                    ymax_lin = float(max(pos_vals))
+                    if ymin_lin >= ymax_lin:
+                        ymax_lin = ymin_lin * 10.0
+                else:
+                    ymin_lin, ymax_lin = 1e-12, 1e-6
+
+            fig.update_yaxes(range=[math.log10(ymin_lin), math.log10(ymax_lin)])
+        else:
+            if y_min is not None and y_max is not None and y_min < y_max:
                 fig.update_yaxes(range=[y_min, y_max])
+            else:
+                vals = []
+                for ds in self.datasets.values():
+                    try:
+                        v = ds.get("upstream_data", {}).get("pressure_data", [])
+                        vals.extend([float(x) for x in v])
+                    except Exception:
+                        continue
+                if vals:
+                    fig.update_yaxes(range=[min(vals), max(vals)])
 
         # Clean up trace names to remove [R] annotations
         for trace in fig.data:
@@ -2262,7 +2355,6 @@ class DataPlotter:
 
     def _generate_downstream_plot(
         self,
-        show_gauge_names=False,
         show_error_bars=True,
         x_scale=None,
         y_scale=None,
@@ -2342,12 +2434,90 @@ class DataPlotter:
 
         # Apply axis ranges if specified
         if x_min is not None and x_max is not None:
-            fig.update_xaxes(range=[x_min, x_max])
+            if x_axis_type == "log":
+                import math
+
+                def _safe_x_log_range_ds(xmin_val, xmax_val):
+                    try:
+                        if xmin_val is not None and xmax_val is not None:
+                            if xmin_val > 0 and xmax_val > 0 and xmin_val < xmax_val:
+                                return math.log10(xmin_val), math.log10(xmax_val)
+                    except Exception:
+                        pass
+
+                    pos_vals = []
+                    for dataset_name in self.datasets.keys():
+                        try:
+                            vals = self.datasets[f"{dataset_name}"]["time_data"]
+                            for v in vals:
+                                if v is not None and v > 0:
+                                    pos_vals.append(float(v))
+                        except Exception:
+                            continue
+
+                    if pos_vals:
+                        xmin_p = min(pos_vals)
+                        xmax_p = max(pos_vals)
+                        if xmin_p <= 0:
+                            xmin_p = min(x for x in pos_vals if x > 0)
+                        if xmin_p >= xmax_p:
+                            xmax_p = xmin_p * 10.0
+                        return math.log10(xmin_p), math.log10(xmax_p)
+
+                    return -12.0, -6.0
+
+                x_min_log, x_max_log = _safe_x_log_range_ds(x_min, x_max)
+                fig.update_xaxes(range=[x_min_log, x_max_log])
+            else:
+                fig.update_xaxes(range=[x_min, x_max])
 
         if y_min is not None and y_max is not None:
             if y_axis_type == "log":
-                # For log scale, use log10 of the values
-                fig.update_yaxes(range=[math.log10(y_min), math.log10(y_max)])
+                # For log scale, ensure positive bounds; if provided bounds are
+                # non-positive, derive a safe range from the data.
+                import math
+
+                def _safe_log_range_ds(
+                    downstream_or_upstream: str, y_min_val, y_max_val
+                ):
+                    try:
+                        if y_min_val is not None and y_max_val is not None:
+                            if (
+                                y_min_val > 0
+                                and y_max_val > 0
+                                and y_min_val < y_max_val
+                            ):
+                                return y_min_val, y_max_val
+                    except Exception:
+                        pass
+
+                    pos_vals = []
+                    for dataset_name in self.datasets.keys():
+                        try:
+                            vals = self.datasets[f"{dataset_name}"][
+                                downstream_or_upstream
+                            ]["pressure_data"]
+                            for v in vals:
+                                if v is not None and v > 0:
+                                    pos_vals.append(float(v))
+                        except Exception:
+                            continue
+
+                    if pos_vals:
+                        ymin_p = min(pos_vals)
+                        ymax_p = max(pos_vals)
+                        if ymin_p <= 0:
+                            ymin_p = min(x for x in pos_vals if x > 0)
+                        if ymin_p >= ymax_p:
+                            ymax_p = ymin_p * 10.0
+                        return ymin_p, ymax_p
+
+                    return 1e-12, 1e-6
+
+                y_min_use, y_max_use = _safe_log_range_ds(
+                    "downstream_data", y_min, y_max
+                )
+                fig.update_yaxes(range=[math.log10(y_min_use), math.log10(y_max_use)])
             else:
                 fig.update_yaxes(range=[y_min, y_max])
 
