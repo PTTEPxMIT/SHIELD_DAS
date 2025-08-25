@@ -36,7 +36,6 @@ class DataPlotter:
     datasets = dict
     upstream_datasets: list[dict]
     downstream_datasets: list[dict]
-    folder_datasets: list[dict]
 
     def __init__(self, dataset_paths=None, dataset_names=None, port=8050):
         self.dataset_paths = dataset_paths or []
@@ -173,104 +172,6 @@ class DataPlotter:
             )
 
         return time_data, upstream_data, downstream_data
-
-    def _load_folder_data(self, dataset: dict):
-        """
-        Reload data for a specific dataset.
-
-        Args:
-            dataset: Dataset dictionary containing folder path and gauge lists
-
-        Returns:
-            bool: True if data was successfully loaded, False otherwise
-        """
-        import json
-        import os
-
-        data_folder = dataset["folder"]
-
-        # Check if metadata file exists
-        metadata_path = os.path.join(data_folder, "run_metadata.json")
-        if not os.path.exists(metadata_path):
-            print(
-                f"Skipping live update for {dataset['name']}: "
-                f"run_metadata.json not found in {data_folder}"
-            )
-            return False
-
-        try:
-            # Read metadata
-            with open(metadata_path) as f:
-                metadata = json.load(f)
-
-            # Create gauge instances from metadata
-            gauge_instances = self.create_gauge_instances(metadata["gauges"])
-
-            # Load CSV data
-            csv_path = os.path.join(data_folder, metadata["run_info"]["data_filename"])
-            if not os.path.exists(csv_path):
-                print(f"CSV file not found: {csv_path}")
-                return False
-
-            data = np.genfromtxt(csv_path, delimiter=",", names=True, dtype=None)
-
-            # Convert datetime strings to relative time in floats
-            dt_objects = [
-                datetime.strptime(t, "%Y-%m-%d %H:%M:%S.%f")
-                for t in data["RealTimestamp"]
-            ]
-            relative_times = [(dt - dt_objects[0]).total_seconds() for dt in dt_objects]
-
-            # Update gauge instances with new data
-            for gauge_instance in gauge_instances:
-                gauge_instance.time_data = relative_times
-                gauge_instance.pressure_data = gauge_instance.voltage_to_pressure(
-                    data[f"{gauge_instance.name}_Voltage_V"]
-                )
-                # Calculate error bars
-                gauge_instance.pressure_error = gauge_instance.calculate_error(
-                    gauge_instance.pressure_data
-                )
-
-            # Update the dataset's gauge data
-            new_upstream_gauges = []
-            new_downstream_gauges = []
-
-            for gauge in gauge_instances:
-                # Only Baratron626D_Gauge is visible by default
-                is_visible = gauge.__class__.__name__ == "Baratron626D_Gauge"
-
-                gauge_dataset = {
-                    "data": {
-                        "RelativeTime": gauge.time_data,
-                        "Pressure_Torr": gauge.pressure_data,
-                        "Pressure_Error": gauge.pressure_error,
-                    },
-                    "name": gauge.name,
-                    "display_name": dataset["name"],
-                    "color": dataset["color"],
-                    "visible": is_visible,
-                    "gauge_type": gauge.__class__.__name__,
-                    "folder_dataset": dataset["name"],
-                }
-
-                if gauge.gauge_location == "upstream":
-                    new_upstream_gauges.append(gauge_dataset)
-                else:
-                    new_downstream_gauges.append(gauge_dataset)
-
-            # Update the dataset with new gauge data
-            dataset["upstream_gauges"] = new_upstream_gauges
-            dataset["downstream_gauges"] = new_downstream_gauges
-
-            return True
-
-        except Exception as e:
-            print(f"Error loading data from {data_folder}: {e}")
-            import traceback
-
-            traceback.print_exc()
-            return False
 
     def process_csv_v0_0(
         self, metadata: dict, data_folder: str
@@ -1497,15 +1398,10 @@ class DataPlotter:
         # Helpers to work with self.datasets (dict) and legacy lists if present
         def _keys_list():
             # Return stable ordered list of keys for indexing by position
-            if isinstance(self.datasets, dict):
-                return list(self.datasets.keys())
-            # legacy fallback
-            return list(range(len(getattr(self, "folder_datasets", []) or [])))
+            return list(self.datasets.keys())
 
         def _iter_datasets():
-            if isinstance(self.datasets, dict):
-                return self.datasets.values()
-            return getattr(self, "folder_datasets", [])
+            return self.datasets.values()
 
         # Callback for dataset name changes
         @self.app.callback(
@@ -1532,10 +1428,7 @@ class DataPlotter:
             # Build current names list for comparison to avoid double application
             current_names = []
             for i in range(len(keys)):
-                if isinstance(self.datasets, dict):
-                    current_names.append(self.datasets[keys[i]].get("name", ""))
-                else:
-                    current_names.append(self.folder_datasets[i].get("name", ""))
+                current_names.append(self.datasets[keys[i]].get("name", ""))
 
             # If nothing changed, skip to avoid duplicate updates
             if list(names) == current_names:
@@ -1545,11 +1438,7 @@ class DataPlotter:
             for i, name in enumerate(names):
                 if i < len(keys) and name and name != current_names[i]:
                     key = keys[i]
-                    if isinstance(self.datasets, dict):
-                        self.datasets[key]["name"] = name
-                    else:
-                        # legacy list-like handling
-                        self.folder_datasets[i]["name"] = name
+                    self.datasets[key]["name"] = name
 
             # Return updated table and plots
             return [
@@ -1577,16 +1466,8 @@ class DataPlotter:
             for i, color in enumerate(colors):
                 if i < len(keys) and color:
                     key = keys[i]
-                    if isinstance(self.datasets, dict):
-                        # new-style datasets use 'colour' key
-                        self.datasets[key]["colour"] = color
-                    else:
-                        # legacy structure may have per-gauge colours
-                        self.folder_datasets[i]["color"] = color
-                        for g in self.folder_datasets[i].get("upstream_gauges", []):
-                            g["color"] = color
-                        for g in self.folder_datasets[i].get("downstream_gauges", []):
-                            g["color"] = color
+                    # new-style datasets use 'colour' key
+                    self.datasets[key]["colour"] = color
 
             # Return updated table and plots
             return [
@@ -1958,16 +1839,9 @@ class DataPlotter:
             keys = _keys_list()
             if 0 <= delete_index < len(keys):
                 key = keys[delete_index]
-                if isinstance(self.datasets, dict):
-                    deleted = self.datasets.pop(key, None)
-                    if deleted:
-                        print(f"Deleted dataset: {deleted.get('name')}")
-                else:
-                    try:
-                        deleted = self.folder_datasets.pop(delete_index)
-                        print(f"Deleted dataset: {deleted.get('name')}")
-                    except Exception:
-                        pass
+                deleted = self.datasets.pop(key, None)
+                if deleted:
+                    print(f"Deleted dataset: {deleted.get('name')}")
 
             # Return updated components
             return [
@@ -2007,10 +1881,7 @@ class DataPlotter:
             dataset = None
             if 0 <= download_index < len(keys):
                 key = keys[download_index]
-                if isinstance(self.datasets, dict):
-                    dataset = self.datasets.get(key)
-                else:
-                    dataset = self.folder_datasets[download_index]
+                dataset = self.datasets.get(key)
 
             if dataset:
                 # Prefer explicit dataset folder path
@@ -2130,10 +2001,7 @@ class DataPlotter:
             for i, is_live in enumerate(live_data_values):
                 if i < len(keys):
                     key = keys[i]
-                    if isinstance(self.datasets, dict):
-                        self.datasets[key]["live_data"] = bool(is_live)
-                    else:
-                        self.folder_datasets[i]["live_data"] = bool(is_live)
+                    self.datasets[key]["live_data"] = bool(is_live)
 
             # Check if any dataset has live data enabled
             any_live_data = any(live_data_values) if live_data_values else False
@@ -2172,47 +2040,36 @@ class DataPlotter:
             if not has_live_data:
                 raise PreventUpdate
 
-            # Reload data for live datasets
-            # If new-style datasets are present (self.datasets dict), prefer using load_data
-            if isinstance(self.datasets, dict):
-                # iterate over key, dataset pairs to allow replacement
-                for key in list(self.datasets.keys()):
-                    dataset = self.datasets[key]
-                    if dataset.get("live_data", False):
-                        # Attempt to reload by calling load_data for the dataset path
-                        dataset_path = dataset.get("dataset_path") or dataset.get(
-                            "folder"
+            # Reload data for live datasets by updating existing datasets in place
+            for key in list(self.datasets.keys()):
+                dataset = self.datasets[key]
+                if dataset.get("live_data", False):
+                    # Get dataset info
+                    dataset_path = dataset.get("dataset_path") or dataset.get("folder")
+                    dataset_name = dataset.get("name")
+
+                    if dataset_path and dataset_name:
+                        # Read metadata file
+                        metadata_path = os.path.join(dataset_path, "run_metadata.json")
+                        with open(metadata_path) as f:
+                            metadata = json.load(f)
+
+                        # Process CSV data based on version
+                        (
+                            time_data,
+                            upstream_data,
+                            downstream_data,
+                        ) = self.process_csv_data(metadata, dataset_path)
+
+                        # Update existing dataset in place
+                        # (preserve name, colour, live_data)
+                        dataset.update(
+                            {
+                                "time_data": time_data,
+                                "upstream_data": upstream_data,
+                                "downstream_data": downstream_data,
+                            }
                         )
-                        dataset_name = dataset.get("name")
-                        if dataset_path and dataset_name:
-                            # keep a snapshot in case reload fails
-                            original = dataset.copy()
-                            try:
-                                # load_data will append a new dataset entry; call it and then replace
-                                self.load_data(dataset_path, dataset_name)
-                                # move last-created dataset into this key
-                                new_key = list(self.datasets.keys())[-1]
-                                self.datasets[key] = self.datasets.pop(new_key)
-                            except Exception:
-                                # restore original on failure
-                                self.datasets[key] = original
-            else:
-                # legacy list-style datasets: call _load_folder_data which mutates in-place
-                for dataset in self.folder_datasets:
-                    if dataset.get("live_data", False):
-                        original_upstream = dataset.get("upstream_gauges", []).copy()
-                        original_downstream = dataset.get(
-                            "downstream_gauges", []
-                        ).copy()
-                        dataset["upstream_gauges"] = []
-                        dataset["downstream_gauges"] = []
-                        reload_success = self._load_folder_data(dataset)
-                        if not reload_success or (
-                            len(dataset.get("upstream_gauges", [])) == 0
-                            and len(dataset.get("downstream_gauges", [])) == 0
-                        ):
-                            dataset["upstream_gauges"] = original_upstream
-                            dataset["downstream_gauges"] = original_downstream
 
             # Regenerate plots with updated data;
             return [
