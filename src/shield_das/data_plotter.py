@@ -325,29 +325,79 @@ class DataPlotter:
             data_folder: Path to folder containing CSV data file
         """
 
-        # csv_path = os.path.join(data_folder, metadata["run_info"]["data_filename"])
-        # data = np.genfromtxt(csv_path, delimiter=",", names=True, dtype=None)
+        # Expect a single CSV file specified in metadata->run_info->data_filename
+        data_filename = metadata.get("run_info", {}).get("data_filename")
+        if not data_filename:
+            raise ValueError("Missing data_filename in run_info for v1.0 metadata")
 
-        # # convert datetime strings to relative time in floats
-        # dt_objects = [
-        #     datetime.strptime(t, "%Y-%m-%d %H:%M:%S.%f") for t in data["RealTimestamp"]
-        # ]
-        # relative_times = [(dt - dt_objects[0]).total_seconds() for dt in dt_objects]
-        # print(relative_times)
-        # exit()
+        csv_path = os.path.join(data_folder, data_filename)
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
 
-        # for gauge_instance in gauge_instances:
-        #     gauge_instance.time_data = relative_times
-        #     gauge_instance.pressure_data = gauge_instance.voltage_to_pressure(
-        #         data[f"{gauge_instance.name}_Voltage_V"]
-        #     )
+        # Read structured CSV; allow text fields for timestamps
+        data = np.genfromtxt(
+            csv_path, delimiter=",", names=True, dtype=None, encoding="utf-8"
+        )
 
-        #     # Calculate error bars
-        #     gauge_instance.pressure_error = gauge_instance.calculate_error(
-        #         gauge_instance.pressure_data
-        #     )
+        # Convert RealTimestamp strings to relative time floats
+        if "RealTimestamp" not in data.dtype.names:
+            raise ValueError("RealTimestamp column not found in v1.0 CSV")
 
-        return None, None, None
+        dt_objects = [
+            datetime.strptime(t, "%Y-%m-%d %H:%M:%S.%f") for t in data["RealTimestamp"]
+        ]
+        time_data = np.array(
+            [(dt - dt_objects[0]).total_seconds() for dt in dt_objects]
+        )
+
+        upstream_pressure_data = None
+        downstream_pressure_data = None
+
+        # Iterate gauges and extract Baratron voltage columns where present
+        for gauge in metadata.get("gauges", []):
+            gname = gauge.get("name")
+            gtype = gauge.get("type")
+            loc = gauge.get("gauge_location")
+
+            # We only handle Baratron gauges (voltage -> pressure) here
+            if gtype == "Baratron626D_Gauge":
+                col_name = f"{gname}_Voltage_V"
+                if col_name not in data.dtype.names:
+                    # skip if expected voltage column not present
+                    continue
+
+                volt_vals = np.array(data[col_name], dtype=float)
+                # Convert voltage to pressure using helper
+
+                pressure_vals = voltage_to_pressure(
+                    volt_vals, full_scale_torr=float(gauge["full_scale_torr"])
+                )
+
+                if loc == "upstream":
+                    upstream_pressure_data = pressure_vals
+                else:
+                    downstream_pressure_data = pressure_vals
+
+        if upstream_pressure_data is None or downstream_pressure_data is None:
+            # If we didn't find Baratron data for both sides, raise an informative error
+            raise ValueError(
+                "Could not find Baratron gauge voltage columns for upstream/downstream"
+                " in v1.0 CSV"
+            )
+
+        upstream_error = calculate_error(upstream_pressure_data)
+        downstream_error = calculate_error(downstream_pressure_data)
+
+        upstream_data = {
+            "pressure_data": upstream_pressure_data,
+            "error_data": upstream_error,
+        }
+        downstream_data = {
+            "pressure_data": downstream_pressure_data,
+            "error_data": downstream_error,
+        }
+
+        return time_data, upstream_data, downstream_data
 
     def create_dataset(
         self,
@@ -1798,17 +1848,47 @@ class DataPlotter:
                     ),
                 ]
 
-            # Try to load the dataset
+            # Validate metadata exists before attempting load
+            metadata_path = os.path.join(new_path, "run_metadata.json")
+            if not os.path.exists(metadata_path):
+                return [
+                    self.create_dataset_table(),
+                    self._generate_upstream_plot(),
+                    self._generate_downstream_plot(),
+                    new_path,
+                    dbc.Alert(
+                        "run_metadata.json not found in dataset folder.",
+                        color="danger",
+                        dismissable=True,
+                        duration=5000,
+                    ),
+                ]
+
             # Determine a sensible dataset name (basename of folder)
             dataset_name = (
                 os.path.basename(new_path) or f"dataset_{len(self.datasets) + 1}"
             )
-            # load_data expects (dataset_path, dataset_name)
+
+            # Attempt to load dataset; report any error to the UI instead of
+            # letting the callback raise and appear to 'do nothing'.
             try:
                 self.load_data(new_path, dataset_name)
-            except TypeError:
-                # Fallback for legacy signature: try calling with single arg
-                self.load_data(new_path)
+            except Exception as e:
+                # Report the error to the user
+                msg = str(e) or "Unknown error while loading dataset"
+                print(f"Error adding dataset from {new_path}: {msg}")
+                return [
+                    self.create_dataset_table(),
+                    self._generate_upstream_plot(),
+                    self._generate_downstream_plot(),
+                    new_path,
+                    dbc.Alert(
+                        f"Failed to add dataset: {msg}",
+                        color="danger",
+                        dismissable=True,
+                        duration=7000,
+                    ),
+                ]
 
             return [
                 self.create_dataset_table(),
@@ -1933,71 +2013,6 @@ class DataPlotter:
 
             raise PreventUpdate
 
-    def _create_dataset_download(self, dataset_path: str):
-        """Package original dataset files for download based on metadata version.
-
-        For version '0.0' zip all CSV files in the folder and return as bytes.
-        For version '1.0' return the single CSV file named in run_info.data_filename
-
-        Returns a dict suitable for dcc.send_bytes or dcc.send_file style use.
-        """
-
-        metadata_path = os.path.join(dataset_path, "run_metadata.json")
-        if not os.path.exists(metadata_path):
-            return None
-
-        with open(metadata_path) as f:
-            try:
-                metadata = json.load(f)
-            except Exception:
-                return None
-
-        version = metadata.get("version")
-
-        if version == "0.0":
-            # Zip the entire dataset folder (all files and subfolders), preserving
-            # the relative directory structure inside the archive.
-            mem_zip = io.BytesIO()
-            with zipfile.ZipFile(
-                mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED
-            ) as zf:
-                for root, _dirs, files in os.walk(dataset_path):
-                    for fname in files:
-                        file_path = os.path.join(root, fname)
-                        try:
-                            arcname = os.path.relpath(file_path, dataset_path)
-                            zf.write(file_path, arcname)
-                        except Exception:
-                            # Skip files we fail to read/write into the archive
-                            continue
-            mem_zip.seek(0)
-            # Use a normalized basename in case dataset_path ends with a slash
-            base = os.path.basename(os.path.normpath(dataset_path))
-            return dict(
-                content=mem_zip.getvalue(),
-                filename=f"{base}.zip",
-                type="application/zip",
-            )
-
-        elif version == "1.0":
-            # Expect single CSV named in metadata->run_info->data_filename
-            data_filename = metadata.get("run_info", {}).get("data_filename")
-            if not data_filename:
-                return None
-            csv_path = os.path.join(dataset_path, data_filename)
-            if not os.path.exists(csv_path):
-                return None
-
-            with open(csv_path, "rb") as fh:
-                data = fh.read()
-
-            return dict(
-                content=data, filename=os.path.basename(csv_path), type="text/csv"
-            )
-
-        # Unsupported version
-        return None
-
         # Callback for exporting upstream plot
         @self.app.callback(
             Output("download-upstream-plot", "data", allow_duplicate=True),
@@ -2059,16 +2074,18 @@ class DataPlotter:
             prevent_initial_call=True,
         )
         def toggle_add_dataset_section(n_clicks, is_open):
-            if not n_clicks:
+            # Only handle actual clicks
+            if n_clicks is None:
                 raise PreventUpdate
 
             # Toggle the collapse state
-            new_is_open = not is_open
-
-            # Update the icon class based on the new state
-            icon_class = "fas fa-chevron-down" if new_is_open else "fas fa-chevron-up"
-
-            return [new_is_open, icon_class]
+            new_is_open = not bool(is_open)
+            new_icon_class = "fas fa-minus" if new_is_open else "fas fa-plus"
+            print(
+                f"toggle_add_dataset_section: clicked={n_clicks}, "
+                f"is_open={is_open} -> {new_is_open}, icon={new_icon_class}"
+            )
+            return new_is_open, new_icon_class
 
         # Callback for handling live data checkbox changes
         @self.app.callback(
@@ -2582,6 +2599,63 @@ class DataPlotter:
                 trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
 
         return fig
+
+    def _create_dataset_download(self, dataset_path: str):
+        """Package original dataset files for download based on metadata version.
+
+        For version '0.0' zip all CSV files in the folder and return as bytes.
+        For version '1.0' return the single CSV file named in run_info.data_filename
+
+        Returns a dict suitable for dcc.send_bytes or dcc.send_file style use.
+        """
+
+        metadata_path = os.path.join(dataset_path, "run_metadata.json")
+
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        version = metadata.get("version")
+
+        if version == "0.0":
+            # Zip the entire dataset folder (all files and subfolders), preserving
+            # the relative directory structure inside the archive.
+            mem_zip = io.BytesIO()
+            with zipfile.ZipFile(
+                mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED
+            ) as zf:
+                for root, _dirs, files in os.walk(dataset_path):
+                    for fname in files:
+                        file_path = os.path.join(root, fname)
+                        try:
+                            arcname = os.path.relpath(file_path, dataset_path)
+                            zf.write(file_path, arcname)
+                        except Exception:
+                            # Skip files we fail to read/write into the archive
+                            continue
+            mem_zip.seek(0)
+            # Use a normalized basename in case dataset_path ends with a slash
+            base = os.path.basename(os.path.normpath(dataset_path))
+            return dict(
+                content=mem_zip.getvalue(),
+                filename=f"{base}.zip",
+                type="application/zip",
+            )
+
+        elif version == "1.0":
+            # Expect single CSV named in metadata->run_info->data_filename
+            data_filename = metadata.get("run_info", {}).get("data_filename")
+
+            csv_path = os.path.join(dataset_path, data_filename)
+
+            with open(csv_path, "rb") as fh:
+                data = fh.read()
+
+            return dict(
+                content=data, filename=os.path.basename(csv_path), type="text/csv"
+            )
+
+        # Unsupported version
+        return None
 
     def start(self):
         """Process data and start the Dash web server"""
