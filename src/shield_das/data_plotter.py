@@ -1241,7 +1241,7 @@ class DataPlotter:
                     "Dataset Name",
                     style={
                         "text-align": "left",
-                        "width": "37.5%",
+                        "width": "43.75%",
                         "padding": "2px",
                         "font-weight": "normal",
                     },
@@ -1250,7 +1250,7 @@ class DataPlotter:
                     "Dataset Path",
                     style={
                         "text-align": "left",
-                        "width": "37.5%",
+                        "width": "43.75%",
                         "padding": "2px",
                         "font-weight": "normal",
                     },
@@ -1259,7 +1259,7 @@ class DataPlotter:
                     "Live",
                     style={
                         "text-align": "center",
-                        "width": "5%",
+                        "width": "2.5%",
                         "padding": "2px",
                         "font-weight": "normal",
                     },
@@ -1277,7 +1277,7 @@ class DataPlotter:
                     "",
                     style={
                         "text-align": "center",
-                        "width": "5%",
+                        "width": "2.5%",
                         "padding": "2px",
                         "font-weight": "normal",
                     },
@@ -1286,7 +1286,7 @@ class DataPlotter:
                     "",
                     style={
                         "text-align": "center",
-                        "width": "5%",
+                        "width": "2.5%",
                         "padding": "2px",
                         "font-weight": "normal",
                     },
@@ -1314,7 +1314,7 @@ class DataPlotter:
                                 className="dataset-name-input",
                             )
                         ],
-                        style={"padding": "2px", "border": "0.1px solid #dee2e6"},
+                        style={"padding": "2px", "border": "none"},
                     ),
                     html.Td(
                         [
@@ -1342,26 +1342,32 @@ class DataPlotter:
                                 },
                             )
                         ],
-                        style={"padding": "4px"},
+                        style={"padding": "4px", "border": "none"},
                     ),
                     html.Td(
                         [
-                            html.Span("  "),  # Manual spacing
-                            dbc.Checkbox(
-                                id={"type": "dataset-live-data", "index": i},
-                                value=self.datasets[f"{dataset}"].get(
-                                    "live_data", False
-                                ),
+                            html.Div(
+                                [
+                                    dbc.Checkbox(
+                                        id={"type": "dataset-live-data", "index": i},
+                                        value=self.datasets[f"{dataset}"].get(
+                                            "live_data", False
+                                        ),
+                                        style={
+                                            "transform": "scale(1.2)",
+                                            "display": "inline-block",
+                                        },
+                                    ),
+                                ],
                                 style={
-                                    "transform": "scale(1.2)",
-                                    "display": "inline-block",
+                                    "margin-left": "15px",
                                 },
-                            ),
+                            )
                         ],
                         style={
                             "padding": "4px",
-                            "text-align": "left",
-                            "padding-left": "30px",
+                            "text-align": "center",
+                            "border": "none",
                         },
                     ),
                     html.Td(
@@ -1386,72 +1392,87 @@ class DataPlotter:
                         style={
                             "text-align": "center",
                             "padding": "4px",
+                            "border": "none",
                         },
                     ),
                     html.Td(
                         [
-                            html.Button(
-                                html.Img(
-                                    src="/assets/download-minimalistic-svgrepo-com.svg",
-                                    style={
-                                        "width": "16px",
-                                        "height": "16px",
-                                    },
-                                ),
-                                id={"type": "download-dataset", "index": i},
-                                className="btn btn-outline-primary btn-sm",
+                            html.Div(
+                                [
+                                    html.Button(
+                                        html.Img(
+                                            src="/assets/download-minimalistic-svgrepo-com.svg",
+                                            style={
+                                                "width": "16px",
+                                                "height": "16px",
+                                            },
+                                        ),
+                                        id={"type": "download-dataset", "index": i},
+                                        className="btn btn-outline-primary btn-sm",
+                                        style={
+                                            "width": "32px",
+                                            "height": "32px",
+                                            "padding": "0",
+                                            "border-radius": "4px",
+                                            "font-size": "14px",
+                                            "line-height": "1",
+                                            "display": "flex",
+                                            "align-items": "center",
+                                            "justify-content": "center",
+                                        },
+                                        title=f"Download {self.datasets[f'{dataset}']['name']}",
+                                    ),
+                                ],
                                 style={
-                                    "width": "32px",
-                                    "height": "32px",
-                                    "padding": "0",
-                                    "border-radius": "4px",
-                                    "font-size": "14px",
-                                    "line-height": "1",
-                                    "display": "flex",
-                                    "align-items": "center",
-                                    "justify-content": "center",
+                                    "margin-left": "15px",  # Add left margin
                                 },
-                                title=f"Download {self.datasets[f'{dataset}']['name']}",
-                            ),
+                            )
                         ],
                         style={
-                            "text-align": "left",
+                            "text-align": "center",
                             "padding": "4px",
                             "vertical-align": "middle",
-                            "padding-left": "15px",
+                            "border": "none",
                         },
                     ),
                     html.Td(
                         [
-                            html.Button(
-                                html.Img(
-                                    src="/assets/delete-svgrepo-com.svg",
-                                    style={
-                                        "width": "16px",
-                                        "height": "16px",
-                                    },
-                                ),
-                                id={"type": "delete-dataset", "index": i},
-                                className="btn btn-outline-danger btn-sm",
+                            html.Div(
+                                [
+                                    html.Button(
+                                        html.Img(
+                                            src="/assets/delete-svgrepo-com.svg",
+                                            style={
+                                                "width": "16px",
+                                                "height": "16px",
+                                            },
+                                        ),
+                                        id={"type": "delete-dataset", "index": i},
+                                        className="btn btn-outline-danger btn-sm",
+                                        style={
+                                            "width": "32px",
+                                            "height": "32px",
+                                            "padding": "0",
+                                            "border-radius": "4px",
+                                            "font-size": "14px",
+                                            "line-height": "1",
+                                            "display": "flex",
+                                            "align-items": "center",
+                                            "justify-content": "center",
+                                        },
+                                        title=f"Delete {self.datasets[f'{dataset}']['name']}",
+                                    ),
+                                ],
                                 style={
-                                    "width": "32px",
-                                    "height": "32px",
-                                    "padding": "0",
-                                    "border-radius": "4px",
-                                    "font-size": "14px",
-                                    "line-height": "1",
-                                    "display": "flex",
-                                    "align-items": "center",
-                                    "justify-content": "center",
+                                    "margin-left": "15px",  # Add left margin
                                 },
-                                title=f"Delete {self.datasets[f'{dataset}']['name']}",
-                            ),
+                            )
                         ],
                         style={
-                            "text-align": "left",
+                            "text-align": "center",
                             "padding": "4px",
                             "vertical-align": "middle",
-                            "padding-left": "15px",
+                            "border": "none",
                         },
                     ),
                 ]
