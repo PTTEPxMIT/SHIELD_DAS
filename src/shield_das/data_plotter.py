@@ -2609,53 +2609,27 @@ class DataPlotter:
         Returns a dict suitable for dcc.send_bytes or dcc.send_file style use.
         """
 
-        metadata_path = os.path.join(dataset_path, "run_metadata.json")
-
-        with open(metadata_path) as f:
-            metadata = json.load(f)
-
-        version = metadata.get("version")
-
-        if version == "0.0":
-            # Zip the entire dataset folder (all files and subfolders), preserving
-            # the relative directory structure inside the archive.
-            mem_zip = io.BytesIO()
-            with zipfile.ZipFile(
-                mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED
-            ) as zf:
-                for root, _dirs, files in os.walk(dataset_path):
-                    for fname in files:
-                        file_path = os.path.join(root, fname)
-                        try:
-                            arcname = os.path.relpath(file_path, dataset_path)
-                            zf.write(file_path, arcname)
-                        except Exception:
-                            # Skip files we fail to read/write into the archive
-                            continue
-            mem_zip.seek(0)
-            # Use a normalized basename in case dataset_path ends with a slash
-            base = os.path.basename(os.path.normpath(dataset_path))
-            return dict(
-                content=mem_zip.getvalue(),
-                filename=f"{base}.zip",
-                type="application/zip",
-            )
-
-        elif version == "1.0":
-            # Expect single CSV named in metadata->run_info->data_filename
-            data_filename = metadata.get("run_info", {}).get("data_filename")
-
-            csv_path = os.path.join(dataset_path, data_filename)
-
-            with open(csv_path, "rb") as fh:
-                data = fh.read()
-
-            return dict(
-                content=data, filename=os.path.basename(csv_path), type="text/csv"
-            )
-
-        # Unsupported version
-        return None
+        # Zip the entire dataset folder (all files and subfolders), preserving
+        # the relative directory structure inside the archive.
+        mem_zip = io.BytesIO()
+        with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for root, _dirs, files in os.walk(dataset_path):
+                for fname in files:
+                    file_path = os.path.join(root, fname)
+                    try:
+                        arcname = os.path.relpath(file_path, dataset_path)
+                        zf.write(file_path, arcname)
+                    except Exception:
+                        # Skip files we fail to read/write into the archive
+                        continue
+        mem_zip.seek(0)
+        # Use a normalized basename in case dataset_path ends with a slash
+        base = os.path.basename(os.path.normpath(dataset_path))
+        return dict(
+            content=mem_zip.getvalue(),
+            filename=f"{base}.zip",
+            type="application/zip",
+        )
 
     def start(self):
         """Process data and start the Dash web server"""
