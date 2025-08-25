@@ -25,6 +25,19 @@ class DataPlotter:
 
     Provides a Dash app that displays upstream and downstream pressure
     plots for multiple datasets. Datasets are stored in `self.datasets`.
+
+    Args:
+        dataset_paths: List of folder paths containing datasets to load on
+        dataset_names: List of names corresponding to each dataset path
+        port: Port number for Dash app (default: 8050)
+
+    Attributes:
+        dataset_paths: List of folder paths containing datasets to load on
+        dataset_names: List of names corresponding to each dataset path
+        port: Port number for Dash app (default: 8050)
+        app: Dash app instance
+        datasets: Dictionary of loaded datasets for plotting
+        figure_resamplers: Dictionary of FigureResampler instances for each plot
     """
 
     # Type hints / attributes
