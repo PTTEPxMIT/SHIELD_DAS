@@ -2,7 +2,7 @@
 
 This is a tool to be used with the SHIELD hydrogen permeation rig, providing a way to both record data from the rig and have a live UI displaying plots of the pressure values in the gauges connected to the rig and the temperature of the connected thermocouple.
 
-<img width="1435" alt="Image" src="https://github.com/user-attachments/assets/c88b2da4-6051-4302-baa7-43a56a5254d2" />
+<img width="1901" height="900" alt="Image" src="https://github.com/user-attachments/assets/4cbdcaeb-0226-4381-a8f3-61f411e6f0aa" />
 
 ## Installation
 
