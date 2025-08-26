@@ -196,7 +196,6 @@ class DataPlotter:
             metadata: Parsed JSON metadata dictionary
             data_folder: Path to folder containing CSV data files
         """
-
         # just use first gauge for time data
         csv_path = os.path.join(data_folder, metadata["gauges"][0]["filename"])
         data = np.genfromtxt(csv_path, delimiter=",", names=True)
@@ -276,13 +275,10 @@ class DataPlotter:
             # We only handle Baratron gauges (voltage -> pressure) here
             if gtype == "Baratron626D_Gauge":
                 col_name = f"{gname}_Voltage_V"
-                if col_name not in data.dtype.names:
-                    # skip if expected voltage column not present
-                    continue
 
                 volt_vals = np.array(data[col_name], dtype=float)
-                # Convert voltage to pressure using helper
 
+                #  Convert voltage to pressure using helper
                 pressure_vals = voltage_to_pressure(
                     volt_vals, full_scale_torr=float(gauge["full_scale_torr"])
                 )
@@ -291,13 +287,6 @@ class DataPlotter:
                     upstream_pressure_data = pressure_vals
                 else:
                     downstream_pressure_data = pressure_vals
-
-        if upstream_pressure_data is None or downstream_pressure_data is None:
-            # If we didn't find Baratron data for both sides, raise an informative error
-            raise ValueError(
-                "Could not find Baratron gauge voltage columns for upstream/downstream"
-                " in v1.0 CSV"
-            )
 
         upstream_error = calculate_error(upstream_pressure_data)
         downstream_error = calculate_error(downstream_pressure_data)
