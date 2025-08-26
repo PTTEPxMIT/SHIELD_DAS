@@ -2,9 +2,20 @@
 
 This is a tool to be used with the SHIELD hydrogen permeation rig, providing a way to both record data from the rig and have a live UI displaying plots of the pressure values in the gauges connected to the rig and the temperature of the connected thermocouple.
 
-<img width="1435" alt="Image" src="https://github.com/user-attachments/assets/c88b2da4-6051-4302-baa7-43a56a5254d2" />
+<img width="1901" height="900" alt="Image" src="https://github.com/user-attachments/assets/4cbdcaeb-0226-4381-a8f3-61f411e6f0aa" />
 
-## Example script
+## Installation
+
+The shield DAS package can be downloaded with `pip`
+
+```python
+pip install SHIELD-DAS
+```
+
+However, in order to interact with the Labjack, additional drivers are required from the [manufacturers site](https://support.labjack.com/docs/windows-setup-basic-driver-only).
+
+
+## Example data recording script
 
 This is an example of a script that can be used to activate the DAS.
 
@@ -12,74 +23,62 @@ This is an example of a script that can be used to activate the DAS.
 from shield_das import (
     DataRecorder,
     WGM701_Gauge,
-    DataPlotter,
     CVM211_Gauge,
     Baratron626D_Gauge
 )
-import time
-import sys
 
 # Define gauges
 gauge_1 = WGM701_Gauge(
     gauge_location="downstream",
-    export_filename="WGM701_pressure_data.csv",
+    ain_channel=10,
 )
 gauge_2 = CVM211_Gauge(
     gauge_location="upstream",
-    export_filename="CVM211_pressure_data.csv",
+    ain_channel=8,
 )
 gauge_3 = Baratron626D_Gauge(
     name="Baratron626D_1KT",
     gauge_location="upstream",
-    export_filename="Baratron626D_1KT_upstream_pressure_data.csv",
-    full_scale_Torr=1000,
+    full_scale_torr=1000,
+    ain_channel=6,
 )
 gauge_4 = Baratron626D_Gauge(
     name="Baratron626D_1T",
     gauge_location="downstream",
-    export_filename="Baratron626D_1T_downstream_pressure_data.csv",
-    full_scale_Torr=1,
+    full_scale_torr=1,
+    ain_channel=4,
 )
 
 # Create recorder
 my_recorder = DataRecorder(
     gauges=[gauge_1, gauge_2, gauge_3, gauge_4],
+    thermocouples=[thermocouple_1],
+    run_type="test_mode",
+    recording_interval=0.5,
+    backup_interval=5,
+    furnace_setpoint=500,
 )
 
-if __name__ == "__main__":
-    # Check if we're running in headless mode
-    headless = "--headless" in sys.argv
-    
-    if headless:
-        # Start recorder directly in headless mode
-        my_recorder.start()
-    else:
-        # Create and start the plotter
-        plotter = DataPlotter(my_recorder)
-        plotter.start()
-    
-    # Keep the main thread running (same for both modes)
-    try:
-        while True:
-            time.sleep(1)
-            # Print status every 10 seconds in headless mode
-            if headless and int(time.time()) % 10 == 0:
-                import datetime
-                print(f"Current time: {datetime.datetime.now()} - Recording in progress... Elapsed time: {my_recorder.elapsed_time:.1f}s")
-    except KeyboardInterrupt:
-        my_recorder.stop()
-        print("Recorder stopped")
+# Start recording
+my_recorder.run()
+
 ```
 
-# Test mode
-If the labjack is not connected, the program can be run in `test_mode`, where dummy data is generated which can then be recorded and veiwed for testing the program works.
-
-It can be activate with the argument `test_mode` in the `DataRecorder` class:
+## Example data visulisation script
 
 ```python
-# Create recorder
-my_recorder = DataRecorder(
-    gauges=[gauge_1, gauge_2, gauge_3, gauge_4],
-    test_mode=True
+
+from shield_das import DataPlotter
+
+data_500C_run1 = "results/08.12/run_2_11h45/"
+data_500C_run2 = "results/08.18/run_2_09h47/"
+data_500C_run3 = "results/08.19/run_2_09h21/"
+data_500C_run4 = "results/08.25/run_1_09h07/"
+
+my_plotter = DataPlotter(
+    dataset_paths=[data_500C_run1, data_500C_run2, data_500C_run3, data_500C_run4],
+    dataset_names=["500C_run1", "500C_run2", "500C_run3", "500C_run4"],
 )
+my_plotter.start()
+
 ```
