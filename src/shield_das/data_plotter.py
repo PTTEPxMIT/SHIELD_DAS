@@ -63,6 +63,8 @@ class DataPlotter:
                 "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
             ],
         )
+        # set the browser tab title
+        self.app.title = "SHIELD Data Visualisation"
 
         # Store datasets
         self.datasets = {}
@@ -1304,7 +1306,7 @@ class DataPlotter:
                                 [
                                     html.Button(
                                         html.Img(
-                                            src="/assets/download-minimalistic-svgrepo-com.svg",
+                                            src="/assets/download.svg",
                                             style={
                                                 "width": "16px",
                                                 "height": "16px",
@@ -1344,7 +1346,7 @@ class DataPlotter:
                                 [
                                     html.Button(
                                         html.Img(
-                                            src="/assets/delete-svgrepo-com.svg",
+                                            src="/assets/delete.svg",
                                             style={
                                                 "width": "16px",
                                                 "height": "16px",
@@ -2523,6 +2525,11 @@ class DataPlotter:
 
         # Add custom CSS for hover effects
         self.app.index_string = hover_css
+
+        custom_favicon_link = (
+            '<link rel="icon" href="/assets/shield.svg" type="image/svg+xml">'
+        )
+        self.app.index_string = hover_css.replace("{%favicon%}", custom_favicon_link)
 
         # Register callbacks
         self.register_callbacks()
