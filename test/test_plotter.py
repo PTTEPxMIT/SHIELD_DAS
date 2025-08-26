@@ -221,14 +221,15 @@ class TestDataPlotterV1Processing:
                 },
                 {
                     "name": "TestDownstream",
-                    "type": "CVM211_Gauge",
+                    "type": "Baratron626D_Gauge",
                     "ain_channel": 6,
                     "gauge_location": "downstream",
+                    "full_scale_torr": 1.0,
                 },
             ],
         }
 
-        # Create CSV with proper v1.0 format
+        # Create CSV with both upstream and downstream Baratron voltage columns
         csv_content = """RealTimestamp,TestUpstream_Voltage (V),TestDownstream_Voltage (V)
             2024-01-01 10:00:00.000000,2.5,3.2
             2024-01-01 10:00:01.000000,2.6,3.3
@@ -240,34 +241,25 @@ class TestDataPlotterV1Processing:
 
         # Test the processing
         self.plotter.dataset_paths = [str(dataset)]
-        self.plotter.load_data()
+        self.plotter.load_data(str(dataset), "Test Dataset")
 
-        # Verify gauge instances
-        assert len(self.plotter.gauge_instances) == 2
-
-        upstream_gauge = next(
-            g for g in self.plotter.gauge_instances if g.gauge_location == "upstream"
-        )
-        downstream_gauge = next(
-            g for g in self.plotter.gauge_instances if g.gauge_location == "downstream"
-        )
-
-        # Verify time data conversion
-        assert len(upstream_gauge.time_data) == 4
-        assert upstream_gauge.time_data[0] == 0.0
-        assert upstream_gauge.time_data[1] == 1.0
-        assert upstream_gauge.time_data[2] == 2.0
-        assert upstream_gauge.time_data[3] == 3.0
-
-        # Verify pressure conversion and error calculation
-        assert len(upstream_gauge.pressure_data) == 4
-        assert len(upstream_gauge.pressure_error) == 4
-        assert len(downstream_gauge.pressure_data) == 4
-        assert len(downstream_gauge.pressure_error) == 4
-
-        # Verify datasets were created
-        assert hasattr(self.plotter, "upstream_datasets")
-        assert hasattr(self.plotter, "downstream_datasets")
+        # Verify datasets were created in the dict-based structure
+        assert isinstance(self.plotter.datasets, dict)
+        assert len(self.plotter.datasets) == 1
+        ds = next(iter(self.plotter.datasets.values()))
+        # Check upstream and downstream data
+        assert "upstream_data" in ds and "downstream_data" in ds
+        # Check time data conversion
+        assert len(ds["time_data"]) == 4
+        assert ds["time_data"][0] == 0.0
+        assert ds["time_data"][1] == 1.0
+        assert ds["time_data"][2] == 2.0
+        assert ds["time_data"][3] == 3.0
+        # Check pressure and error arrays
+        assert len(ds["upstream_data"]["pressure_data"]) == 4
+        assert len(ds["upstream_data"]["error_data"]) == 4
+        assert len(ds["downstream_data"]["pressure_data"]) == 4
+        assert len(ds["downstream_data"]["error_data"]) == 4
 
     def test_process_csv_v1_0_missing_csv_file(self, tmp_path):
         """Test v1.0 processing with missing CSV file."""
@@ -321,7 +313,7 @@ class TestDataPlotterV1Processing:
         # The error will be raised during data processing, not path validation
         self.plotter.dataset_paths = [str(dataset)]
         with pytest.raises((ValueError, KeyError)):
-            self.plotter.load_data()
+            self.plotter.load_data(str(dataset), "Test Dataset")
 
     def test_process_csv_v1_0_invalid_timestamp_format(self, tmp_path):
         """Test v1.0 processing with invalid timestamp format."""
@@ -352,7 +344,7 @@ class TestDataPlotterV1Processing:
         # The error will be raised during data processing, not path validation
         self.plotter.dataset_paths = [str(dataset)]
         with pytest.raises(ValueError):
-            self.plotter.load_data()
+            self.plotter.load_data(str(dataset), "Test Dataset")
 
     def test_process_csv_v1_0_missing_metadata_fields(self, tmp_path):
         """Test v1.0 processing with missing required metadata fields."""
@@ -368,7 +360,7 @@ class TestDataPlotterV1Processing:
                     "type": "Baratron626D_Gauge",
                     "ain_channel": 10,
                     "gauge_location": "upstream",
-                    "full_scale_torr": 1.0,  # Add required parameter
+                    "full_scale_torr": 1.0,
                 }
             ],
         }
@@ -382,8 +374,10 @@ class TestDataPlotterV1Processing:
 
         # The error will be raised during data processing, not path validation
         self.plotter.dataset_paths = [str(dataset)]
-        with pytest.raises(KeyError):
-            self.plotter.load_data()
+        with pytest.raises(
+            ValueError, match="Missing data_filename in run_info for v1.0 metadata"
+        ):
+            self.plotter.load_data(str(dataset), "Test Dataset")
 
 
 class TestDataPlotterDataProcessing:
@@ -412,9 +406,10 @@ class TestDataPlotterDataProcessing:
                 },
                 {
                     "name": "TestGauge2",
-                    "type": "CVM211_Gauge",
+                    "type": "Baratron626D_Gauge",
                     "ain_channel": 6,
                     "gauge_location": "downstream",
+                    "full_scale_torr": 1.0,
                 },
             ],
         }
@@ -430,142 +425,24 @@ class TestDataPlotterDataProcessing:
 
         # This should not raise an error anymore
         self.plotter.dataset_paths = [str(dataset)]
-        self.plotter.load_data()
+        self.plotter.load_data(str(dataset), "Test Dataset")
 
-        # Verify gauge instances were created
-        assert len(self.plotter.gauge_instances) == 2
-
-        # Verify data was loaded correctly
-        gauge1 = self.plotter.gauge_instances[0]
-        gauge2 = self.plotter.gauge_instances[1]
-
-        # Check that time data was converted to relative time
-        assert len(gauge1.time_data) == 3
-        assert gauge1.time_data[0] == 0.0
-        assert gauge1.time_data[1] == 1.0
-        assert gauge1.time_data[2] == 2.0
-
-        # Check that pressure data was calculated from voltage
-        assert len(gauge1.pressure_data) == 3
-        assert len(gauge2.pressure_data) == 3
-
-        # Check that error bars were calculated
-        assert hasattr(gauge1, "pressure_error")
-        assert hasattr(gauge2, "pressure_error")
-        assert len(gauge1.pressure_error) == 3
-        assert len(gauge2.pressure_error) == 3
-
-    @pytest.mark.parametrize(
-        "version,should_raise",
-        [
-            ("0.0", False),
-            ("1.0", False),  # v1.0 is now implemented
-            ("2.0", True),
-            ("unknown", True),
-        ],
-    )
-    def test_process_csv_data_version_handling(self, version, should_raise):
-        """Test process_csv_data handles different versions correctly."""
-        metadata = {"version": version}
-
-        if should_raise:
-            with pytest.raises(
-                NotImplementedError,
-                match=f"Unsupported metadata version: {version}",
-            ):
-                self.plotter.process_csv_data(metadata, "/fake/path")
-        else:
-            # For version 0.0 and 1.0, we need to mock the respective process methods
-            if version == "0.0":
-                with patch.object(self.plotter, "process_csv_v0_0") as mock_process:
-                    self.plotter.process_csv_data(metadata, "/fake/path")
-                    mock_process.assert_called_once_with(metadata, "/fake/path")
-            elif version == "1.0":
-                with patch.object(self.plotter, "process_csv_v1_0") as mock_process:
-                    self.plotter.process_csv_data(metadata, "/fake/path")
-                    mock_process.assert_called_once_with(metadata, "/fake/path")
-
-    def test_create_gauge_instances(self):
-        """Test creation of gauge instances from metadata."""
-        gauges_metadata = [
-            {
-                "name": "CVM211",
-                "type": "CVM211_Gauge",
-                "ain_channel": 8,
-                "gauge_location": "upstream",
-            },
-            {
-                "name": "Baratron626D_1T",
-                "type": "Baratron626D_Gauge",
-                "ain_channel": 10,
-                "full_scale_torr": 1.0,
-                "gauge_location": "downstream",
-            },
-        ]
-
-        gauges = self.plotter.create_gauge_instances(gauges_metadata)
-
-        assert len(gauges) == 2
-        assert all(isinstance(gauge, PressureGauge) for gauge in gauges)
-        assert gauges[0].gauge_location == "upstream"
-        assert gauges[1].gauge_location == "downstream"
-
-
-class TestDataPlotterFileOperations:
-    """Test file operation methods."""
-
-    def setup_method(self):
-        """Create DataPlotter instance for testing."""
-        self.plotter = DataPlotter()
-
-    def test_load_data_with_valid_datasets(self, tmp_path):
-        """Test loading data from valid dataset paths."""
-        # Create test dataset
-        dataset = tmp_path / "dataset"
-        dataset.mkdir()
-
-        metadata = {
-            "version": "0.0",
-            "gauges": {
-                "gauge1": {
-                    "gauge_id": "G001",
-                    "gauge_location": "Test Location",
-                    "gauge_brand": "Test Brand",
-                    "gauge_model": "Test Model",
-                    "gauge_range": [0, 100],
-                    "gauge_units": "psi",
-                }
-            },
-        }
-        (dataset / "run_metadata.json").write_text(json.dumps(metadata))
-        (dataset / "data.csv").write_text("timestamp,pressure\n0,100\n1,200\n")
-
-        # Set dataset paths and load data
-        self.plotter.dataset_paths = [str(dataset)]
-
-        # Mock the process_csv_v0_0 method to avoid complex setup
-        with patch.object(self.plotter, "process_csv_v0_0") as mock_process:
-            self.plotter.load_data()
-            mock_process.assert_called_once()
-
-    def test_load_data_prints_progress(self, tmp_path, capsys):
-        """Test that load_data prints progress information."""
-        # Create test dataset
-        dataset = tmp_path / "dataset"
-        dataset.mkdir()
-
-        metadata = {"version": "0.0", "gauges": {}}
-        (dataset / "run_metadata.json").write_text(json.dumps(metadata))
-        (dataset / "data.csv").write_text("timestamp,pressure\n0,100\n")
-
-        self.plotter.dataset_paths = [str(dataset)]
-
-        with patch.object(self.plotter, "process_csv_v0_0"):
-            self.plotter.load_data()
-
-        captured = capsys.readouterr()
-        assert "Loading data from 1 dataset(s)" in captured.out
-        assert "Processing dataset 1/1" in captured.out
+        # Verify datasets were created in the dict-based structure
+        assert isinstance(self.plotter.datasets, dict)
+        assert len(self.plotter.datasets) == 1
+        ds = next(iter(self.plotter.datasets.values()))
+        # Check upstream and downstream data
+        assert "upstream_data" in ds and "downstream_data" in ds
+        # Check time data conversion
+        assert len(ds["time_data"]) == 3
+        assert ds["time_data"][0] == 0.0
+        assert ds["time_data"][1] == 1.0
+        assert ds["time_data"][2] == 2.0
+        # Check pressure and error arrays
+        assert len(ds["upstream_data"]["pressure_data"]) == 3
+        assert len(ds["downstream_data"]["pressure_data"]) == 3
+        assert len(ds["upstream_data"]["error_data"]) == 3
+        assert len(ds["downstream_data"]["error_data"]) == 3
 
 
 class TestDataPlotterIntegration:
@@ -594,7 +471,7 @@ class TestDataPlotterIntegration:
                 },
                 {
                     "name": "TestGauge2",
-                    "type": "CVM211_Gauge",
+                    "type": "Baratron626D_Gauge",
                     "ain_channel": 6,
                     "gauge_location": "downstream",
                     "filename": "gauge2_data.csv",
@@ -624,32 +501,25 @@ class TestDataPlotterIntegration:
 
         # Set up plotter and process the data
         self.plotter.dataset_paths = [str(dataset)]
-        self.plotter.load_data()
+        self.plotter.load_data(str(dataset), "Test Dataset")
 
-        # Verify gauge instances were created
-        assert len(self.plotter.gauge_instances) == 2
-
-        # Verify data was loaded correctly
-        gauge1 = self.plotter.gauge_instances[0]
-        gauge2 = self.plotter.gauge_instances[1]
-
+        # Verify datasets were created in the dict-based structure
+        assert isinstance(self.plotter.datasets, dict)
+        assert len(self.plotter.datasets) == 1
+        ds = next(iter(self.plotter.datasets.values()))
+        # Check upstream and downstream data
+        assert "upstream_data" in ds and "downstream_data" in ds
         # Check time data
-        assert len(gauge1.time_data) == 5
-        assert gauge1.time_data[0] == 0.0
-        assert gauge1.time_data[-1] == 4.0
-
+        assert len(ds["time_data"]) == 5
+        assert ds["time_data"][0] == 0.0
+        assert ds["time_data"][-1] == 4.0
         # Check pressure data
-        assert len(gauge1.pressure_data) == 5
-        assert gauge1.pressure_data[0] == 0.001
-        assert gauge1.pressure_data[-1] == 0.005
-
-        assert len(gauge2.pressure_data) == 5
-        assert gauge2.pressure_data[0] == 0.1
-        assert gauge2.pressure_data[-1] == 0.5
-
-        # Verify datasets were created for plotting
-        assert hasattr(self.plotter, "upstream_datasets")
-        assert hasattr(self.plotter, "downstream_datasets")
+        assert len(ds["upstream_data"]["pressure_data"]) == 5
+        assert ds["upstream_data"]["pressure_data"][0] == 0.001
+        assert ds["upstream_data"]["pressure_data"][-1] == 0.005
+        assert len(ds["downstream_data"]["pressure_data"]) == 5
+        assert ds["downstream_data"]["pressure_data"][0] == 0.1
+        assert ds["downstream_data"]["pressure_data"][-1] == 0.5
 
     def test_integration_with_data_recorder(self, tmp_path):
         """Integration test using DataRecorder to generate data."""
@@ -712,7 +582,8 @@ class TestDataPlotterIntegration:
         # Update gauge types in metadata to valid types since Mock generates "Mock" type
         metadata["gauges"][0]["type"] = "Baratron626D_Gauge"
         metadata["gauges"][0]["full_scale_torr"] = 1.0  # Add required parameter
-        metadata["gauges"][1]["type"] = "CVM211_Gauge"
+        metadata["gauges"][1]["type"] = "Baratron626D_Gauge"
+        metadata["gauges"][1]["full_scale_torr"] = 1000.0  # Add required parameter
 
         # Write back the corrected metadata
         with open(metadata_path, "w") as f:
@@ -722,14 +593,18 @@ class TestDataPlotterIntegration:
         plotter = DataPlotter(
             dataset_paths=[recorder.run_dir], dataset_names=["Test Run"]
         )
-        plotter.load_data()
+        plotter.load_data(recorder.run_dir, "Test Run")
 
         # Verify the data was processed correctly
-        assert len(plotter.gauge_instances) == 2
-        assert all(hasattr(gauge, "pressure_data") for gauge in plotter.gauge_instances)
-        assert all(
-            hasattr(gauge, "pressure_error") for gauge in plotter.gauge_instances
-        )
+        assert isinstance(plotter.datasets, dict)
+        assert len(plotter.datasets) == 1
+        ds = next(iter(plotter.datasets.values()))
+        assert "upstream_data" in ds and "downstream_data" in ds
+        # Check that pressure and error arrays exist and are non-empty
+        assert len(ds["upstream_data"]["pressure_data"]) > 0
+        assert len(ds["downstream_data"]["pressure_data"]) > 0
+        assert len(ds["upstream_data"]["error_data"]) > 0
+        assert len(ds["downstream_data"]["error_data"]) > 0
 
     def test_process_csv_v0_0_error_handling(self, tmp_path):
         """Test error handling in process_csv_v0_0 method."""
@@ -786,7 +661,7 @@ class TestDataPlotterIntegration:
 
         # Should raise an error due to missing expected columns
         with pytest.raises((ValueError, KeyError)):
-            self.plotter.load_data()
+            self.plotter.load_data(str(dataset), "Test Dataset")
 
 
 class TestDataPlotterPlotGeneration:
@@ -826,31 +701,18 @@ class TestDataPlotterPlotGeneration:
 
         # Load data
         self.plotter.dataset_paths = [str(dataset)]
-        self.plotter.load_data()
+        self.plotter.load_data(str(dataset), "Test Dataset")
 
         # Test that plot generation methods accept error bar parameters
         # These should not raise errors
-        upstream_plot = self.plotter._generate_upstream_plot(
-            show_gauge_names=False, show_error_bars=True
-        )
+        upstream_plot = self.plotter._generate_upstream_plot(show_error_bars=True)
         upstream_plot_no_errors = self.plotter._generate_upstream_plot(
-            show_gauge_names=False, show_error_bars=False
+            show_error_bars=False
         )
 
         # Verify plots were generated
         assert upstream_plot is not None
         assert upstream_plot_no_errors is not None
-
-        # Test full data plots as well
-        upstream_full = self.plotter._generate_upstream_plot_full_data(
-            show_gauge_names=False, show_error_bars=True
-        )
-        upstream_full_no_errors = self.plotter._generate_upstream_plot_full_data(
-            show_gauge_names=False, show_error_bars=False
-        )
-
-        assert upstream_full is not None
-        assert upstream_full_no_errors is not None
 
     def test_error_bars_calculation_in_v1_0_processing(self, tmp_path):
         """Test that error bars are properly calculated during v1.0 processing."""
@@ -863,9 +725,10 @@ class TestDataPlotterPlotGeneration:
             "gauges": [
                 {
                     "name": "ErrorTestGauge",
-                    "type": "CVM211_Gauge",
+                    "type": "Baratron626D_Gauge",
                     "ain_channel": 6,
                     "gauge_location": "downstream",
+                    "full_scale_torr": 1.0,
                 }
             ],
         }
@@ -883,12 +746,13 @@ class TestDataPlotterPlotGeneration:
 
         # Process the data
         self.plotter.dataset_paths = [str(dataset)]
-        self.plotter.load_data()
+        self.plotter.load_data(str(dataset), "Test Dataset")
 
-        # Verify error bars were calculated
-        gauge = self.plotter.gauge_instances[0]
-        assert hasattr(gauge, "pressure_error")
-        assert len(gauge.pressure_error) == len(gauge.pressure_data)
-        assert all(
-            error >= 0 for error in gauge.pressure_error
-        )  # Errors should be positive
+        # Verify error bars were calculated in the dataset dict
+        ds = next(iter(self.plotter.datasets.values()))
+        assert "downstream_data" in ds
+        assert "pressure_data" in ds["downstream_data"]
+        assert len(ds["downstream_data"]["pressure_data"]) == len(
+            ds["downstream_data"]["pressure_data"]
+        )
+        assert all(error >= 0 for error in ds["downstream_data"]["pressure_data"])

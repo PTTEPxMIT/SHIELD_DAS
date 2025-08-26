@@ -1,55 +1,54 @@
+import io
 import json
+import math
 import os
 import threading
 import webbrowser
+import zipfile
 from datetime import datetime
 
 import dash
 import dash_bootstrap_components as dbc
 import numpy as np
+import numpy.typing as npt
 import plotly.graph_objects as go
 from dash import ALL, dcc, html
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 from plotly_resampler import FigureResampler
 
-from .pressure_gauge import (
-    Baratron626D_Gauge,
-    CVM211_Gauge,
-    PressureGauge,
-    WGM701_Gauge,
-)
+from .helpers import calculate_error, voltage_to_pressure
 
 
 class DataPlotter:
-    """
-        DataPlotter is responsible for visualizing pressure gauge data using Dash.
+    """Plotter UI for pressure gauge datasets using Dash.
+
+    Provides a Dash app that displays upstream and downstream pressure
+    plots for multiple datasets. Datasets are stored in `self.datasets`.
 
     Args:
-        dataset_paths: list of strings with paths to dataset folders
-        dataset_names: List of strings to name the datasets (optional, must match data
-            length if provided)
-        port: Port for the Dash server, defaults to 8050
+        dataset_paths: List of folder paths containing datasets to load on
+        dataset_names: List of names corresponding to each dataset path
+        port: Port number for Dash app (default: 8050)
 
     Attributes:
-        dataset_paths: list of strings with paths to dataset folders
-        dataset_names: List of strings to name the datasets (optional, must match data
-            length if provided)
-        port: Port for the Dash server, defaults to 8050
+        dataset_paths: List of folder paths containing datasets to load on
+        dataset_names: List of names corresponding to each dataset path
+        port: Port number for Dash app (default: 8050)
         app: Dash app instance
-        upstream_datasets: List of upstream datasets
-        downstream_datasets: List of downstream datasets
-        folder_datasets: List of folder-level datasets
+        datasets: Dictionary of loaded datasets for plotting
+        figure_resamplers: Dictionary of FigureResampler instances for each plot
     """
 
+    # Type hints / attributes
     dataset_paths: list[str]
     dataset_names: list[str]
     port: int
 
     app: dash.Dash
+    datasets = dict
     upstream_datasets: list[dict]
     downstream_datasets: list[dict]
-    folder_datasets: list[dict]
 
     def __init__(self, dataset_paths=None, dataset_names=None, port=8050):
         self.dataset_paths = dataset_paths or []
@@ -65,13 +64,11 @@ class DataPlotter:
             ],
         )
 
-        # Store multiple datasets - separate lists for upstream and downstream
-        self.upstream_datasets = []
-        self.downstream_datasets = []
+        # Store datasets
+        self.datasets = {}
 
-        # Store folder-level datasets for management
-        # Each folder = 1 dataset with upstream/downstream gauges
-        self.folder_datasets = []
+        # Store FigureResampler instances for callback registration
+        self.figure_resamplers = {}
 
     @property
     def dataset_paths(self) -> list[str]:
@@ -139,47 +136,59 @@ class DataPlotter:
 
         self._dataset_names = value
 
-    def load_data(self):
+    def load_data(self, dataset_path: str, dataset_name: str):
         """
-        Load and process data from all specified data paths.
+        Load and process data from all specified data path.
         """
-        print(f"Loading data from {len(self.dataset_paths)} dataset(s)")
 
-        for i, dataset_path in enumerate(self.dataset_paths):
-            print(
-                f"\n--- Processing dataset {i + 1}/{len(self.dataset_paths)}: "
-                f"{dataset_path} ---"
-            )
+        # Read metadata file
+        metadata_path = os.path.join(dataset_path, "run_metadata.json")
+        with open(metadata_path) as f:
+            metadata = json.load(f)
 
-            # Read metadata file
-            metadata_path = os.path.join(dataset_path, "run_metadata.json")
-            with open(metadata_path) as f:
-                metadata = json.load(f)
+        # Process CSV data based on version
+        time_data, upstream_data, downstream_data = self.process_csv_data(
+            metadata, dataset_path
+        )
 
-            # Process CSV data based on version
-            self.process_csv_data(metadata, dataset_path)
+        # Create datasets for plotting
+        self.create_dataset(
+            dataset_path, dataset_name, time_data, upstream_data, downstream_data
+        )
 
-    def process_csv_data(self, metadata: dict, data_folder: str):
+    def process_csv_data(
+        self, metadata: dict, data_folder: str
+    ) -> tuple[npt.NDArray, dict, dict]:
         """
         Process CSV data based on metadata version.
 
         Args:
             metadata: Parsed JSON metadata dictionary
             data_folder: Path to folder containing CSV data files
+            gauge_instances: List of gauge instances to populate with data
         """
+
         version = metadata.get("version")
 
         if version == "0.0":
-            self.process_csv_v0_0(metadata, data_folder)
+            time_data, upstream_data, downstream_data = self.process_csv_v0_0(
+                metadata, data_folder
+            )
         elif version == "1.0":
-            self.process_csv_v1_0(metadata, data_folder)
+            time_data, upstream_data, downstream_data = self.process_csv_v1_0(
+                metadata, data_folder
+            )
         else:
             raise NotImplementedError(
                 f"Unsupported metadata version: {version}. "
                 f"Only versions '0.0' and '1.0' are supported."
             )
 
-    def process_csv_v0_0(self, metadata: dict, data_folder: str):
+        return time_data, upstream_data, downstream_data
+
+    def process_csv_v0_0(
+        self, metadata: dict, data_folder: str
+    ) -> tuple[npt.NDArray, dict, dict]:
         """
         Process CSV data for metadata version 0.0 (multiple CSV files).
 
@@ -187,31 +196,40 @@ class DataPlotter:
             metadata: Parsed JSON metadata dictionary
             data_folder: Path to folder containing CSV data files
         """
+        # just use first gauge for time data
+        csv_path = os.path.join(data_folder, metadata["gauges"][0]["filename"])
+        data = np.genfromtxt(csv_path, delimiter=",", names=True)
+        time_data = data["RelativeTime"]
 
-        # Create gauge instances from metadata
-        self.gauge_instances = self.create_gauge_instances(metadata["gauges"])
+        # Load upstream and downstream data for each gauge
+        for gauge in metadata["gauges"]:
+            if gauge["type"] == "Baratron626D_Gauge":
+                if gauge["gauge_location"] == "upstream":
+                    csv_path = os.path.join(data_folder, gauge["filename"])
+                    data = np.genfromtxt(csv_path, delimiter=",", names=True)
+                    upstream_pressure_data = data["Pressure_Torr"]
+                if gauge["gauge_location"] == "downstream":
+                    csv_path = os.path.join(data_folder, gauge["filename"])
+                    data = np.genfromtxt(csv_path, delimiter=",", names=True)
+                    downstream_pressure_data = data["Pressure_Torr"]
 
-        # Load data for each gauge
-        for gauge_instance, gauge in zip(self.gauge_instances, metadata["gauges"]):
-            csv_path = os.path.join(data_folder, gauge["filename"])
-            data = np.genfromtxt(csv_path, delimiter=",", names=True)
-            gauge_instance.time_data = data["RelativeTime"]
-            gauge_instance.pressure_data = data["Pressure_Torr"]
+        upstream_error = calculate_error(upstream_pressure_data)
+        downstream_error = calculate_error(downstream_pressure_data)
 
-            # Calculate error bars
-            gauge_instance.pressure_error = gauge_instance.calculate_error(
-                gauge_instance.pressure_data
-            )
+        upstream_data = {
+            "pressure_data": upstream_pressure_data,
+            "error_data": upstream_error,
+        }
+        downstream_data = {
+            "pressure_data": downstream_pressure_data,
+            "error_data": downstream_error,
+        }
 
-        # Create datasets for plotting
-        self.create_datasets_from_gauges(self.gauge_instances, data_folder)
+        return time_data, upstream_data, downstream_data
 
-        # Log completion
-        print("\nDatasets created:")
-        print(f"  - Upstream: {len(self.upstream_datasets)} datasets")
-        print(f"  - Downstream: {len(self.downstream_datasets)} datasets")
-
-    def process_csv_v1_0(self, metadata: dict, data_folder: str):
+    def process_csv_v1_0(
+        self, metadata: dict, data_folder: str
+    ) -> tuple[npt.NDArray, dict, dict]:
         """
         Process CSV data for metadata version 1.0 (single CSV file).
 
@@ -220,91 +238,77 @@ class DataPlotter:
             data_folder: Path to folder containing CSV data file
         """
 
-        # Create gauge instances from metadata
-        self.gauge_instances = self.create_gauge_instances(metadata["gauges"])
+        # Expect a single CSV file specified in metadata->run_info->data_filename
+        data_filename = metadata.get("run_info", {}).get("data_filename")
+        if not data_filename:
+            raise ValueError("Missing data_filename in run_info for v1.0 metadata")
 
-        csv_path = os.path.join(data_folder, metadata["run_info"]["data_filename"])
-        data = np.genfromtxt(csv_path, delimiter=",", names=True, dtype=None)
+        csv_path = os.path.join(data_folder, data_filename)
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
 
-        # convert datetime strings to relative time in floats
+        # Read structured CSV; allow text fields for timestamps
+        data = np.genfromtxt(
+            csv_path, delimiter=",", names=True, dtype=None, encoding="utf-8"
+        )
+
+        # Convert RealTimestamp strings to relative time floats
+        if "RealTimestamp" not in data.dtype.names:
+            raise ValueError("RealTimestamp column not found in v1.0 CSV")
+
         dt_objects = [
             datetime.strptime(t, "%Y-%m-%d %H:%M:%S.%f") for t in data["RealTimestamp"]
         ]
-        relative_times = [(dt - dt_objects[0]).total_seconds() for dt in dt_objects]
+        time_data = np.array(
+            [(dt - dt_objects[0]).total_seconds() for dt in dt_objects]
+        )
 
-        for gauge_instance in self.gauge_instances:
-            gauge_instance.time_data = relative_times
-            gauge_instance.pressure_data = gauge_instance.voltage_to_pressure(
-                data[f"{gauge_instance.name}_Voltage_V"]
-            )
+        upstream_pressure_data = None
+        downstream_pressure_data = None
 
-            # Calculate error bars
-            gauge_instance.pressure_error = gauge_instance.calculate_error(
-                gauge_instance.pressure_data
-            )
+        # Iterate gauges and extract Baratron voltage columns where present
+        for gauge in metadata.get("gauges", []):
+            gname = gauge.get("name")
+            gtype = gauge.get("type")
+            loc = gauge.get("gauge_location")
 
-        # Create datasets for plotting
-        self.create_datasets_from_gauges(self.gauge_instances, data_folder)
+            # We only handle Baratron gauges (voltage -> pressure) here
+            if gtype == "Baratron626D_Gauge":
+                col_name = f"{gname}_Voltage_V"
 
-        # Log completion
-        print("\nDatasets created:")
-        print(f"  - Upstream: {len(self.upstream_datasets)} datasets")
-        print(f"  - Downstream: {len(self.downstream_datasets)} datasets")
+                volt_vals = np.array(data[col_name], dtype=float)
 
-    def create_gauge_instances(self, gauges_metadata: dict) -> list[PressureGauge]:
-        """Create gauge instances from metadata and load CSV data.
+                #  Convert voltage to pressure using helper
+                pressure_vals = voltage_to_pressure(
+                    volt_vals, full_scale_torr=float(gauge["full_scale_torr"])
+                )
 
-        Args:
-            gauges_metadata: Metadata for gauges
+                if loc == "upstream":
+                    upstream_pressure_data = pressure_vals
+                else:
+                    downstream_pressure_data = pressure_vals
 
-        returns:
-            List of PressureGauge instances
-        """
-        gauge_instances = []
+        upstream_error = calculate_error(upstream_pressure_data)
+        downstream_error = calculate_error(downstream_pressure_data)
 
-        # Mapping of gauge types to classes
-        gauge_type_map = {
-            "WGM701_Gauge": WGM701_Gauge,
-            "CVM211_Gauge": CVM211_Gauge,
-            "Baratron626D_Gauge": Baratron626D_Gauge,
+        upstream_data = {
+            "pressure_data": upstream_pressure_data,
+            "error_data": upstream_error,
+        }
+        downstream_data = {
+            "pressure_data": downstream_pressure_data,
+            "error_data": downstream_error,
         }
 
-        for gauge_data in gauges_metadata:
-            gauge_type = gauge_data.get("type")
+        return time_data, upstream_data, downstream_data
 
-            if gauge_type not in gauge_type_map:
-                raise ValueError(f"Unknown gauge type: {gauge_type}")
-
-            gauge_class = gauge_type_map[gauge_type]
-
-            # Extract common parameters
-            name = gauge_data.get("name")
-            ain_channel = gauge_data.get("ain_channel")
-            gauge_location = gauge_data.get("gauge_location")
-
-            # Create instance based on gauge type
-            if gauge_type == "Baratron626D_Gauge":
-                full_scale_torr = gauge_data.get("full_scale_torr")
-                gauge_instance = gauge_class(
-                    ain_channel=ain_channel,
-                    name=name,
-                    gauge_location=gauge_location,
-                    full_scale_Torr=full_scale_torr,
-                )
-            else:
-                # WGM701 and CVM211 use the same constructor parameters
-                gauge_instance = gauge_class(
-                    name=name, ain_channel=ain_channel, gauge_location=gauge_location
-                )
-
-            gauge_instances.append(gauge_instance)
-
-        return gauge_instances
-
-    def create_datasets_from_gauges(
+    def create_dataset(
         self,
-        gauges: list[PressureGauge],
-        data_folder: str,
+        dataset_path: str,
+        dataset_name: str,
+        time_data: npt.NDArray,
+        upstream_data: dict,
+        downstream_data: dict,
     ):
         """
         Create dataset dictionaries from gauge instances for plotting.
@@ -314,55 +318,22 @@ class DataPlotter:
             downstream_gauges: List of gauge instances with downstream location
             data_folder: Path to folder containing the data
         """
-        # Create a single folder-level dataset
-        # Use custom dataset name if provided, otherwise use default naming
-        dataset_index = len(self.folder_datasets)
-        if self.dataset_names and dataset_index < len(self.dataset_names):
-            dataset_name = self.dataset_names[dataset_index]
-        else:
-            dataset_name = f"Dataset_{dataset_index + 1}"
-        dataset_color = self.get_next_color(len(self.folder_datasets))
 
-        folder_dataset = {
+        dataset_color = self.get_next_color(len(self.datasets))
+
+        dataset = {
             "name": dataset_name,
-            "color": dataset_color,
-            "folder": data_folder,
-            "upstream_gauges": [],
-            "downstream_gauges": [],
+            "colour": dataset_color,
+            "dataset_path": dataset_path,
+            "live_data": False,
+            "time_data": time_data,
+            "upstream_data": upstream_data,
+            "downstream_data": downstream_data,
         }
 
-        # Create upstream datasets with folder dataset reference
-        for gauge in gauges:
-            # Only Baratron626D_Gauge is visible by default
-            is_visible = gauge.__class__.__name__ == "Baratron626D_Gauge"
-
-            dataset = {
-                "data": {
-                    "RelativeTime": gauge.time_data,
-                    "Pressure_Torr": gauge.pressure_data,
-                    "Pressure_Error": gauge.pressure_error,
-                },
-                "name": gauge.name,
-                "display_name": dataset_name,
-                "color": dataset_color,
-                "visible": is_visible,
-                "gauge_type": gauge.__class__.__name__,
-                "folder_dataset": dataset_name,
-            }
-            if gauge.gauge_location == "upstream":
-                self.upstream_datasets.append(dataset)
-                folder_dataset["upstream_gauges"].append(dataset)
-            else:
-                self.downstream_datasets.append(dataset)
-                folder_dataset["downstream_gauges"].append(dataset)
-
-            print(
-                f"Added to {gauge.gauge_location} dataset: {dataset['display_name']}"
-                f"(visible: {is_visible})"
-            )
-
         # Add the folder dataset to our list
-        self.folder_datasets.append(folder_dataset)
+        i = len(self.datasets) + 1
+        self.datasets[f"dataset_{i}"] = dataset
 
     def get_next_color(self, index: int) -> str:
         """
@@ -861,12 +832,7 @@ class DataPlotter:
                                                                         "Options",
                                                                         className="mb-2 mt-3",
                                                                     ),
-                                                                    dbc.Checkbox(
-                                                                        id="show-gauge-names-upstream",
-                                                                        label="Show gauge names",
-                                                                        value=False,
-                                                                        className="mb-2",
-                                                                    ),
+                                                                    # removed: show gauge names option
                                                                     dbc.Checkbox(
                                                                         id="show-error-bars-upstream",
                                                                         label="Show error bars",
@@ -1101,12 +1067,7 @@ class DataPlotter:
                                                                         "Options",
                                                                         className="mb-2 mt-3",
                                                                     ),
-                                                                    dbc.Checkbox(
-                                                                        id="show-gauge-names-downstream",
-                                                                        label="Show gauge names",
-                                                                        value=False,
-                                                                        className="mb-2",
-                                                                    ),
+                                                                    # removed: show gauge names option
                                                                     dbc.Checkbox(
                                                                         id="show-error-bars-downstream",
                                                                         label="Show error bars",
@@ -1160,15 +1121,19 @@ class DataPlotter:
                 # Download components for plot exports
                 dcc.Download(id="download-upstream-plot"),
                 dcc.Download(id="download-downstream-plot"),
+                # Interval component for live data updates
+                dcc.Interval(
+                    id="live-data-interval",
+                    interval=1000,  # Update every 1 second
+                    n_intervals=0,
+                    disabled=True,  # Start disabled, enable when needed
+                ),
             ],
             fluid=True,
         )
 
     def create_dataset_table(self):
         """Create a table showing folder-level datasets with editable name and color"""
-        if not self.folder_datasets:
-            return html.Div("No datasets loaded", className="text-muted")
-
         # Create table rows
         rows = []
 
@@ -1179,7 +1144,7 @@ class DataPlotter:
                     "Dataset Name",
                     style={
                         "text-align": "left",
-                        "width": "40%",
+                        "width": "43.75%",
                         "padding": "2px",
                         "font-weight": "normal",
                     },
@@ -1188,7 +1153,16 @@ class DataPlotter:
                     "Dataset Path",
                     style={
                         "text-align": "left",
-                        "width": "40%",
+                        "width": "43.75%",
+                        "padding": "2px",
+                        "font-weight": "normal",
+                    },
+                ),
+                html.Th(
+                    "Live",
+                    style={
+                        "text-align": "center",
+                        "width": "2.5%",
                         "padding": "2px",
                         "font-weight": "normal",
                     },
@@ -1197,15 +1171,6 @@ class DataPlotter:
                     "Colour",
                     style={
                         "text-align": "center",
-                        "width": "10%",
-                        "padding": "2px",
-                        "font-weight": "normal",
-                    },
-                ),
-                html.Th(
-                    "",
-                    style={
-                        "text-align": "center",
                         "width": "5%",
                         "padding": "2px",
                         "font-weight": "normal",
@@ -1215,7 +1180,16 @@ class DataPlotter:
                     "",
                     style={
                         "text-align": "center",
-                        "width": "5%",
+                        "width": "2.5%",
+                        "padding": "2px",
+                        "font-weight": "normal",
+                    },
+                ),
+                html.Th(
+                    "",
+                    style={
+                        "text-align": "center",
+                        "width": "2.5%",
                         "padding": "2px",
                         "font-weight": "normal",
                     },
@@ -1225,16 +1199,16 @@ class DataPlotter:
         rows.append(header_row)
 
         # Add dataset rows
-        for i, dataset in enumerate(self.folder_datasets):
+        for i, dataset in enumerate(self.datasets.keys()):
             row = html.Tr(
                 [
                     html.Td(
                         [
                             dcc.Input(
                                 id={"type": "dataset-name", "index": i},
-                                value=dataset["name"],
+                                value=self.datasets[f"{dataset}"]["name"],
                                 style={
-                                    "width": "90%",
+                                    "width": "95%",
                                     "border": "1px solid #ccc",
                                     "padding": "4px",
                                     "border-radius": "4px",
@@ -1243,21 +1217,23 @@ class DataPlotter:
                                 className="dataset-name-input",
                             )
                         ],
-                        style={"padding": "4px"},
+                        style={"padding": "2px", "border": "none"},
                     ),
                     html.Td(
                         [
                             html.Div(
                                 [
                                     html.Span(
-                                        dataset["folder"],
+                                        self.datasets[f"{dataset}"]["dataset_path"],
                                         style={
                                             "font-family": "monospace",
                                             "font-size": "0.9em",
                                             "color": "#666",
                                             "word-break": "break-all",
                                         },
-                                        title=dataset["folder"],  # Full path on hover
+                                        title=self.datasets[f"{dataset}"][
+                                            "dataset_path"
+                                        ],  # Full path on hover
                                     )
                                 ],
                                 style={
@@ -1269,14 +1245,40 @@ class DataPlotter:
                                 },
                             )
                         ],
-                        style={"padding": "4px"},
+                        style={"padding": "4px", "border": "none"},
+                    ),
+                    html.Td(
+                        [
+                            html.Div(
+                                [
+                                    dbc.Checkbox(
+                                        id={"type": "dataset-live-data", "index": i},
+                                        value=self.datasets[f"{dataset}"].get(
+                                            "live_data", False
+                                        ),
+                                        style={
+                                            "transform": "scale(1.2)",
+                                            "display": "inline-block",
+                                        },
+                                    ),
+                                ],
+                                style={
+                                    "margin-left": "15px",
+                                },
+                            )
+                        ],
+                        style={
+                            "padding": "4px",
+                            "text-align": "center",
+                            "border": "none",
+                        },
                     ),
                     html.Td(
                         [
                             dcc.Input(
                                 id={"type": "dataset-color", "index": i},
                                 type="color",
-                                value=dataset["color"],
+                                value=self.datasets[f"{dataset}"]["colour"],
                                 style={
                                     "width": "32px",
                                     "height": "32px",
@@ -1290,63 +1292,91 @@ class DataPlotter:
                                 className="color-picker-input",
                             ),
                         ],
-                        style={"text-align": "center", "padding": "4px"},
+                        style={
+                            "text-align": "center",
+                            "padding": "4px",
+                            "border": "none",
+                        },
                     ),
                     html.Td(
                         [
-                            html.Button(
-                                html.Img(
-                                    src="/assets/download-minimalistic-svgrepo-com.svg",
-                                    style={
-                                        "width": "16px",
-                                        "height": "16px",
-                                    },
-                                ),
-                                id={"type": "download-dataset", "index": i},
-                                className="btn btn-outline-primary btn-sm",
+                            html.Div(
+                                [
+                                    html.Button(
+                                        html.Img(
+                                            src="/assets/download-minimalistic-svgrepo-com.svg",
+                                            style={
+                                                "width": "16px",
+                                                "height": "16px",
+                                            },
+                                        ),
+                                        id={"type": "download-dataset", "index": i},
+                                        className="btn btn-outline-primary btn-sm",
+                                        style={
+                                            "width": "32px",
+                                            "height": "32px",
+                                            "padding": "0",
+                                            "border-radius": "4px",
+                                            "font-size": "14px",
+                                            "line-height": "1",
+                                            "display": "flex",
+                                            "align-items": "center",
+                                            "justify-content": "center",
+                                        },
+                                        title=f"Download {self.datasets[f'{dataset}']['name']}",
+                                    ),
+                                ],
                                 style={
-                                    "width": "32px",
-                                    "height": "32px",
-                                    "padding": "0",
-                                    "border-radius": "4px",
-                                    "font-size": "14px",
-                                    "line-height": "1",
-                                    "display": "flex",
-                                    "align-items": "center",
-                                    "justify-content": "center",
+                                    "margin-left": "15px",  # Add left margin
                                 },
-                                title=f"Download {dataset['name']}",
-                            ),
+                            )
                         ],
-                        style={"text-align": "center", "padding": "4px"},
+                        style={
+                            "text-align": "center",
+                            "padding": "4px",
+                            "vertical-align": "middle",
+                            "border": "none",
+                        },
                     ),
                     html.Td(
                         [
-                            html.Button(
-                                html.Img(
-                                    src="/assets/delete-svgrepo-com.svg",
-                                    style={
-                                        "width": "16px",
-                                        "height": "16px",
-                                    },
-                                ),
-                                id={"type": "delete-dataset", "index": i},
-                                className="btn btn-outline-danger btn-sm",
+                            html.Div(
+                                [
+                                    html.Button(
+                                        html.Img(
+                                            src="/assets/delete-svgrepo-com.svg",
+                                            style={
+                                                "width": "16px",
+                                                "height": "16px",
+                                            },
+                                        ),
+                                        id={"type": "delete-dataset", "index": i},
+                                        className="btn btn-outline-danger btn-sm",
+                                        style={
+                                            "width": "32px",
+                                            "height": "32px",
+                                            "padding": "0",
+                                            "border-radius": "4px",
+                                            "font-size": "14px",
+                                            "line-height": "1",
+                                            "display": "flex",
+                                            "align-items": "center",
+                                            "justify-content": "center",
+                                        },
+                                        title=f"Delete {self.datasets[f'{dataset}']['name']}",
+                                    ),
+                                ],
                                 style={
-                                    "width": "32px",
-                                    "height": "32px",
-                                    "padding": "0",
-                                    "border-radius": "4px",
-                                    "font-size": "14px",
-                                    "line-height": "1",
-                                    "display": "flex",
-                                    "align-items": "center",
-                                    "justify-content": "center",
+                                    "margin-left": "15px",  # Add left margin
                                 },
-                                title=f"Delete {dataset['name']}",
-                            ),
+                            )
                         ],
-                        style={"text-align": "center", "padding": "4px"},
+                        style={
+                            "text-align": "center",
+                            "padding": "4px",
+                            "vertical-align": "middle",
+                            "border": "none",
+                        },
                     ),
                 ]
             )
@@ -1367,6 +1397,14 @@ class DataPlotter:
         return html.Div([table])
 
     def register_callbacks(self):
+        # Helpers to work with self.datasets (dict) and legacy lists if present
+        def _keys_list():
+            # Return stable ordered list of keys for indexing by position
+            return list(self.datasets.keys())
+
+        def _iter_datasets():
+            return self.datasets.values()
+
         # Callback for dataset name changes
         @self.app.callback(
             [
@@ -1376,8 +1414,6 @@ class DataPlotter:
             ],
             [Input({"type": "dataset-name", "index": ALL}, "value")],
             [
-                State("show-gauge-names-upstream", "value"),
-                State("show-gauge-names-downstream", "value"),
                 State("show-error-bars-upstream", "value"),
                 State("show-error-bars-downstream", "value"),
             ],
@@ -1385,44 +1421,35 @@ class DataPlotter:
         )
         def update_dataset_names(
             names,
-            show_gauge_names_upstream,
-            show_gauge_names_downstream,
             show_error_bars_upstream,
             show_error_bars_downstream,
         ):
-            # Update dataset names
+            # Map positional indices from the UI to dataset keys
+            keys = _keys_list()
+
+            # Build current names list for comparison to avoid double application
+            current_names = []
+            for i in range(len(keys)):
+                current_names.append(self.datasets[keys[i]].get("name", ""))
+
+            # If nothing changed, skip to avoid duplicate updates
+            if list(names) == current_names:
+                raise PreventUpdate
+
+            # Update only entries that changed
             for i, name in enumerate(names):
-                if i < len(self.folder_datasets) and name:
-                    self.folder_datasets[i]["name"] = name
-
-                    # Update upstream gauge display names based on checkbox state
-                    for gauge_dataset in self.folder_datasets[i]["upstream_gauges"]:
-                        if show_gauge_names_upstream:
-                            gauge_dataset["display_name"] = (
-                                f"{gauge_dataset['name']} - {name}"
-                            )
-                        else:
-                            gauge_dataset["display_name"] = name
-                        gauge_dataset["folder_dataset"] = name
-
-                    # Update downstream gauge display names based on checkbox state
-                    for gauge_dataset in self.folder_datasets[i]["downstream_gauges"]:
-                        if show_gauge_names_downstream:
-                            gauge_dataset["display_name"] = (
-                                f"{gauge_dataset['name']} - {name}"
-                            )
-                        else:
-                            gauge_dataset["display_name"] = name
-                        gauge_dataset["folder_dataset"] = name
+                if i < len(keys) and name and name != current_names[i]:
+                    key = keys[i]
+                    self.datasets[key]["name"] = name
 
             # Return updated table and plots
             return [
                 self.create_dataset_table(),
-                self._generate_upstream_plot(
-                    show_gauge_names_upstream, show_error_bars_upstream
-                ),
+                # upstream: _generate_upstream_plot takes show_error_bars as first arg
+                self._generate_upstream_plot(show_error_bars_upstream),
+                # show_gauge_names option removed; pass show_error_bars by keyword
                 self._generate_downstream_plot(
-                    show_gauge_names_downstream, show_error_bars_downstream
+                    show_error_bars=show_error_bars_downstream
                 ),
             ]
 
@@ -1437,17 +1464,12 @@ class DataPlotter:
             prevent_initial_call=True,
         )
         def update_dataset_colors(colors):
-            # Update dataset colors
+            keys = _keys_list()
             for i, color in enumerate(colors):
-                if i < len(self.folder_datasets) and color:
-                    self.folder_datasets[i]["color"] = color
-
-                    # Update colors for all gauges in this dataset
-                    for gauge_dataset in self.folder_datasets[i]["upstream_gauges"]:
-                        gauge_dataset["color"] = color
-
-                    for gauge_dataset in self.folder_datasets[i]["downstream_gauges"]:
-                        gauge_dataset["color"] = color
+                if i < len(keys) and color:
+                    key = keys[i]
+                    # new-style datasets use 'colour' key
+                    self.datasets[key]["colour"] = color
 
             # Return updated table and plots
             return [
@@ -1521,7 +1543,10 @@ class DataPlotter:
 
         # Callback for upstream plot settings changes
         @self.app.callback(
-            [Output("upstream-plot", "figure", allow_duplicate=True)],
+            [
+                Output("upstream-plot", "figure", allow_duplicate=True),
+                Output("upstream-settings-store", "data"),
+            ],
             [
                 Input("upstream-x-scale", "value"),
                 Input("upstream-y-scale", "value"),
@@ -1529,20 +1554,70 @@ class DataPlotter:
                 Input("upstream-x-max", "value"),
                 Input("upstream-y-min", "value"),
                 Input("upstream-y-max", "value"),
+                Input("show-error-bars-upstream", "value"),
+            ],
+            [
+                State("upstream-plot", "figure"),
+                State("upstream-settings-store", "data"),
             ],
             prevent_initial_call=True,
         )
-        def update_upstream_plot_settings(x_scale, y_scale, x_min, x_max, y_min, y_max):
-            # Generate updated upstream plot with new settings
+        def update_upstream_plot_settings(
+            x_scale,
+            y_scale,
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            show_error_bars_upstream,
+            current_fig,
+            store_data,
+        ):
+            # Helper to extract axis ranges from an existing figure
+            def _extract_axis_range(fig, axis_name):
+                if not fig:
+                    return None, None
+                layout = fig.get("layout", {})
+                # common axis keys
+                for key in (axis_name, f"{axis_name}1"):
+                    ax = layout.get(key)
+                    if isinstance(ax, dict):
+                        r = ax.get("range")
+                        if r and len(r) == 2:
+                            return r[0], r[1]
+                return None, None
+
+            # Simpler behavior: always reset the figure when scale or error-bar
+            # options change. Do not preserve current zoom. If inputs are None
+            # pass None so the generator autosizes.
+            x_min_use = x_min if x_min is not None else None
+            x_max_use = x_max if x_max is not None else None
+            y_min_use = y_min if y_min is not None else None
+            y_max_use = y_max if y_max is not None else None
+
+            # Generate updated upstream plot with new settings (use keywords)
+            # Update store data with current scale settings
+            new_store = {"y_scale": y_scale}
+
             return [
                 self._generate_upstream_plot(
-                    x_scale, y_scale, x_min, x_max, y_min, y_max
-                )
+                    show_error_bars=bool(show_error_bars_upstream),
+                    x_scale=x_scale,
+                    y_scale=y_scale,
+                    x_min=x_min_use,
+                    x_max=x_max_use,
+                    y_min=y_min_use,
+                    y_max=y_max_use,
+                ),
+                new_store,
             ]
 
         # Callback for downstream plot settings changes
         @self.app.callback(
-            [Output("downstream-plot", "figure", allow_duplicate=True)],
+            [
+                Output("downstream-plot", "figure", allow_duplicate=True),
+                Output("downstream-settings-store", "data"),
+            ],
             [
                 Input("downstream-x-scale", "value"),
                 Input("downstream-y-scale", "value"),
@@ -1550,17 +1625,60 @@ class DataPlotter:
                 Input("downstream-x-max", "value"),
                 Input("downstream-y-min", "value"),
                 Input("downstream-y-max", "value"),
+                Input("show-error-bars-downstream", "value"),
+            ],
+            [
+                State("downstream-plot", "figure"),
+                State("downstream-settings-store", "data"),
             ],
             prevent_initial_call=True,
         )
         def update_downstream_plot_settings(
-            x_scale, y_scale, x_min, x_max, y_min, y_max
+            x_scale,
+            y_scale,
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            show_error_bars_downstream,
+            current_fig,
+            store_data,
         ):
-            # Generate updated downstream plot with new settings
+            # Helper to extract axis ranges from an existing figure
+            def _extract_axis_range(fig, axis_name):
+                if not fig:
+                    return None, None
+                layout = fig.get("layout", {})
+                for key in (axis_name, f"{axis_name}1"):
+                    ax = layout.get(key)
+                    if isinstance(ax, dict):
+                        r = ax.get("range")
+                        if r and len(r) == 2:
+                            return r[0], r[1]
+                return None, None
+
+            # Simpler behavior: always reset the figure when scale or error-bar
+            # options change. Do not preserve current zoom. If inputs are None
+            # pass None so the generator autosizes.
+            x_min_use = x_min if x_min is not None else None
+            x_max_use = x_max if x_max is not None else None
+            y_min_use = y_min if y_min is not None else None
+            y_max_use = y_max if y_max is not None else None
+
+            new_store = {"y_scale": y_scale}
+
+            # Generate updated downstream plot with new settings (use keywords)
             return [
                 self._generate_downstream_plot(
-                    x_scale, y_scale, x_min, x_max, y_min, y_max
-                )
+                    show_error_bars=bool(show_error_bars_downstream),
+                    x_scale=x_scale,
+                    y_scale=y_scale,
+                    x_min=x_min_use,
+                    x_max=x_max_use,
+                    y_min=y_min_use,
+                    y_max=y_max_use,
+                ),
+                new_store,
             ]
 
         # Callbacks to update min values based on scale mode
@@ -1596,70 +1714,6 @@ class DataPlotter:
         def update_downstream_y_min(y_scale):
             return [0 if y_scale == "linear" else None]
 
-        # Callback for upstream show gauge names checkbox
-        @self.app.callback(
-            [Output("upstream-plot", "figure", allow_duplicate=True)],
-            [
-                Input("show-gauge-names-upstream", "value"),
-                Input("show-error-bars-upstream", "value"),
-            ],
-            prevent_initial_call=True,
-        )
-        def update_upstream_label_display(
-            show_gauge_names_upstream, show_error_bars_upstream
-        ):
-            # Update display names for upstream gauges only
-            for folder_dataset in self.folder_datasets:
-                dataset_name = folder_dataset["name"]
-
-                # Update upstream gauges
-                for gauge_dataset in folder_dataset["upstream_gauges"]:
-                    if show_gauge_names_upstream:
-                        gauge_dataset["display_name"] = (
-                            f"{gauge_dataset['name']} - {dataset_name}"
-                        )
-                    else:
-                        gauge_dataset["display_name"] = dataset_name
-
-            # Return updated upstream plot
-            return [
-                self._generate_upstream_plot(
-                    show_gauge_names_upstream, show_error_bars_upstream
-                )
-            ]
-
-        # Callback for downstream show gauge names checkbox
-        @self.app.callback(
-            [Output("downstream-plot", "figure", allow_duplicate=True)],
-            [
-                Input("show-gauge-names-downstream", "value"),
-                Input("show-error-bars-downstream", "value"),
-            ],
-            prevent_initial_call=True,
-        )
-        def update_downstream_label_display(
-            show_gauge_names_downstream, show_error_bars_downstream
-        ):
-            # Update display names for downstream gauges only
-            for folder_dataset in self.folder_datasets:
-                dataset_name = folder_dataset["name"]
-
-                # Update downstream gauges
-                for gauge_dataset in folder_dataset["downstream_gauges"]:
-                    if show_gauge_names_downstream:
-                        gauge_dataset["display_name"] = (
-                            f"{gauge_dataset['name']} - {dataset_name}"
-                        )
-                    else:
-                        gauge_dataset["display_name"] = dataset_name
-
-            # Return updated downstream plot
-            return [
-                self._generate_downstream_plot(
-                    show_gauge_names_downstream, show_error_bars_downstream
-                )
-            ]
-
         # Callback for adding new dataset
         @self.app.callback(
             [
@@ -1684,8 +1738,6 @@ class DataPlotter:
                 ]
 
             # Check if path exists and contains valid data
-            import os
-
             if not os.path.exists(new_path):
                 return [
                     self.create_dataset_table(),
@@ -1700,41 +1752,65 @@ class DataPlotter:
                     ),
                 ]
 
-            try:
-                # Try to load the dataset
-                self.load_data(new_path)
-
-                return [
-                    self.create_dataset_table(),
-                    self._generate_upstream_plot(),
-                    self._generate_downstream_plot(),
-                    "",  # Clear the input field
-                    dbc.Alert(
-                        f"Dataset added successfully from {new_path}",
-                        color="success",
-                        dismissable=True,
-                        duration=3000,
-                    ),
-                ]
-
-            except Exception as e:
+            # Validate metadata exists before attempting load
+            metadata_path = os.path.join(new_path, "run_metadata.json")
+            if not os.path.exists(metadata_path):
                 return [
                     self.create_dataset_table(),
                     self._generate_upstream_plot(),
                     self._generate_downstream_plot(),
                     new_path,
                     dbc.Alert(
-                        f"Error loading dataset: {e!s}",
+                        "run_metadata.json not found in dataset folder.",
                         color="danger",
                         dismissable=True,
                         duration=5000,
                     ),
                 ]
 
+            # Determine a sensible dataset name (basename of folder)
+            dataset_name = (
+                os.path.basename(new_path) or f"dataset_{len(self.datasets) + 1}"
+            )
+
+            # Attempt to load dataset; report any error to the UI instead of
+            # letting the callback raise and appear to 'do nothing'.
+            try:
+                self.load_data(new_path, dataset_name)
+            except Exception as e:
+                # Report the error to the user
+                msg = str(e) or "Unknown error while loading dataset"
+                print(f"Error adding dataset from {new_path}: {msg}")
+                return [
+                    self.create_dataset_table(),
+                    self._generate_upstream_plot(),
+                    self._generate_downstream_plot(),
+                    new_path,
+                    dbc.Alert(
+                        f"Failed to add dataset: {msg}",
+                        color="danger",
+                        dismissable=True,
+                        duration=7000,
+                    ),
+                ]
+
+            return [
+                self.create_dataset_table(),
+                self._generate_upstream_plot(),
+                self._generate_downstream_plot(),
+                "",  # Clear the input field
+                dbc.Alert(
+                    f"Dataset added successfully from {new_path}",
+                    color="success",
+                    dismissable=True,
+                    duration=3000,
+                ),
+            ]
+
         # Callback for deleting datasets
         @self.app.callback(
             [
-                Output("dataset-table", "children"),
+                Output("dataset-table-container", "children"),
                 Output("upstream-plot", "figure"),
                 Output("downstream-plot", "figure"),
             ],
@@ -1757,14 +1833,17 @@ class DataPlotter:
 
             try:
                 button_data = json.loads(button_id.split(".")[0])
-                delete_index = button_data["index"]
-            except (json.JSONDecodeError, KeyError, IndexError):
+                delete_index = int(button_data["index"])
+            except (json.JSONDecodeError, KeyError, IndexError, ValueError):
                 raise PreventUpdate
 
-            # Remove the dataset at the specified index
-            if 0 <= delete_index < len(self.folder_datasets):
-                deleted_dataset = self.folder_datasets.pop(delete_index)
-                print(f"Deleted dataset: {deleted_dataset['name']}")
+            # Map positional index to dataset key and remove
+            keys = _keys_list()
+            if 0 <= delete_index < len(keys):
+                key = keys[delete_index]
+                deleted = self.datasets.pop(key, None)
+                if deleted:
+                    print(f"Deleted dataset: {deleted.get('name')}")
 
             # Return updated components
             return [
@@ -1795,61 +1874,36 @@ class DataPlotter:
 
             try:
                 button_data = json.loads(button_id.split(".")[0])
-                download_index = button_data["index"]
-            except (json.JSONDecodeError, KeyError, IndexError):
+                download_index = int(button_data["index"])
+            except (json.JSONDecodeError, KeyError, IndexError, ValueError):
                 raise PreventUpdate
 
-            # Get the dataset to download
-            if 0 <= download_index < len(self.folder_datasets):
-                dataset = self.folder_datasets[download_index]
+            # Map positional index to dataset key
+            keys = _keys_list()
+            dataset = None
+            if 0 <= download_index < len(keys):
+                key = keys[download_index]
+                dataset = self.datasets.get(key)
 
-                # Create CSV data combining all gauges from this dataset
-                import pandas as pd
-
-                # Combine upstream and downstream gauges
-                all_gauges = dataset["upstream_gauges"] + dataset["downstream_gauges"]
-
-                # Collect all unique time points first
-                all_times = set()
-                gauge_data_dict = {}
-
-                for gauge in all_gauges:
-                    gauge_data = gauge["data"]
-                    if len(gauge_data.get("RelativeTime", [])) > 0:
-                        times = gauge_data["RelativeTime"]
-                        pressures = gauge_data["Pressure_Torr"]
-
-                        # Add times to our set
-                        all_times.update(times)
-
-                        # Store gauge data with unique column name
-                        gauge_name = gauge.get(
-                            "display_name", gauge.get("name", "Unknown")
+            if dataset:
+                # Prefer explicit dataset folder path
+                dataset_path = dataset.get("dataset_path") or dataset.get("folder")
+                if dataset_path and os.path.exists(dataset_path):
+                    packaged = self._create_dataset_download(dataset_path)
+                    if packaged is not None:
+                        # If packaged content is binary (zip or bytes), use dcc.send_bytes
+                        content = packaged.get("content")
+                        filename = packaged.get("filename")
+                        if isinstance(content, (bytes, bytearray)):
+                            return dcc.send_bytes(
+                                lambda f, data=content: f.write(data), filename
+                            )
+                        # If content is text (string), return as dict like before
+                        return dict(
+                            content=content,
+                            filename=filename,
+                            type=packaged.get("type", "text/csv"),
                         )
-                        gauge_data_dict[f"{gauge_name}_Pressure_Torr"] = dict(
-                            zip(times, pressures)
-                        )
-
-                if all_times and gauge_data_dict:
-                    # Create a sorted list of times
-                    sorted_times = sorted(all_times)
-
-                    # Build the final DataFrame
-                    result_data = {"RelativeTime": sorted_times}
-
-                    # Add each gauge's data
-                    for gauge_column, time_pressure_map in gauge_data_dict.items():
-                        result_data[gauge_column] = [
-                            time_pressure_map.get(time, "") for time in sorted_times
-                        ]
-
-                    df = pd.DataFrame(result_data)
-                    csv_data = df.to_csv(index=False)
-                    return dict(
-                        content=csv_data,
-                        filename=f"{dataset['name']}_data.csv",
-                        type="text/csv",
-                    )
 
             raise PreventUpdate
 
@@ -1857,22 +1911,27 @@ class DataPlotter:
         @self.app.callback(
             Output("download-upstream-plot", "data", allow_duplicate=True),
             [Input("export-upstream-plot", "n_clicks")],
-            [State("show-gauge-names-upstream", "value")],
+            [State("upstream-plot", "figure")],
             prevent_initial_call=True,
         )
-        def export_upstream_plot(n_clicks, show_gauge_names):
+        def export_upstream_plot(n_clicks, current_fig):
             if not n_clicks:
                 raise PreventUpdate
 
-            # Generate the upstream plot with FULL DATA (no resampling)
-            fig = self._generate_upstream_plot_full_data(show_gauge_names)
+            # Use the current rendered figure (as dict) and convert to HTML
+            if not current_fig:
+                raise PreventUpdate
 
-            # Convert to HTML
-            html_str = fig.to_html(include_plotlyjs="inline")
+            # Convert dict->plotly Figure then to HTML
+            try:
+                fig = go.Figure(current_fig)
+                html_str = fig.to_html(include_plotlyjs="inline")
+            except Exception:
+                raise PreventUpdate
 
             return dict(
                 content=html_str,
-                filename="upstream_plot_full_data.html",
+                filename="upstream_plot.html",
                 type="text/html",
             )
 
@@ -1880,15 +1939,14 @@ class DataPlotter:
         @self.app.callback(
             Output("download-downstream-plot", "data", allow_duplicate=True),
             [Input("export-downstream-plot", "n_clicks")],
-            [State("show-gauge-names-downstream", "value")],
             prevent_initial_call=True,
         )
-        def export_downstream_plot(n_clicks, show_gauge_names):
+        def export_downstream_plot(n_clicks):
             if not n_clicks:
                 raise PreventUpdate
 
             # Generate the downstream plot with FULL DATA (no resampling)
-            fig = self._generate_downstream_plot_full_data(show_gauge_names)
+            fig = self._generate_downstream_plot_full_data(False)
 
             # Convert to HTML
             html_str = fig.to_html(include_plotlyjs="inline")
@@ -1910,110 +1968,170 @@ class DataPlotter:
             prevent_initial_call=True,
         )
         def toggle_add_dataset_section(n_clicks, is_open):
-            if not n_clicks:
+            # Only handle actual clicks
+            if n_clicks is None:
                 raise PreventUpdate
 
             # Toggle the collapse state
-            new_is_open = not is_open
-
-            # Change icon based on state
-            icon_class = "fas fa-minus" if new_is_open else "fas fa-plus"
-
-            return new_is_open, icon_class
-
-    def _generate_plot(
-        self,
-        x_scale=None,
-        y_scale=None,
-        x_min=None,
-        x_max=None,
-        y_min=None,
-        y_max=None,
-    ):
-        """Generate the plot based on current dataset state and settings"""
-        # Use FigureResampler with parameters to hide resampling annotations
-        fig = FigureResampler(
-            go.Figure(),
-            show_dash_kwargs={"mode": "disabled"},
-            show_mean_aggregation_size=False,
-            verbose=False,
-        )
-
-        # Iterate through folder datasets and all their gauges
-        for folder_dataset in self.folder_datasets:
-            all_gauges = (
-                folder_dataset["upstream_gauges"] + folder_dataset["downstream_gauges"]
+            new_is_open = not bool(is_open)
+            new_icon_class = "fas fa-minus" if new_is_open else "fas fa-plus"
+            print(
+                f"toggle_add_dataset_section: clicked={n_clicks}, "
+                f"is_open={is_open} -> {new_is_open}, icon={new_icon_class}"
             )
-            for dataset in all_gauges:
-                # Skip invisible datasets
-                if not dataset.get("visible", True):
-                    continue
+            return new_is_open, new_icon_class
 
-                data = dataset["data"]
-                display_name = dataset.get(
-                    "display_name", dataset.get("name", "Unknown Dataset")
-                )
-                color = dataset["color"]
-
-                if len(data.get("RelativeTime", [])) > 0:
-                    # Extract data directly from our structure
-                    time_data = data["RelativeTime"]
-                    pressure_data = data["Pressure_Torr"]
-
-                    # Use plotly-resampler for automatic downsampling
-                    fig.add_trace(
-                        go.Scatter(
-                            x=time_data,
-                            y=pressure_data,
-                            mode="lines+markers",
-                            name=display_name,
-                            line=dict(color=color, width=1.5),
-                            marker=dict(size=3),
-                        )
-                    )
-
-        # Configure the layout
-        fig.update_layout(
-            height=600,
-            xaxis_title="Relative Time (s)",
-            yaxis_title="Pressure (Torr)",
-            template="plotly_white",
-            margin=dict(l=60, r=30, t=40, b=60),
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
-            ),
+        # Callback for handling live data checkbox changes
+        @self.app.callback(
+            [
+                Output("upstream-plot", "figure", allow_duplicate=True),
+                Output("downstream-plot", "figure", allow_duplicate=True),
+                Output("live-data-interval", "disabled"),
+            ],
+            [Input({"type": "dataset-live-data", "index": ALL}, "value")],
+            [
+                State("show-error-bars-upstream", "value"),
+                State("show-error-bars-downstream", "value"),
+            ],
+            prevent_initial_call=True,
         )
+        def handle_live_data_toggle(
+            live_data_values, show_error_bars_upstream, show_error_bars_downstream
+        ):
+            # Update the live_data flag for each dataset using keys mapping
+            keys = _keys_list()
+            for i, is_live in enumerate(live_data_values):
+                if i < len(keys):
+                    key = keys[i]
+                    self.datasets[key]["live_data"] = bool(is_live)
 
-        # Apply axis scaling
-        x_axis_type = x_scale if x_scale else "linear"
-        y_axis_type = y_scale if y_scale else "linear"
+            # Check if any dataset has live data enabled
+            any_live_data = any(live_data_values) if live_data_values else False
 
-        fig.update_xaxes(type=x_axis_type)
-        fig.update_yaxes(type=y_axis_type)
+            # Regenerate plots with updated data
+            return [
+                self._generate_upstream_plot(show_error_bars_upstream),
+                self._generate_downstream_plot(
+                    show_error_bars=show_error_bars_downstream
+                ),
+                not any_live_data,  # Disable interval if no live data
+            ]
 
-        # Apply axis ranges if specified
-        if x_min is not None and x_max is not None:
-            fig.update_xaxes(range=[x_min, x_max])
+        # Callback for periodic live data updates
+        @self.app.callback(
+            [
+                Output("upstream-plot", "figure", allow_duplicate=True),
+                Output("downstream-plot", "figure", allow_duplicate=True),
+            ],
+            [Input("live-data-interval", "n_intervals")],
+            [
+                State("show-error-bars-upstream", "value"),
+                State("show-error-bars-downstream", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def update_live_data(
+            n_intervals, show_error_bars_upstream, show_error_bars_downstream
+        ):
+            # Check if any dataset has live data enabled
+            datasets_iter = list(_iter_datasets())
+            has_live_data = any(
+                dataset.get("live_data", False) for dataset in datasets_iter
+            )
 
-        if y_min is not None and y_max is not None:
-            if y_axis_type == "log":
-                # For log scale, use log10 of the values
-                import math
+            if not has_live_data:
+                raise PreventUpdate
 
-                fig.update_yaxes(range=[math.log10(y_min), math.log10(y_max)])
-            else:
-                fig.update_yaxes(range=[y_min, y_max])
+            # Reload data for live datasets by updating existing datasets in place
+            for key in list(self.datasets.keys()):
+                dataset = self.datasets[key]
+                if dataset.get("live_data", False):
+                    # Get dataset info
+                    dataset_path = dataset.get("dataset_path") or dataset.get("folder")
+                    dataset_name = dataset.get("name")
 
-        # Clean up trace names to remove [R] annotations
-        for trace in fig.data:
-            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
-                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
+                    if dataset_path and dataset_name:
+                        # Read metadata file
+                        metadata_path = os.path.join(dataset_path, "run_metadata.json")
+                        with open(metadata_path) as f:
+                            metadata = json.load(f)
 
-        return fig
+                        # Process CSV data based on version
+                        (
+                            time_data,
+                            upstream_data,
+                            downstream_data,
+                        ) = self.process_csv_data(metadata, dataset_path)
+
+                        # Update existing dataset in place
+                        # (preserve name, colour, live_data)
+                        dataset.update(
+                            {
+                                "time_data": time_data,
+                                "upstream_data": upstream_data,
+                                "downstream_data": downstream_data,
+                            }
+                        )
+
+            # Regenerate plots with updated data;
+            return [
+                self._generate_upstream_plot(show_error_bars_upstream),
+                self._generate_downstream_plot(
+                    show_error_bars=show_error_bars_downstream
+                ),
+            ]
+
+        # FigureResampler callbacks for interactive zooming/panning
+        @self.app.callback(
+            Output("upstream-plot", "figure", allow_duplicate=True),
+            Input("upstream-plot", "relayoutData"),
+            prevent_initial_call=True,
+        )
+        def update_upstream_plot_on_relayout(relayoutData):
+            if "upstream-plot" in self.figure_resamplers and relayoutData:
+                fig_resampler = self.figure_resamplers["upstream-plot"]
+
+                # Check if this is an autoscale/reset zoom event (double-click)
+                if (
+                    "autosize" in relayoutData
+                    or "xaxis.autorange" in relayoutData
+                    or "yaxis.autorange" in relayoutData
+                    or relayoutData.get("xaxis.autorange") is True
+                    or relayoutData.get("yaxis.autorange") is True
+                ):
+                    # Regenerate the full plot for autoscale
+                    return self._generate_upstream_plot()
+                else:
+                    # Normal zoom/pan - use resampling
+                    return fig_resampler.construct_update_data_patch(relayoutData)
+            return dash.no_update
+
+        @self.app.callback(
+            Output("downstream-plot", "figure", allow_duplicate=True),
+            Input("downstream-plot", "relayoutData"),
+            prevent_initial_call=True,
+        )
+        def update_downstream_plot_on_relayout(relayoutData):
+            if "downstream-plot" in self.figure_resamplers and relayoutData:
+                fig_resampler = self.figure_resamplers["downstream-plot"]
+
+                # Check if this is an autoscale/reset zoom event (double-click)
+                if (
+                    "autosize" in relayoutData
+                    or "xaxis.autorange" in relayoutData
+                    or "yaxis.autorange" in relayoutData
+                    or relayoutData.get("xaxis.autorange") is True
+                    or relayoutData.get("yaxis.autorange") is True
+                ):
+                    # Regenerate the full plot for autoscale
+                    return self._generate_downstream_plot()
+                else:
+                    # Normal zoom/pan - use resampling
+                    return fig_resampler.construct_update_data_patch(relayoutData)
+            return dash.no_update
 
     def _generate_upstream_plot(
         self,
-        show_gauge_names=False,
         show_error_bars=True,
         x_scale=None,
         y_scale=None,
@@ -2031,53 +2149,52 @@ class DataPlotter:
             verbose=False,
         )
 
-        # Iterate through folder datasets and their upstream gauges
-        for folder_dataset in self.folder_datasets:
-            for dataset in folder_dataset["upstream_gauges"]:
-                # Skip invisible datasets
-                if not dataset.get("visible", True):
-                    continue
+        # Store the FigureResampler instance
+        self.figure_resamplers["upstream-plot"] = fig
 
-                data = dataset["data"]
-                display_name = dataset.get(
-                    "display_name", dataset.get("name", "Unknown Dataset")
+        # Iterate through datasets and obtain the upstream data
+        for dataset_name in self.datasets.keys():
+            time_data = self.datasets[f"{dataset_name}"]["time_data"]
+            time_data = np.ascontiguousarray(time_data)
+            pressure_data = self.datasets[f"{dataset_name}"]["upstream_data"][
+                "pressure_data"
+            ]
+            pressure_data = np.ascontiguousarray(pressure_data)
+            pressure_error = self.datasets[f"{dataset_name}"]["upstream_data"][
+                "error_data"
+            ]
+            pressure_error = np.ascontiguousarray(pressure_error)
+
+            colour = self.datasets[f"{dataset_name}"]["colour"]
+
+            # Create scatter trace
+            scatter_kwargs = {
+                "mode": "lines+markers",
+                "name": self.datasets[f"{dataset_name}"]["name"],
+                "line": dict(color=colour, width=1.5),
+                "marker": dict(size=3),
+            }
+
+            # Add error bars if enabled
+            if show_error_bars:
+                scatter_kwargs["error_y"] = dict(
+                    type="data",
+                    array=pressure_error,
+                    visible=True,
+                    color=colour,
+                    thickness=1.5,
+                    width=3,
                 )
-                color = dataset["color"]
 
-                if len(data.get("RelativeTime", [])) > 0:
-                    # Extract data directly from our structure
-                    time_data = data["RelativeTime"]
-                    pressure_data = data["Pressure_Torr"]
-                    pressure_error = data["Pressure_Error"]
-
-                    # Create scatter trace
-                    scatter_kwargs = {
-                        "x": time_data,
-                        "y": pressure_data,
-                        "mode": "lines+markers",
-                        "name": display_name,
-                        "line": dict(color=color, width=1.5),
-                        "marker": dict(size=3),
-                    }
-
-                    # Add error bars if enabled
-                    if show_error_bars:
-                        scatter_kwargs["error_y"] = dict(
-                            type="data",
-                            array=pressure_error,
-                            visible=True,
-                            color=color,
-                            thickness=1.5,
-                            width=3,
-                        )
-
-                    # Use plotly-resampler for automatic downsampling
-                    fig.add_trace(go.Scatter(**scatter_kwargs))
+            # Use plotly-resampler for automatic downsampling
+            fig.add_trace(
+                go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
+            )
 
         # Configure the layout
         fig.update_layout(
             height=500,
-            xaxis_title="Relative Time (s)",
+            xaxis_title="Time (s)",
             yaxis_title="Pressure (Torr)",
             template="plotly_white",
             margin=dict(l=60, r=30, t=40, b=60),
@@ -2093,18 +2210,95 @@ class DataPlotter:
         fig.update_xaxes(type=x_axis_type)
         fig.update_yaxes(type=y_axis_type)
 
-        # Apply axis ranges if specified
-        if x_min is not None and x_max is not None:
-            fig.update_xaxes(range=[x_min, x_max])
-
-        if y_min is not None and y_max is not None:
-            if y_axis_type == "log":
-                # For log scale, use log10 of the values
-                import math
-
-                fig.update_yaxes(range=[math.log10(y_min), math.log10(y_max)])
+        # Determine x-axis range from data (or use provided bounds when valid)
+        if x_axis_type == "log":
+            if (
+                x_min is not None
+                and x_max is not None
+                and x_min > 0
+                and x_max > 0
+                and x_min < x_max
+            ):
+                xmin_lin, xmax_lin = float(x_min), float(x_max)
             else:
+                pos_vals = []
+                for ds in self.datasets.values():
+                    try:
+                        vals = np.asarray(ds.get("time_data", []), dtype=float)
+                        vals = vals[vals > 0]
+                        if vals.size:
+                            pos_vals.extend(vals.tolist())
+                    except Exception:
+                        continue
+                if pos_vals:
+                    xmin_lin = float(min(pos_vals))
+                    xmax_lin = float(max(pos_vals))
+                    if xmin_lin >= xmax_lin:
+                        xmax_lin = xmin_lin * 10.0
+                else:
+                    xmin_lin, xmax_lin = 1e-12, 1e-6
+
+            fig.update_xaxes(range=[math.log10(xmin_lin), math.log10(xmax_lin)])
+        else:
+            if x_min is not None and x_max is not None and x_min < x_max:
+                fig.update_xaxes(range=[x_min, x_max])
+            else:
+                # derive from data
+                vals = []
+                for ds in self.datasets.values():
+                    try:
+                        v = ds.get("time_data", [])
+                        vals.extend([float(x) for x in v])
+                    except Exception:
+                        continue
+                if vals:
+                    fig.update_xaxes(range=[min(vals), max(vals)])
+
+        # Determine y-axis range from upstream data (or use provided bounds when valid)
+        if y_axis_type == "log":
+            if (
+                y_min is not None
+                and y_max is not None
+                and y_min > 0
+                and y_max > 0
+                and y_min < y_max
+            ):
+                ymin_lin, ymax_lin = float(y_min), float(y_max)
+            else:
+                pos_vals = []
+                for ds in self.datasets.values():
+                    try:
+                        vals = np.asarray(
+                            ds.get("upstream_data", {}).get("pressure_data", []),
+                            dtype=float,
+                        )
+                        vals = vals[vals > 0]
+                        if vals.size:
+                            pos_vals.extend(vals.tolist())
+                    except Exception:
+                        continue
+                if pos_vals:
+                    ymin_lin = float(min(pos_vals))
+                    ymax_lin = float(max(pos_vals))
+                    if ymin_lin >= ymax_lin:
+                        ymax_lin = ymin_lin * 10.0
+                else:
+                    ymin_lin, ymax_lin = 1e-12, 1e-6
+
+            fig.update_yaxes(range=[math.log10(ymin_lin), math.log10(ymax_lin)])
+        else:
+            if y_min is not None and y_max is not None and y_min < y_max:
                 fig.update_yaxes(range=[y_min, y_max])
+            else:
+                vals = []
+                for ds in self.datasets.values():
+                    try:
+                        v = ds.get("upstream_data", {}).get("pressure_data", [])
+                        vals.extend([float(x) for x in v])
+                    except Exception:
+                        continue
+                if vals:
+                    fig.update_yaxes(range=[min(vals), max(vals)])
 
         # Clean up trace names to remove [R] annotations
         for trace in fig.data:
@@ -2115,7 +2309,6 @@ class DataPlotter:
 
     def _generate_downstream_plot(
         self,
-        show_gauge_names=False,
         show_error_bars=True,
         x_scale=None,
         y_scale=None,
@@ -2133,53 +2326,52 @@ class DataPlotter:
             verbose=False,
         )
 
-        # Iterate through folder datasets and their downstream gauges
-        for folder_dataset in self.folder_datasets:
-            for dataset in folder_dataset["downstream_gauges"]:
-                # Skip invisible datasets
-                if not dataset.get("visible", True):
-                    continue
+        # Store the FigureResampler instance
+        self.figure_resamplers["downstream-plot"] = fig
 
-                data = dataset["data"]
-                display_name = dataset.get(
-                    "display_name", dataset.get("name", "Unknown Dataset")
+        # Iterate through datasets and obtain the upstream data
+        for dataset_name in self.datasets.keys():
+            time_data = self.datasets[f"{dataset_name}"]["time_data"]
+            time_data = np.ascontiguousarray(time_data)
+            pressure_data = self.datasets[f"{dataset_name}"]["downstream_data"][
+                "pressure_data"
+            ]
+            pressure_data = np.ascontiguousarray(pressure_data)
+            pressure_error = self.datasets[f"{dataset_name}"]["downstream_data"][
+                "error_data"
+            ]
+            pressure_error = np.ascontiguousarray(pressure_error)
+
+            colour = self.datasets[f"{dataset_name}"]["colour"]
+
+            # Create scatter trace
+            scatter_kwargs = {
+                "mode": "lines+markers",
+                "name": self.datasets[f"{dataset_name}"]["name"],
+                "line": dict(color=colour, width=1.5),
+                "marker": dict(size=3),
+            }
+
+            # Add error bars if enabled
+            if show_error_bars:
+                scatter_kwargs["error_y"] = dict(
+                    type="data",
+                    array=pressure_error,
+                    visible=True,
+                    color=colour,
+                    thickness=1.5,
+                    width=3,
                 )
-                color = dataset["color"]
 
-                if len(data.get("RelativeTime", [])) > 0:
-                    # Extract data directly from our structure
-                    time_data = data["RelativeTime"]
-                    pressure_data = data["Pressure_Torr"]
-                    pressure_error = data["Pressure_Error"]
-
-                    # Create scatter trace
-                    scatter_kwargs = {
-                        "x": time_data,
-                        "y": pressure_data,
-                        "mode": "lines+markers",
-                        "name": display_name,
-                        "line": dict(color=color, width=1.5),
-                        "marker": dict(size=3),
-                    }
-
-                    # Add error bars if enabled
-                    if show_error_bars:
-                        scatter_kwargs["error_y"] = dict(
-                            type="data",
-                            array=pressure_error,
-                            visible=True,
-                            color=color,
-                            thickness=1.5,
-                            width=3,
-                        )
-
-                    # Use plotly-resampler for automatic downsampling
-                    fig.add_trace(go.Scatter(**scatter_kwargs))
+            # Use plotly-resampler for automatic downsampling
+            fig.add_trace(
+                go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
+            )
 
         # Configure the layout
         fig.update_layout(
             height=500,
-            xaxis_title="Relative Time (s)",
+            xaxis_title="Time (s)",
             yaxis_title="Pressure (Torr)",
             template="plotly_white",
             margin=dict(l=60, r=30, t=40, b=60),
@@ -2187,7 +2379,6 @@ class DataPlotter:
                 orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
             ),
         )
-
         # Apply axis scaling
         x_axis_type = x_scale if x_scale else "linear"
         y_axis_type = y_scale if y_scale else "linear"
@@ -2197,14 +2388,88 @@ class DataPlotter:
 
         # Apply axis ranges if specified
         if x_min is not None and x_max is not None:
-            fig.update_xaxes(range=[x_min, x_max])
+            if x_axis_type == "log":
+
+                def _safe_x_log_range_ds(xmin_val, xmax_val):
+                    try:
+                        if xmin_val is not None and xmax_val is not None:
+                            if xmin_val > 0 and xmax_val > 0 and xmin_val < xmax_val:
+                                return math.log10(xmin_val), math.log10(xmax_val)
+                    except Exception:
+                        pass
+
+                    pos_vals = []
+                    for dataset_name in self.datasets.keys():
+                        try:
+                            vals = self.datasets[f"{dataset_name}"]["time_data"]
+                            for v in vals:
+                                if v is not None and v > 0:
+                                    pos_vals.append(float(v))
+                        except Exception:
+                            continue
+
+                    if pos_vals:
+                        xmin_p = min(pos_vals)
+                        xmax_p = max(pos_vals)
+                        if xmin_p <= 0:
+                            xmin_p = min(x for x in pos_vals if x > 0)
+                        if xmin_p >= xmax_p:
+                            xmax_p = xmin_p * 10.0
+                        return math.log10(xmin_p), math.log10(xmax_p)
+
+                    return -12.0, -6.0
+
+                x_min_log, x_max_log = _safe_x_log_range_ds(x_min, x_max)
+                fig.update_xaxes(range=[x_min_log, x_max_log])
+            else:
+                fig.update_xaxes(range=[x_min, x_max])
 
         if y_min is not None and y_max is not None:
             if y_axis_type == "log":
-                # For log scale, use log10 of the values
-                import math
+                # For log scale, ensure positive bounds; if provided bounds are
+                # non-positive, derive a safe range from the data.
 
-                fig.update_yaxes(range=[math.log10(y_min), math.log10(y_max)])
+                def _safe_log_range_ds(
+                    downstream_or_upstream: str, y_min_val, y_max_val
+                ):
+                    try:
+                        if y_min_val is not None and y_max_val is not None:
+                            if (
+                                y_min_val > 0
+                                and y_max_val > 0
+                                and y_min_val < y_max_val
+                            ):
+                                return y_min_val, y_max_val
+                    except Exception:
+                        pass
+
+                    pos_vals = []
+                    for dataset_name in self.datasets.keys():
+                        try:
+                            vals = self.datasets[f"{dataset_name}"][
+                                downstream_or_upstream
+                            ]["pressure_data"]
+                            for v in vals:
+                                if v is not None and v > 0:
+                                    pos_vals.append(float(v))
+                        except Exception:
+                            continue
+
+                    if pos_vals:
+                        ymin_p = min(pos_vals)
+                        ymax_p = max(pos_vals)
+                        if ymin_p <= 0:
+                            ymin_p = min(x for x in pos_vals if x > 0)
+                        if ymin_p >= ymax_p:
+                            ymax_p = ymin_p * 10.0
+                        return ymin_p, ymax_p
+
+                    return 1e-12, 1e-6
+
+                y_min_use, y_max_use = _safe_log_range_ds(
+                    "downstream_data", y_min, y_max
+                )
+                fig.update_yaxes(range=[math.log10(y_min_use), math.log10(y_max_use)])
             else:
                 fig.update_yaxes(range=[y_min, y_max])
 
@@ -2215,159 +2480,43 @@ class DataPlotter:
 
         return fig
 
-    def _generate_upstream_plot_full_data(
-        self, show_gauge_names=False, show_error_bars=True
-    ):
-        """Generate the upstream pressure plot with FULL DATA (no resampling)"""
-        # Use regular plotly Figure WITHOUT FigureResampler
-        fig = go.Figure()
+    def _create_dataset_download(self, dataset_path: str):
+        """Package original dataset files for download based on metadata version.
 
-        # Iterate through folder datasets and their upstream gauges
-        for folder_dataset in self.folder_datasets:
-            for dataset in folder_dataset["upstream_gauges"]:
-                # Skip invisible datasets
-                if not dataset.get("visible", True):
-                    continue
+        For version '0.0' zip all CSV files in the folder and return as bytes.
+        For version '1.0' return the single CSV file named in run_info.data_filename
 
-                data = dataset["data"]
-                # Determine display name based on checkbox state
-                if show_gauge_names:
-                    display_name = dataset.get(
-                        "display_name", dataset.get("name", "Unknown Dataset")
-                    )
-                else:
-                    display_name = folder_dataset["name"]
-                color = dataset["color"]
+        Returns a dict suitable for dcc.send_bytes or dcc.send_file style use.
+        """
 
-                if len(data.get("RelativeTime", [])) > 0:
-                    # Extract data directly from our structure
-                    time_data = data["RelativeTime"]
-                    pressure_data = data["Pressure_Torr"]
-                    pressure_error = data["Pressure_Error"]
-
-                    # Create scatter trace
-                    scatter_kwargs = {
-                        "x": time_data,
-                        "y": pressure_data,
-                        "mode": "lines+markers",
-                        "name": display_name,
-                        "line": dict(color=color, width=1.5),
-                        "marker": dict(size=3),
-                    }
-
-                    # Add error bars if enabled
-                    if show_error_bars:
-                        scatter_kwargs["error_y"] = dict(
-                            type="data",
-                            array=pressure_error,
-                            visible=True,
-                            color=color,
-                            thickness=1.5,
-                            width=3,
-                        )
-
-                    # Add ALL data points (no resampling)
-                    fig.add_trace(go.Scatter(**scatter_kwargs))
-
-        # Configure the layout
-        fig.update_layout(
-            title="Upstream Pressure (Full Data)",
-            height=500,
-            xaxis_title="Relative Time (s)",
-            yaxis_title="Pressure (Torr)",
-            template="plotly_white",
-            margin=dict(l=60, r=30, t=40, b=60),
-            legend=dict(
-                orientation="v",
-                yanchor="top",
-                y=1,
-                xanchor="left",
-                x=1.05,
-            ),
-            hovermode="x unified",
+        # Zip the entire dataset folder (all files and subfolders), preserving
+        # the relative directory structure inside the archive.
+        mem_zip = io.BytesIO()
+        with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for root, _dirs, files in os.walk(dataset_path):
+                for fname in files:
+                    file_path = os.path.join(root, fname)
+                    try:
+                        arcname = os.path.relpath(file_path, dataset_path)
+                        zf.write(file_path, arcname)
+                    except Exception:
+                        # Skip files we fail to read/write into the archive
+                        continue
+        mem_zip.seek(0)
+        # Use a normalized basename in case dataset_path ends with a slash
+        base = os.path.basename(os.path.normpath(dataset_path))
+        return dict(
+            content=mem_zip.getvalue(),
+            filename=f"{base}.zip",
+            type="application/zip",
         )
-
-        return fig
-
-    def _generate_downstream_plot_full_data(
-        self, show_gauge_names=False, show_error_bars=True
-    ):
-        """Generate the downstream pressure plot with FULL DATA (no resampling)"""
-        # Use regular plotly Figure WITHOUT FigureResampler
-        fig = go.Figure()
-
-        # Iterate through folder datasets and their downstream gauges
-        for folder_dataset in self.folder_datasets:
-            for dataset in folder_dataset["downstream_gauges"]:
-                # Skip invisible datasets
-                if not dataset.get("visible", True):
-                    continue
-
-                data = dataset["data"]
-                # Determine display name based on checkbox state
-                if show_gauge_names:
-                    display_name = dataset.get(
-                        "display_name", dataset.get("name", "Unknown Dataset")
-                    )
-                else:
-                    display_name = folder_dataset["name"]
-                color = dataset["color"]
-
-                if len(data.get("RelativeTime", [])) > 0:
-                    # Extract data directly from our structure
-                    time_data = data["RelativeTime"]
-                    pressure_data = data["Pressure_Torr"]
-                    pressure_error = data["Pressure_Error"]
-
-                    # Create scatter trace
-                    scatter_kwargs = {
-                        "x": time_data,
-                        "y": pressure_data,
-                        "mode": "lines+markers",
-                        "name": display_name,
-                        "line": dict(color=color, width=1.5),
-                        "marker": dict(size=3),
-                    }
-
-                    # Add error bars if enabled
-                    if show_error_bars:
-                        scatter_kwargs["error_y"] = dict(
-                            type="data",
-                            array=pressure_error,
-                            visible=True,
-                            color=color,
-                            thickness=1.5,
-                            width=3,
-                        )
-
-                    # Add ALL data points (no resampling)
-                    fig.add_trace(go.Scatter(**scatter_kwargs))
-
-        # Configure the layout
-        fig.update_layout(
-            title="Downstream Pressure (Full Data)",
-            height=500,
-            xaxis_title="Relative Time (s)",
-            yaxis_title="Pressure (Torr)",
-            template="plotly_white",
-            margin=dict(l=60, r=30, t=40, b=60),
-            legend=dict(
-                orientation="v",
-                yanchor="top",
-                y=1,
-                xanchor="left",
-                x=1.05,
-            ),
-            hovermode="x unified",
-        )
-
-        return fig
 
     def start(self):
         """Process data and start the Dash web server"""
 
         # Process data
-        self.load_data()
+        for dataset_path, dataset_name in zip(self.dataset_paths, self.dataset_names):
+            self.load_data(dataset_path, dataset_name)
 
         # Setup the app layout
         self.app.layout = self.create_layout()
