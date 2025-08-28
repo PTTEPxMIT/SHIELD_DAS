@@ -1,4 +1,4 @@
-# SHIELD permeation rig Data Aquisistion System
+# SHIELD permeation rig Data Acquisition System
 
 This is a tool to be used with the SHIELD hydrogen permeation rig, providing a way to both record data from the rig and have a live UI displaying plots of the pressure values in the gauges connected to the rig and the temperature of the connected thermocouple.
 
