@@ -323,6 +323,34 @@ class DataPlotter:
 
         dataset_color = self.get_next_color(len(self.datasets))
 
+        # Extract valve times from metadata
+        valve_times = {}
+        try:
+            with open(os.path.join(dataset_path, "run_metadata.json")) as f:
+                metadata = json.load(f)
+            run_info = metadata.get("run_info", {})
+
+            # Get start time for relative calculation
+            start_time_str = run_info.get("start_time")
+            if start_time_str:
+                try:
+                    # Try with seconds first, then without
+                    start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    start_time = datetime.strptime(
+                        start_time_str, "%Y-%m-%d %H:%M:%S.%f"
+                    )
+
+                for key, value in run_info.items():
+                    if "_time" in key and key.startswith("v"):
+                        try:
+                            valve_dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
+                            valve_times[key] = (valve_dt - start_time).total_seconds()
+                        except (ValueError, TypeError):
+                            pass
+        except Exception:
+            pass
+
         dataset = {
             "name": dataset_name,
             "colour": dataset_color,
@@ -331,6 +359,7 @@ class DataPlotter:
             "time_data": time_data,
             "upstream_data": upstream_data,
             "downstream_data": downstream_data,
+            "valve_times": valve_times,
         }
 
         # Add the folder dataset to our list
@@ -2065,6 +2094,32 @@ class DataPlotter:
                             downstream_data,
                         ) = self.process_csv_data(metadata, dataset_path)
 
+                        # Update valve times for live data
+                        valve_times = {}
+                        run_info = metadata.get("run_info", {})
+                        start_time_str = run_info.get("start_time")
+                        if start_time_str:
+                            try:
+                                start_time = datetime.strptime(
+                                    start_time_str, "%Y-%m-%d %H:%M:%S"
+                                )
+                            except ValueError:
+                                start_time = datetime.strptime(
+                                    start_time_str, "%Y-%m-%d %H:%M:%S.%f"
+                                )
+
+                            for k, v in run_info.items():
+                                if "_time" in k and k.startswith("v"):
+                                    try:
+                                        valve_dt = datetime.strptime(
+                                            v, "%Y-%m-%d %H:%M:%S.%f"
+                                        )
+                                        valve_times[k] = (
+                                            valve_dt - start_time
+                                        ).total_seconds()
+                                    except (ValueError, TypeError):
+                                        pass
+
                         # Update existing dataset in place
                         # (preserve name, colour, live_data)
                         dataset.update(
@@ -2072,6 +2127,7 @@ class DataPlotter:
                                 "time_data": time_data,
                                 "upstream_data": upstream_data,
                                 "downstream_data": downstream_data,
+                                "valve_times": valve_times,
                             }
                         )
 
@@ -2192,6 +2248,20 @@ class DataPlotter:
             fig.add_trace(
                 go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
             )
+
+            # Add valve time vertical lines
+            valve_times = self.datasets[f"{dataset_name}"].get("valve_times", {})
+            for valve_event, valve_time in valve_times.items():
+                fig.add_vline(
+                    x=valve_time,
+                    line_dash="dash",
+                    line_color="red",
+                    line_width=1,
+                    annotation_text=valve_event.replace("_", " ").title(),
+                    annotation_position="top",
+                    annotation_textangle=0,
+                    annotation_font_size=8,
+                )
 
         # Configure the layout
         fig.update_layout(
@@ -2369,6 +2439,20 @@ class DataPlotter:
             fig.add_trace(
                 go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
             )
+
+            # Add valve time vertical lines
+            valve_times = self.datasets[f"{dataset_name}"].get("valve_times", {})
+            for valve_event, valve_time in valve_times.items():
+                fig.add_vline(
+                    x=valve_time,
+                    line_dash="dash",
+                    line_color="red",
+                    line_width=1,
+                    annotation_text=valve_event.replace("_", " ").title(),
+                    annotation_position="top",
+                    annotation_textangle=0,
+                    annotation_font_size=8,
+                )
 
         # Configure the layout
         fig.update_layout(
