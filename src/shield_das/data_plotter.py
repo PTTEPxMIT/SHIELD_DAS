@@ -40,6 +40,14 @@ class DataPlotter:
         figure_resamplers: Dictionary of FigureResampler instances for each plot
     """
 
+    # Helper constants for repeated callback state patterns
+    PLOT_CONTROL_STATES = [
+        State("show-error-bars-upstream", "value"),
+        State("show-error-bars-downstream", "value"),
+        State("show-valve-times-upstream", "value"),
+        State("show-valve-times-downstream", "value"),
+    ]
+
     # Type hints / attributes
     dataset_paths: list[str]
     dataset_names: list[str]
@@ -323,6 +331,34 @@ class DataPlotter:
 
         dataset_color = self.get_next_color(len(self.datasets))
 
+        # Extract valve times from metadata
+        valve_times = {}
+        try:
+            with open(os.path.join(dataset_path, "run_metadata.json")) as f:
+                metadata = json.load(f)
+            run_info = metadata.get("run_info", {})
+
+            # Get start time for relative calculation
+            start_time_str = run_info.get("start_time")
+            if start_time_str:
+                try:
+                    # Try with seconds first, then without
+                    start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    start_time = datetime.strptime(
+                        start_time_str, "%Y-%m-%d %H:%M:%S.%f"
+                    )
+
+                for key, value in run_info.items():
+                    if "_time" in key and key.startswith("v"):
+                        try:
+                            valve_dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
+                            valve_times[key] = (valve_dt - start_time).total_seconds()
+                        except (ValueError, TypeError):
+                            pass
+        except Exception:
+            pass
+
         dataset = {
             "name": dataset_name,
             "colour": dataset_color,
@@ -331,6 +367,7 @@ class DataPlotter:
             "time_data": time_data,
             "upstream_data": upstream_data,
             "downstream_data": downstream_data,
+            "valve_times": valve_times,
         }
 
         # Add the folder dataset to our list
@@ -841,6 +878,12 @@ class DataPlotter:
                                                                         value=True,
                                                                         className="mb-2",
                                                                     ),
+                                                                    dbc.Checkbox(
+                                                                        id="show-valve-times-upstream",
+                                                                        label="Show valve operation times",
+                                                                        value=False,
+                                                                        className="mb-2",
+                                                                    ),
                                                                     html.Hr(
                                                                         className="my-2"
                                                                     ),
@@ -1074,6 +1117,12 @@ class DataPlotter:
                                                                         id="show-error-bars-downstream",
                                                                         label="Show error bars",
                                                                         value=True,
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    dbc.Checkbox(
+                                                                        id="show-valve-times-downstream",
+                                                                        label="Show valve operation times",
+                                                                        value=False,
                                                                         className="mb-2",
                                                                     ),
                                                                     html.Hr(
@@ -1415,16 +1464,15 @@ class DataPlotter:
                 Output("downstream-plot", "figure", allow_duplicate=True),
             ],
             [Input({"type": "dataset-name", "index": ALL}, "value")],
-            [
-                State("show-error-bars-upstream", "value"),
-                State("show-error-bars-downstream", "value"),
-            ],
+            self.PLOT_CONTROL_STATES,
             prevent_initial_call=True,
         )
         def update_dataset_names(
             names,
             show_error_bars_upstream,
             show_error_bars_downstream,
+            show_valve_times_upstream,
+            show_valve_times_downstream,
         ):
             # Map positional indices from the UI to dataset keys
             keys = _keys_list()
@@ -1445,15 +1493,13 @@ class DataPlotter:
                     self.datasets[key]["name"] = name
 
             # Return updated table and plots
-            return [
-                self.create_dataset_table(),
-                # upstream: _generate_upstream_plot takes show_error_bars as first arg
-                self._generate_upstream_plot(show_error_bars_upstream),
-                # show_gauge_names option removed; pass show_error_bars by keyword
-                self._generate_downstream_plot(
-                    show_error_bars=show_error_bars_downstream
-                ),
-            ]
+            plots = self._generate_both_plots(
+                show_error_bars_upstream=show_error_bars_upstream,
+                show_error_bars_downstream=show_error_bars_downstream,
+                show_valve_times_upstream=show_valve_times_upstream,
+                show_valve_times_downstream=show_valve_times_downstream,
+            )
+            return [self.create_dataset_table(), *plots]
 
         # Callback for dataset color changes
         @self.app.callback(
@@ -1557,6 +1603,7 @@ class DataPlotter:
                 Input("upstream-y-min", "value"),
                 Input("upstream-y-max", "value"),
                 Input("show-error-bars-upstream", "value"),
+                Input("show-valve-times-upstream", "value"),
             ],
             [
                 State("upstream-plot", "figure"),
@@ -1572,6 +1619,7 @@ class DataPlotter:
             y_min,
             y_max,
             show_error_bars_upstream,
+            show_valve_times_upstream,
             current_fig,
             store_data,
         ):
@@ -1604,6 +1652,7 @@ class DataPlotter:
             return [
                 self._generate_upstream_plot(
                     show_error_bars=bool(show_error_bars_upstream),
+                    show_valve_times=bool(show_valve_times_upstream),
                     x_scale=x_scale,
                     y_scale=y_scale,
                     x_min=x_min_use,
@@ -1628,6 +1677,7 @@ class DataPlotter:
                 Input("downstream-y-min", "value"),
                 Input("downstream-y-max", "value"),
                 Input("show-error-bars-downstream", "value"),
+                Input("show-valve-times-downstream", "value"),
             ],
             [
                 State("downstream-plot", "figure"),
@@ -1643,6 +1693,7 @@ class DataPlotter:
             y_min,
             y_max,
             show_error_bars_downstream,
+            show_valve_times_downstream,
             current_fig,
             store_data,
         ):
@@ -1673,6 +1724,7 @@ class DataPlotter:
             return [
                 self._generate_downstream_plot(
                     show_error_bars=bool(show_error_bars_downstream),
+                    show_valve_times=bool(show_valve_times_downstream),
                     x_scale=x_scale,
                     y_scale=y_scale,
                     x_min=x_min_use,
@@ -1991,14 +2043,15 @@ class DataPlotter:
                 Output("live-data-interval", "disabled"),
             ],
             [Input({"type": "dataset-live-data", "index": ALL}, "value")],
-            [
-                State("show-error-bars-upstream", "value"),
-                State("show-error-bars-downstream", "value"),
-            ],
+            self.PLOT_CONTROL_STATES,
             prevent_initial_call=True,
         )
         def handle_live_data_toggle(
-            live_data_values, show_error_bars_upstream, show_error_bars_downstream
+            live_data_values,
+            show_error_bars_upstream,
+            show_error_bars_downstream,
+            show_valve_times_upstream,
+            show_valve_times_downstream,
         ):
             # Update the live_data flag for each dataset using keys mapping
             keys = _keys_list()
@@ -2011,13 +2064,13 @@ class DataPlotter:
             any_live_data = any(live_data_values) if live_data_values else False
 
             # Regenerate plots with updated data
-            return [
-                self._generate_upstream_plot(show_error_bars_upstream),
-                self._generate_downstream_plot(
-                    show_error_bars=show_error_bars_downstream
-                ),
-                not any_live_data,  # Disable interval if no live data
-            ]
+            plots = self._generate_both_plots(
+                show_error_bars_upstream=show_error_bars_upstream,
+                show_error_bars_downstream=show_error_bars_downstream,
+                show_valve_times_upstream=show_valve_times_upstream,
+                show_valve_times_downstream=show_valve_times_downstream,
+            )
+            return [*plots, not any_live_data]  # Disable interval if no live data
 
         # Callback for periodic live data updates
         @self.app.callback(
@@ -2026,14 +2079,15 @@ class DataPlotter:
                 Output("downstream-plot", "figure", allow_duplicate=True),
             ],
             [Input("live-data-interval", "n_intervals")],
-            [
-                State("show-error-bars-upstream", "value"),
-                State("show-error-bars-downstream", "value"),
-            ],
+            self.PLOT_CONTROL_STATES,
             prevent_initial_call=True,
         )
         def update_live_data(
-            n_intervals, show_error_bars_upstream, show_error_bars_downstream
+            n_intervals,
+            show_error_bars_upstream,
+            show_error_bars_downstream,
+            show_valve_times_upstream,
+            show_valve_times_downstream,
         ):
             # Check if any dataset has live data enabled
             datasets_iter = list(_iter_datasets())
@@ -2065,6 +2119,32 @@ class DataPlotter:
                             downstream_data,
                         ) = self.process_csv_data(metadata, dataset_path)
 
+                        # Update valve times for live data
+                        valve_times = {}
+                        run_info = metadata.get("run_info", {})
+                        start_time_str = run_info.get("start_time")
+                        if start_time_str:
+                            try:
+                                start_time = datetime.strptime(
+                                    start_time_str, "%Y-%m-%d %H:%M:%S"
+                                )
+                            except ValueError:
+                                start_time = datetime.strptime(
+                                    start_time_str, "%Y-%m-%d %H:%M:%S.%f"
+                                )
+
+                            for k, v in run_info.items():
+                                if "_time" in k and k.startswith("v"):
+                                    try:
+                                        valve_dt = datetime.strptime(
+                                            v, "%Y-%m-%d %H:%M:%S.%f"
+                                        )
+                                        valve_times[k] = (
+                                            valve_dt - start_time
+                                        ).total_seconds()
+                                    except (ValueError, TypeError):
+                                        pass
+
                         # Update existing dataset in place
                         # (preserve name, colour, live_data)
                         dataset.update(
@@ -2072,16 +2152,17 @@ class DataPlotter:
                                 "time_data": time_data,
                                 "upstream_data": upstream_data,
                                 "downstream_data": downstream_data,
+                                "valve_times": valve_times,
                             }
                         )
 
             # Regenerate plots with updated data;
-            return [
-                self._generate_upstream_plot(show_error_bars_upstream),
-                self._generate_downstream_plot(
-                    show_error_bars=show_error_bars_downstream
-                ),
-            ]
+            return self._generate_both_plots(
+                show_error_bars_upstream=show_error_bars_upstream,
+                show_error_bars_downstream=show_error_bars_downstream,
+                show_valve_times_upstream=show_valve_times_upstream,
+                show_valve_times_downstream=show_valve_times_downstream,
+            )
 
         # FigureResampler callbacks for interactive zooming/panning
         @self.app.callback(
@@ -2132,9 +2213,33 @@ class DataPlotter:
                     return fig_resampler.construct_update_data_patch(relayoutData)
             return dash.no_update
 
+    def _generate_both_plots(
+        self,
+        show_error_bars_upstream=True,
+        show_error_bars_downstream=True,
+        show_valve_times_upstream=False,
+        show_valve_times_downstream=False,
+        **kwargs,
+    ):
+        """Helper method to generate both upstream and downstream plots
+        with common parameters"""
+        return [
+            self._generate_upstream_plot(
+                show_error_bars=show_error_bars_upstream,
+                show_valve_times=show_valve_times_upstream,
+                **kwargs,
+            ),
+            self._generate_downstream_plot(
+                show_error_bars=show_error_bars_downstream,
+                show_valve_times=show_valve_times_downstream,
+                **kwargs,
+            ),
+        ]
+
     def _generate_upstream_plot(
         self,
         show_error_bars=True,
+        show_valve_times=False,
         x_scale=None,
         y_scale=None,
         x_min=None,
@@ -2156,23 +2261,17 @@ class DataPlotter:
 
         # Iterate through datasets and obtain the upstream data
         for dataset_name in self.datasets.keys():
-            time_data = self.datasets[f"{dataset_name}"]["time_data"]
-            time_data = np.ascontiguousarray(time_data)
-            pressure_data = self.datasets[f"{dataset_name}"]["upstream_data"][
-                "pressure_data"
-            ]
-            pressure_data = np.ascontiguousarray(pressure_data)
-            pressure_error = self.datasets[f"{dataset_name}"]["upstream_data"][
-                "error_data"
-            ]
-            pressure_error = np.ascontiguousarray(pressure_error)
-
-            colour = self.datasets[f"{dataset_name}"]["colour"]
+            dataset = self.datasets[f"{dataset_name}"]
+            time_data = np.ascontiguousarray(dataset["time_data"])
+            upstream_data = dataset["upstream_data"]
+            pressure_data = np.ascontiguousarray(upstream_data["pressure_data"])
+            pressure_error = np.ascontiguousarray(upstream_data["error_data"])
+            colour = dataset["colour"]
 
             # Create scatter trace
             scatter_kwargs = {
                 "mode": "lines+markers",
-                "name": self.datasets[f"{dataset_name}"]["name"],
+                "name": dataset["name"],
                 "line": dict(color=colour, width=1.5),
                 "marker": dict(size=3),
             }
@@ -2192,6 +2291,21 @@ class DataPlotter:
             fig.add_trace(
                 go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
             )
+
+            # Add valve time vertical lines
+            if show_valve_times:
+                valve_times = self.datasets[f"{dataset_name}"].get("valve_times", {})
+                for valve_event, valve_time in valve_times.items():
+                    fig.add_vline(
+                        x=valve_time,
+                        line_dash="dash",
+                        line_color=colour,
+                        line_width=1,
+                        annotation_text=valve_event.replace("_", " ").title(),
+                        annotation_position="top",
+                        annotation_textangle=0,
+                        annotation_font_size=8,
+                    )
 
         # Configure the layout
         fig.update_layout(
@@ -2312,6 +2426,7 @@ class DataPlotter:
     def _generate_downstream_plot(
         self,
         show_error_bars=True,
+        show_valve_times=False,
         x_scale=None,
         y_scale=None,
         x_min=None,
@@ -2369,6 +2484,21 @@ class DataPlotter:
             fig.add_trace(
                 go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
             )
+
+            # Add valve time vertical lines
+            if show_valve_times:
+                valve_times = self.datasets[f"{dataset_name}"].get("valve_times", {})
+                for valve_event, valve_time in valve_times.items():
+                    fig.add_vline(
+                        x=valve_time,
+                        line_dash="dash",
+                        line_color=colour,
+                        line_width=1,
+                        annotation_text=valve_event.replace("_", " ").title(),
+                        annotation_position="top",
+                        annotation_textangle=0,
+                        annotation_font_size=8,
+                    )
 
         # Configure the layout
         fig.update_layout(

@@ -44,9 +44,9 @@ class DataRecorder:
         run_dir: Directory for the current run's results
         backup_dir: Directory for backup files
         elapsed_time: Time elapsed since the start of recording
-        v5_close_time: Timestamp when V5 valve was closed (spacebar press 1)
-        v6_close_time: Timestamp when V6 valve was closed (spacebar press 2)
-        v7_close_time: Timestamp when V7 valve was closed (spacebar press 3)
+        v4_close_time: Timestamp when V4 valve was closed (spacebar press 1)
+        v5_close_time: Timestamp when V5 valve was closed (spacebar press 2)
+        v6_close_time: Timestamp when V6 valve was closed (spacebar press 3)
         v3_open_time: Timestamp when V3 valve was opened (spacebar press 4)
         valve_event_sequence: Ordered list of valve events to track
         current_valve_index: Current position in the valve event sequence
@@ -65,9 +65,9 @@ class DataRecorder:
     run_dir: str
     backup_dir: str
     elapsed_time: float
+    v4_close_time: str | None
     v5_close_time: str | None
     v6_close_time: str | None
-    v7_close_time: str | None
     v3_open_time: str | None
     start_time: datetime
     valve_event_sequence: list[str]
@@ -96,17 +96,17 @@ class DataRecorder:
         self.thread = None
 
         self.elapsed_time = 0.0
+        self.v4_close_time = None
         self.v5_close_time = None
         self.v6_close_time = None
-        self.v7_close_time = None
         self.v3_open_time = None
         self.start_time = None
 
         # Valve event sequence tracking
         self.valve_event_sequence = [
+            "v4_close_time",
             "v5_close_time",
             "v6_close_time",
-            "v7_close_time",
             "v3_open_time",
         ]
         self.current_valve_index = 0
@@ -377,9 +377,9 @@ class DataRecorder:
         self.start_time = datetime.now()
 
         # Reset all valve events for new run
+        self.v4_close_time = None
         self.v5_close_time = None
         self.v6_close_time = None
-        self.v7_close_time = None
         self.v3_open_time = None
         self.current_valve_index = 0
 
