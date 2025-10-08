@@ -46,17 +46,17 @@ class TestValveEventIntegration:
             recorder.start()
 
             # Verify initial state
+            assert recorder.v4_close_time is None
             assert recorder.v5_close_time is None
             assert recorder.v6_close_time is None
-            assert recorder.v7_close_time is None
             assert recorder.v3_open_time is None
             assert recorder.current_valve_index == 0
 
             # Simulate valve events being recorded
             valve_times = {
-                "v5_close_time": "2025-08-12 15:30:00.123",
-                "v6_close_time": "2025-08-12 15:31:00.456",
-                "v7_close_time": "2025-08-12 15:32:00.789",
+                "v4_close_time": "2025-08-12 15:30:00.123",
+                "v5_close_time": "2025-08-12 15:31:00.456",
+                "v6_close_time": "2025-08-12 15:32:00.789",
                 "v3_open_time": "2025-08-12 15:33:00.012",
             }  # Record each valve event
             for i, (event_name, timestamp) in enumerate(valve_times.items()):

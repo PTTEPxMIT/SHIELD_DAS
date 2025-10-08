@@ -45,15 +45,15 @@ class TestValveEvents:
 
     def test_valve_event_initialization(self):
         """Test that valve event attributes are properly initialized."""
+        assert self.recorder.v4_close_time is None
         assert self.recorder.v5_close_time is None
         assert self.recorder.v6_close_time is None
-        assert self.recorder.v7_close_time is None
         assert self.recorder.v3_open_time is None
         assert self.recorder.current_valve_index == 0
         assert self.recorder.valve_event_sequence == [
+            "v4_close_time",
             "v5_close_time",
             "v6_close_time",
-            "v7_close_time",
             "v3_open_time",
         ]
 
@@ -70,9 +70,9 @@ class TestValveEvents:
             self.recorder.stop()
 
         # Check that values were reset
+        assert self.recorder.v4_close_time is None
         assert self.recorder.v5_close_time is None
         assert self.recorder.v6_close_time is None
-        assert self.recorder.v7_close_time is None
         assert self.recorder.v3_open_time is None
         assert self.recorder.current_valve_index == 0
 
@@ -200,9 +200,9 @@ class TestValveEvents:
     def test_valve_event_attributes_in_class(self):
         """Test that all valve event attributes are properly defined in the class."""
         # Check that all expected attributes exist
+        assert hasattr(self.recorder, "v4_close_time")
         assert hasattr(self.recorder, "v5_close_time")
         assert hasattr(self.recorder, "v6_close_time")
-        assert hasattr(self.recorder, "v7_close_time")
         assert hasattr(self.recorder, "v3_open_time")
         assert hasattr(self.recorder, "valve_event_sequence")
         assert hasattr(self.recorder, "current_valve_index")
@@ -210,9 +210,9 @@ class TestValveEvents:
     def test_valve_sequence_order(self):
         """Test that the valve event sequence is in the correct order."""
         expected_sequence = [
+            "v4_close_time",
             "v5_close_time",
             "v6_close_time",
-            "v7_close_time",
             "v3_open_time",
         ]
         assert self.recorder.valve_event_sequence == expected_sequence
