@@ -2255,7 +2255,7 @@ class DataPlotter:
                 fig.add_vline(
                     x=valve_time,
                     line_dash="dash",
-                    line_color="red",
+                    line_color=colour,
                     line_width=1,
                     annotation_text=valve_event.replace("_", " ").title(),
                     annotation_position="top",
@@ -2446,7 +2446,7 @@ class DataPlotter:
                 fig.add_vline(
                     x=valve_time,
                     line_dash="dash",
-                    line_color="red",
+                    line_color=colour,
                     line_width=1,
                     annotation_text=valve_event.replace("_", " ").title(),
                     annotation_position="top",
