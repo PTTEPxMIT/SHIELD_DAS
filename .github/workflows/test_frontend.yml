@@ -12,6 +12,7 @@ jobs:
       uses: conda-incubator/setup-miniconda@v3
       with:
         activate-environment: myenv
+        python-version: "3.13"
         miniforge-version: latest
         channels: conda-forge
 
