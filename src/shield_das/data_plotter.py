@@ -40,6 +40,14 @@ class DataPlotter:
         figure_resamplers: Dictionary of FigureResampler instances for each plot
     """
 
+    # Helper constants for repeated callback state patterns
+    PLOT_CONTROL_STATES = [
+        State("show-error-bars-upstream", "value"),
+        State("show-error-bars-downstream", "value"),
+        State("show-valve-times-upstream", "value"),
+        State("show-valve-times-downstream", "value"),
+    ]
+
     # Type hints / attributes
     dataset_paths: list[str]
     dataset_names: list[str]
@@ -1456,12 +1464,7 @@ class DataPlotter:
                 Output("downstream-plot", "figure", allow_duplicate=True),
             ],
             [Input({"type": "dataset-name", "index": ALL}, "value")],
-            [
-                State("show-error-bars-upstream", "value"),
-                State("show-error-bars-downstream", "value"),
-                State("show-valve-times-upstream", "value"),
-                State("show-valve-times-downstream", "value"),
-            ],
+            self.PLOT_CONTROL_STATES,
             prevent_initial_call=True,
         )
         def update_dataset_names(
@@ -1490,19 +1493,13 @@ class DataPlotter:
                     self.datasets[key]["name"] = name
 
             # Return updated table and plots
-            return [
-                self.create_dataset_table(),
-                # upstream: _generate_upstream_plot takes show_error_bars as first arg
-                self._generate_upstream_plot(
-                    show_error_bars=show_error_bars_upstream,
-                    show_valve_times=show_valve_times_upstream,
-                ),
-                # show_gauge_names option removed; pass show_error_bars by keyword
-                self._generate_downstream_plot(
-                    show_error_bars=show_error_bars_downstream,
-                    show_valve_times=show_valve_times_downstream,
-                ),
-            ]
+            plots = self._generate_both_plots(
+                show_error_bars_upstream=show_error_bars_upstream,
+                show_error_bars_downstream=show_error_bars_downstream,
+                show_valve_times_upstream=show_valve_times_upstream,
+                show_valve_times_downstream=show_valve_times_downstream,
+            )
+            return [self.create_dataset_table(), *plots]
 
         # Callback for dataset color changes
         @self.app.callback(
@@ -2046,14 +2043,15 @@ class DataPlotter:
                 Output("live-data-interval", "disabled"),
             ],
             [Input({"type": "dataset-live-data", "index": ALL}, "value")],
-            [
-                State("show-error-bars-upstream", "value"),
-                State("show-error-bars-downstream", "value"),
-            ],
+            self.PLOT_CONTROL_STATES,
             prevent_initial_call=True,
         )
         def handle_live_data_toggle(
-            live_data_values, show_error_bars_upstream, show_error_bars_downstream
+            live_data_values,
+            show_error_bars_upstream,
+            show_error_bars_downstream,
+            show_valve_times_upstream,
+            show_valve_times_downstream,
         ):
             # Update the live_data flag for each dataset using keys mapping
             keys = _keys_list()
@@ -2066,13 +2064,13 @@ class DataPlotter:
             any_live_data = any(live_data_values) if live_data_values else False
 
             # Regenerate plots with updated data
-            return [
-                self._generate_upstream_plot(show_error_bars_upstream),
-                self._generate_downstream_plot(
-                    show_error_bars=show_error_bars_downstream
-                ),
-                not any_live_data,  # Disable interval if no live data
-            ]
+            plots = self._generate_both_plots(
+                show_error_bars_upstream=show_error_bars_upstream,
+                show_error_bars_downstream=show_error_bars_downstream,
+                show_valve_times_upstream=show_valve_times_upstream,
+                show_valve_times_downstream=show_valve_times_downstream,
+            )
+            return [*plots, not any_live_data]  # Disable interval if no live data
 
         # Callback for periodic live data updates
         @self.app.callback(
@@ -2081,12 +2079,7 @@ class DataPlotter:
                 Output("downstream-plot", "figure", allow_duplicate=True),
             ],
             [Input("live-data-interval", "n_intervals")],
-            [
-                State("show-error-bars-upstream", "value"),
-                State("show-error-bars-downstream", "value"),
-                State("show-valve-times-upstream", "value"),
-                State("show-valve-times-downstream", "value"),
-            ],
+            self.PLOT_CONTROL_STATES,
             prevent_initial_call=True,
         )
         def update_live_data(
@@ -2164,16 +2157,12 @@ class DataPlotter:
                         )
 
             # Regenerate plots with updated data;
-            return [
-                self._generate_upstream_plot(
-                    show_error_bars=show_error_bars_upstream,
-                    show_valve_times=show_valve_times_upstream,
-                ),
-                self._generate_downstream_plot(
-                    show_error_bars=show_error_bars_downstream,
-                    show_valve_times=show_valve_times_downstream,
-                ),
-            ]
+            return self._generate_both_plots(
+                show_error_bars_upstream=show_error_bars_upstream,
+                show_error_bars_downstream=show_error_bars_downstream,
+                show_valve_times_upstream=show_valve_times_upstream,
+                show_valve_times_downstream=show_valve_times_downstream,
+            )
 
         # FigureResampler callbacks for interactive zooming/panning
         @self.app.callback(
@@ -2224,6 +2213,29 @@ class DataPlotter:
                     return fig_resampler.construct_update_data_patch(relayoutData)
             return dash.no_update
 
+    def _generate_both_plots(
+        self,
+        show_error_bars_upstream=True,
+        show_error_bars_downstream=True,
+        show_valve_times_upstream=False,
+        show_valve_times_downstream=False,
+        **kwargs,
+    ):
+        """Helper method to generate both upstream and downstream plots
+        with common parameters"""
+        return [
+            self._generate_upstream_plot(
+                show_error_bars=show_error_bars_upstream,
+                show_valve_times=show_valve_times_upstream,
+                **kwargs,
+            ),
+            self._generate_downstream_plot(
+                show_error_bars=show_error_bars_downstream,
+                show_valve_times=show_valve_times_downstream,
+                **kwargs,
+            ),
+        ]
+
     def _generate_upstream_plot(
         self,
         show_error_bars=True,
@@ -2249,23 +2261,17 @@ class DataPlotter:
 
         # Iterate through datasets and obtain the upstream data
         for dataset_name in self.datasets.keys():
-            time_data = self.datasets[f"{dataset_name}"]["time_data"]
-            time_data = np.ascontiguousarray(time_data)
-            pressure_data = self.datasets[f"{dataset_name}"]["upstream_data"][
-                "pressure_data"
-            ]
-            pressure_data = np.ascontiguousarray(pressure_data)
-            pressure_error = self.datasets[f"{dataset_name}"]["upstream_data"][
-                "error_data"
-            ]
-            pressure_error = np.ascontiguousarray(pressure_error)
-
-            colour = self.datasets[f"{dataset_name}"]["colour"]
+            dataset = self.datasets[f"{dataset_name}"]
+            time_data = np.ascontiguousarray(dataset["time_data"])
+            upstream_data = dataset["upstream_data"]
+            pressure_data = np.ascontiguousarray(upstream_data["pressure_data"])
+            pressure_error = np.ascontiguousarray(upstream_data["error_data"])
+            colour = dataset["colour"]
 
             # Create scatter trace
             scatter_kwargs = {
                 "mode": "lines+markers",
-                "name": self.datasets[f"{dataset_name}"]["name"],
+                "name": dataset["name"],
                 "line": dict(color=colour, width=1.5),
                 "marker": dict(size=3),
             }
