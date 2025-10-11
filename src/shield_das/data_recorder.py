@@ -253,7 +253,7 @@ class DataRecorder:
     def _create_metadata_file(self):
         """Create a JSON metadata file with run information."""
         metadata = {
-            "version": "1.0",
+            "version": "1.1",
             "run_info": {
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
