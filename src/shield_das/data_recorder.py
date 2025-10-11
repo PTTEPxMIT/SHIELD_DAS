@@ -54,11 +54,12 @@ class DataRecorder:
 
     gauges: list[PressureGauge]
     thermocouples: list[Thermocouple]
-    furnace_setpoint: float | None
+    furnace_setpoint: float
     results_dir: str
     run_type: str
     recording_interval: float
     backup_interval: float
+    sample_material: str
 
     stop_event: threading.Event
     thread: threading.Thread
@@ -77,7 +78,7 @@ class DataRecorder:
         self,
         gauges: list[PressureGauge],
         thermocouples: list[Thermocouple],
-        furnace_setpoint: float | None = None,
+        furnace_setpoint: float,
         results_dir: str = "results",
         run_type="permeation_exp",
         recording_interval: float = 0.5,
@@ -162,6 +163,16 @@ class DataRecorder:
     def test_mode(self) -> bool:
         """Check if the recorder is in test mode."""
         return self.run_type == "test_mode"
+
+    @property
+    def sample_material(self) -> str:
+        return self._sample_material
+
+    @sample_material.setter
+    def sample_material(self, value: str):
+        if value not in ["316", "AISI 1018"]:
+            raise ValueError("sample_material must be one of '316L', or '316'")
+        self._sample_material = value
 
     def _create_results_directory(self):
         """Creates a new directory for results based on date and run number."""
