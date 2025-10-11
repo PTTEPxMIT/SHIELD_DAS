@@ -28,6 +28,8 @@ class DataRecorder:
             if in test mode, runs without actual hardware interaction
         recording_interval: Time interval (seconds) between recordings, defaults to 0.5s
         backup_interval: How often to backup data (seconds)
+        sample_material: Material of the sample being tested, either "316" or
+            "AISI 1018"
 
     Attributes:
         gauges: List of PressureGauge instances to record data from
@@ -39,6 +41,8 @@ class DataRecorder:
         recording_interval: Time interval (in seconds) between recordings, defaults to
             0.5 seconds
         backup_interval: How often to rotate backup CSV files (seconds)
+        sample_material: Material of the sample being tested, either "316" or
+            "AISI 1018"
         stop_event: Event to control the recording thread
         thread: Thread for recording data
         run_dir: Directory for the current run's results
