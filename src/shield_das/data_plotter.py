@@ -184,7 +184,7 @@ class DataPlotter:
             time_data, upstream_data, downstream_data = self.process_csv_v0_0(
                 metadata, data_folder
             )
-        elif version == "1.0":
+        elif version == "1.0" or "1.1":
             time_data, upstream_data, downstream_data = self.process_csv_v1_0(
                 metadata, data_folder
             )

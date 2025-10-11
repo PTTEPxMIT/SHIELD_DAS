@@ -354,3 +354,92 @@ class TestMetadata:
             assert "furnace_setpoint" in run_info
             assert run_info["furnace_setpoint"] == setpoint
             assert isinstance(run_info["furnace_setpoint"], int | float)
+
+    def test_metadata_sample_material_provided(self):
+        """Test that sample material is correctly included when provided."""
+        material = "316"
+        recorder = DataRecorder(
+            gauges=[self.mock_gauge1],
+            thermocouples=[],
+            results_dir=self.temp_dir,
+            sample_material=material,
+            run_type="test_mode",
+        )
+
+        recorder.start()
+        time.sleep(0.1)
+        recorder.stop()
+
+        metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        # Check that sample_material is present and correct
+        run_info = metadata["run_info"]
+        assert "sample_material" in run_info
+        assert run_info["sample_material"] == material
+        assert isinstance(run_info["sample_material"], str)
+
+    def test_metadata_sample_material_none(self):
+        """Test that sample material is None when not provided."""
+        recorder = DataRecorder(
+            gauges=[self.mock_gauge1],
+            thermocouples=[],
+            results_dir=self.temp_dir,
+            # sample_material not provided, should default to None
+            run_type="test_mode",
+        )
+
+        recorder.start()
+        time.sleep(0.1)
+        recorder.stop()
+
+        metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        # Check that sample_material is present but None
+        run_info = metadata["run_info"]
+        assert "sample_material" in run_info
+        assert run_info["sample_material"] is None
+
+    def test_metadata_sample_material_valid_values(self):
+        """Test sample material with all valid values."""
+        test_cases = [
+            "316",  # Stainless steel 316
+            "AISI 1018",  # Carbon steel
+        ]
+
+        for material in test_cases:
+            recorder = DataRecorder(
+                gauges=[self.mock_gauge1],
+                thermocouples=[],
+                results_dir=self.temp_dir,
+                sample_material=material,
+                run_type="test_mode",
+            )
+
+            recorder.start()
+            time.sleep(0.1)
+            recorder.stop()
+
+            metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+            with open(metadata_path) as f:
+                metadata = json.load(f)
+
+            # Verify the material is correctly stored
+            run_info = metadata["run_info"]
+            assert "sample_material" in run_info
+            assert run_info["sample_material"] == material
+            assert isinstance(run_info["sample_material"], str)
+
+    def test_sample_material_invalid_value(self):
+        """Test that invalid sample material raises ValueError."""
+        with pytest.raises(ValueError, match="sample_material must be one of"):
+            DataRecorder(
+                gauges=[self.mock_gauge1],
+                thermocouples=[],
+                results_dir=self.temp_dir,
+                sample_material="invalid_material",
+                run_type="test_mode",
+            )
