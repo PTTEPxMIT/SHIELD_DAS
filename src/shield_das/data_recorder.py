@@ -58,7 +58,7 @@ class DataRecorder:
 
     gauges: list[PressureGauge]
     thermocouples: list[Thermocouple]
-    furnace_setpoint: float
+    furnace_setpoint: float | None
     results_dir: str
     run_type: str
     recording_interval: float
@@ -82,11 +82,12 @@ class DataRecorder:
         self,
         gauges: list[PressureGauge],
         thermocouples: list[Thermocouple],
-        furnace_setpoint: float,
+        furnace_setpoint: float | None = None,
         results_dir: str = "results",
         run_type="permeation_exp",
         recording_interval: float = 0.5,
         backup_interval: float = 5.0,
+        sample_material: str | None = None,
     ):
         self.gauges = gauges
         self.thermocouples = thermocouples
@@ -95,6 +96,7 @@ class DataRecorder:
         self.run_type = run_type
         self.recording_interval = recording_interval
         self.backup_interval = backup_interval
+        self.sample_material = sample_material
 
         # Thread control
         self.stop_event = threading.Event()
@@ -174,7 +176,9 @@ class DataRecorder:
 
     @sample_material.setter
     def sample_material(self, value: str):
-        if value not in ["316", "AISI 1018"]:
+        if value is None:
+            self._sample_material = value
+        elif value not in ["316", "AISI 1018"]:
             raise ValueError("sample_material must be one of '316L', or '316'")
         self._sample_material = value
 
