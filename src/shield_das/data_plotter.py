@@ -17,7 +17,12 @@ from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 from plotly_resampler import FigureResampler
 
-from .helpers import calculate_error, voltage_to_pressure, import_htm_data
+from .analysis import (
+    average_pressure_after_increase,
+    calculate_flux_from_sample,
+    calculate_permeability_from_flux,
+)
+from .helpers import calculate_error, import_htm_data, voltage_to_pressure
 
 
 class DataPlotter:
@@ -333,31 +338,30 @@ class DataPlotter:
 
         # Extract valve times from metadata
         valve_times = {}
-        try:
-            with open(os.path.join(dataset_path, "run_metadata.json")) as f:
-                metadata = json.load(f)
-            run_info = metadata.get("run_info", {})
+        with open(os.path.join(dataset_path, "run_metadata.json")) as f:
+            metadata = json.load(f)
+        run_info = metadata.get("run_info", {})
 
-            # Get start time for relative calculation
-            start_time_str = run_info.get("start_time")
-            if start_time_str:
-                try:
-                    # Try with seconds first, then without
-                    start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    start_time = datetime.strptime(
-                        start_time_str, "%Y-%m-%d %H:%M:%S.%f"
-                    )
+        # get furnace set_point temperature
+        furnace_set_point_C = run_info["furnace_setpoint"]
+        furnace_set_point_K = furnace_set_point_C + 273.15
 
-                for key, value in run_info.items():
-                    if "_time" in key and key.startswith("v"):
-                        try:
-                            valve_dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
-                            valve_times[key] = (valve_dt - start_time).total_seconds()
-                        except (ValueError, TypeError):
-                            pass
-        except Exception:
-            pass
+        # Get start time for relative calculation
+        start_time_str = run_info.get("start_time")
+        if start_time_str:
+            try:
+                # Try with seconds first, then without
+                start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S.%f")
+
+            for key, value in run_info.items():
+                if "_time" in key and key.startswith("v"):
+                    try:
+                        valve_dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
+                        valve_times[key] = (valve_dt - start_time).total_seconds()
+                    except (ValueError, TypeError):
+                        pass
 
         dataset = {
             "name": dataset_name,
@@ -368,6 +372,7 @@ class DataPlotter:
             "upstream_data": upstream_data,
             "downstream_data": downstream_data,
             "valve_times": valve_times,
+            "temperature": furnace_set_point_K,
         }
 
         # Add the folder dataset to our list
@@ -2664,21 +2669,55 @@ class DataPlotter:
             )
 
         # Placeholder: Add empty traces for each dataset to establish structure
-        for dataset_name in self.datasets.keys():
-            dataset = self.datasets[f"{dataset_name}"]
-            colour = dataset["colour"]
+        temp_data = []
+        permeability_data = []
 
-            # Add placeholder trace (empty for now)
-            fig.add_trace(
-                go.Scatter(
-                    x=[],
-                    y=[],
-                    mode="lines+markers",
-                    name=dataset["name"],
-                    line=dict(color=colour, width=2),
-                    marker=dict(size=4),
-                )
+        for dataset_name in self.datasets.keys():
+            temp = self.datasets[f"{dataset_name}"]["temperature"]
+            temp_data.append(temp)
+
+            # evaluate average upstream pressure after initial increase
+            P_up_torr = self.datasets[f"{dataset_name}"]["upstream_data"][
+                "pressure_data"
+            ]
+            t_data = self.datasets[f"{dataset_name}"]["time_data"]
+            P_avg_up_torr = average_pressure_after_increase(
+                time=t_data, pressure=P_up_torr
             )
+
+            # evaluate flux coming from the sample
+            P_down_torr = self.datasets[f"{dataset_name}"]["downstream_data"][
+                "pressure_data"
+            ]
+            h_flux = calculate_flux_from_sample(t_data=t_data, P_data=P_down_torr)
+
+            # evaluate permerbility from flux
+            d_sample = 0.0155  # diameter of fitting on sample in meters
+            A = 1 / 4 * np.pi * (d_sample) ** 2
+            permeability = calculate_permeability_from_flux(
+                slope_torr_per_s=h_flux,
+                V_m3=7.9e-5,
+                T_K=temp,
+                A_m2=A,
+                e_m=0.00088,
+                P_up_torr=P_avg_up_torr,
+            )
+
+            permeability_data.append(permeability)
+
+        # Add placeholder trace (empty for now)
+        x_plot = 1000 / np.array(temp_data)  # Convert to 1000/T
+
+        fig.add_trace(
+            go.Scatter(
+                x=x_plot,
+                y=permeability_data,
+                mode="lines+markers",
+                name="SHIELD Data",
+                line=dict(color="black", width=2),
+                marker=dict(size=4),
+            )
+        )
 
         # Set up layout
         fig.update_layout(
