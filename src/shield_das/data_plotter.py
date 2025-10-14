@@ -2713,10 +2713,9 @@ class DataPlotter:
             go.Scatter(
                 x=x_plot,
                 y=permeability_data,
-                mode="lines+markers",
+                mode="markers",
                 name="SHIELD Data",
-                line=dict(color="black", width=2),
-                marker=dict(size=4),
+                marker=dict(size=4, color="black"),
             )
         )
 
