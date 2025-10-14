@@ -2707,6 +2707,7 @@ class DataPlotter:
 
         # Add placeholder trace (empty for now)
         x_plot = 1000 / np.array(temp_data)  # Convert to 1000/T
+        permeability_data = np.array(permeability_data)
 
         fig.add_trace(
             go.Scatter(
