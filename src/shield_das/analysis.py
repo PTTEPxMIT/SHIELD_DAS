@@ -50,6 +50,7 @@ def calculate_flux_from_sample(t_data, P_data, tail_frac=0.25, tol=0.08):
 
     # Linear fit to stable region
     slope, _ = np.polyfit(x[fit_start:], y[fit_start:], 1)
+
     return slope
 
 
