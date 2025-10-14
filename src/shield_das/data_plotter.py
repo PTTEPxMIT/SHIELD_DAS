@@ -2642,84 +2642,55 @@ class DataPlotter:
         return fig
 
     def _generate_permeability_plot(self):
-        """Generate the permeability plot (placeholder for future implementation)"""
-
-        # Use FigureResampler with parameters to hide resampling annotations
+        """Generate permeability plot with HTM reference and measured data."""
         fig = FigureResampler(
             go.Figure(),
             show_dash_kwargs={"mode": "disabled"},
             show_mean_aggregation_size=False,
             verbose=False,
         )
-
-        # Store the FigureResampler instance
         self.figure_resamplers["permeability-plot"] = fig
 
-        # Add HTM data to plot
-        htm_x_values, htm_y_values, htm_labels = import_htm_data("316l_steel")
+        # Add HTM reference data
+        htm_x, htm_y, htm_labels = import_htm_data("316l_steel")
+        for x, y, label in zip(htm_x, htm_y, htm_labels):
+            fig.add_trace(go.Scatter(x=1000 / x, y=y, name=label))
 
-        for x, y, label in zip(htm_x_values, htm_y_values, htm_labels):
-            x_plot = 1000 / x  # Convert to 1000/T
-            fig.add_trace(
-                go.Scatter(
-                    x=x_plot,
-                    y=y,
-                    name=label,
-                )
+        # Calculate and plot permeability for each dataset
+        temps, perms = [], []
+        SAMPLE_DIAMETER = 0.0155  # meters
+        SAMPLE_AREA = np.pi * (SAMPLE_DIAMETER / 2) ** 2
+        SAMPLE_THICKNESS = 0.00088  # meters
+        CHAMBER_VOLUME = 7.9e-5  # m³
+
+        for dataset in self.datasets.values():
+            temp = dataset["temperature"]
+            time = dataset["time_data"]
+            p_up = dataset["upstream_data"]["pressure_data"]
+            p_down = dataset["downstream_data"]["pressure_data"]
+
+            # Calculate permeability
+            p_avg_up = average_pressure_after_increase(time, p_up)
+            flux = calculate_flux_from_sample(time, p_down)
+            perm = calculate_permeability_from_flux(
+                flux, CHAMBER_VOLUME, temp, SAMPLE_AREA, SAMPLE_THICKNESS, p_avg_up
             )
 
-        # Placeholder: Add empty traces for each dataset to establish structure
-        temp_data = []
-        permeability_data = []
+            temps.append(temp)
+            perms.append(perm)
 
-        for dataset_name in self.datasets.keys():
-            temp = self.datasets[f"{dataset_name}"]["temperature"]
-            temp_data.append(temp)
-
-            # evaluate average upstream pressure after initial increase
-            P_up_torr = self.datasets[f"{dataset_name}"]["upstream_data"][
-                "pressure_data"
-            ]
-            t_data = self.datasets[f"{dataset_name}"]["time_data"]
-            P_avg_up_torr = average_pressure_after_increase(
-                time=t_data, pressure=P_up_torr
-            )
-
-            # evaluate flux coming from the sample
-            P_down_torr = self.datasets[f"{dataset_name}"]["downstream_data"][
-                "pressure_data"
-            ]
-            h_flux = calculate_flux_from_sample(t_data=t_data, P_data=P_down_torr)
-
-            # evaluate permerbility from flux
-            d_sample = 0.0155  # diameter of fitting on sample in meters
-            A = 1 / 4 * np.pi * (d_sample) ** 2
-            permeability = calculate_permeability_from_flux(
-                slope_torr_per_s=h_flux,
-                V_m3=7.9e-5,
-                T_K=temp,
-                A_m2=A,
-                e_m=0.00088,
-                P_up_torr=P_avg_up_torr,
-            )
-
-            permeability_data.append(permeability)
-
-        # Add placeholder trace (empty for now)
-        x_plot = 1000 / np.array(temp_data)  # Convert to 1000/T
-        permeability_data = np.array(permeability_data)
-
+        # Add measured data
         fig.add_trace(
             go.Scatter(
-                x=x_plot,
-                y=permeability_data,
+                x=1000 / np.array(temps),
+                y=perms,
                 mode="markers",
                 name="SHIELD Data",
                 marker=dict(size=4, color="black"),
             )
         )
 
-        # Set up layout
+        # Configure layout
         fig.update_layout(
             xaxis_title="1000/T (K-1)",
             yaxis_title="Permeability (m-1 s-1 Pa-0.5)",
@@ -2727,15 +2698,11 @@ class DataPlotter:
             hovermode="closest",
             template="plotly_white",
             legend=dict(
-                orientation="v",
-                yanchor="top",
-                y=0.99,
-                xanchor="right",
-                x=0.99,
+                orientation="v", yanchor="top", y=0.99, xanchor="right", x=0.99
             ),
         )
 
-        # Clean up trace names to remove [R] annotations
+        # Clean up resampler annotations
         for trace in fig.data:
             if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
                 trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
