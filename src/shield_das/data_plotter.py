@@ -17,7 +17,7 @@ from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 from plotly_resampler import FigureResampler
 
-from .helpers import calculate_error, voltage_to_pressure
+from .helpers import calculate_error, voltage_to_pressure, import_htm_data
 
 
 class DataPlotter:
@@ -1149,6 +1149,30 @@ class DataPlotter:
                                             ),
                                             id="collapse-downstream-controls",
                                             is_open=False,
+                                        ),
+                                    ]
+                                ),
+                            ],
+                            width=6,
+                        ),
+                    ],
+                    className="mt-3",
+                ),
+                # Permeability plot
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader("Measured Permeability"),
+                                        dbc.CardBody(
+                                            [
+                                                dcc.Graph(
+                                                    id="permeability-plot",
+                                                    figure=self._generate_permeability_plot(),
+                                                )
+                                            ]
                                         ),
                                     ]
                                 ),
@@ -2604,6 +2628,73 @@ class DataPlotter:
                 fig.update_yaxes(range=[math.log10(y_min_use), math.log10(y_max_use)])
             else:
                 fig.update_yaxes(range=[y_min, y_max])
+
+        # Clean up trace names to remove [R] annotations
+        for trace in fig.data:
+            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
+                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
+
+        return fig
+
+    def _generate_permeability_plot(self):
+        """Generate the permeability plot (placeholder for future implementation)"""
+
+        # Use FigureResampler with parameters to hide resampling annotations
+        fig = FigureResampler(
+            go.Figure(),
+            show_dash_kwargs={"mode": "disabled"},
+            show_mean_aggregation_size=False,
+            verbose=False,
+        )
+
+        # Store the FigureResampler instance
+        self.figure_resamplers["permeability-plot"] = fig
+
+        # Add HTM data to plot
+        htm_x_values, htm_y_values, htm_labels = import_htm_data("316l_steel")
+
+        for x, y, label in zip(htm_x_values, htm_y_values, htm_labels):
+            x_plot = 1000 / x  # Convert to 1000/T
+            fig.add_trace(
+                go.Scatter(
+                    x=x_plot,
+                    y=y,
+                    name=label,
+                )
+            )
+
+        # Placeholder: Add empty traces for each dataset to establish structure
+        for dataset_name in self.datasets.keys():
+            dataset = self.datasets[f"{dataset_name}"]
+            colour = dataset["colour"]
+
+            # Add placeholder trace (empty for now)
+            fig.add_trace(
+                go.Scatter(
+                    x=[],
+                    y=[],
+                    mode="lines+markers",
+                    name=dataset["name"],
+                    line=dict(color=colour, width=2),
+                    marker=dict(size=4),
+                )
+            )
+
+        # Set up layout
+        fig.update_layout(
+            xaxis_title="1000/T (K-1)",
+            yaxis_title="Permeability (m-1 s-1 Pa-0.5)",
+            yaxis_type="log",
+            hovermode="closest",
+            template="plotly_white",
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=0.99,
+                xanchor="right",
+                x=0.99,
+            ),
+        )
 
         # Clean up trace names to remove [R] annotations
         for trace in fig.data:
