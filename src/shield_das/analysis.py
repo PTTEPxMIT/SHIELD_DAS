@@ -55,7 +55,7 @@ def calculate_flux_from_sample(t_data, P_data, tail_frac=0.25, tol=0.08):
     y = np.asarray(P_data)
 
     # Filter data to only include pressure values between 0.03 and 0.985
-    valid_mask = (y >= 0.03) & (y <= 0.985)
+    valid_mask = (y >= 0.05) & (y <= 0.95)
     x = x[valid_mask]
     y = y[valid_mask]
 
@@ -112,7 +112,7 @@ def calculate_permeability_from_flux(
     """
     R = 8.314  # J/(mol*K)
     dPdt_Pa_per_s = slope_torr_per_s * 133.3  # convert Torr/s to Pa/s
-    J = dPdt_Pa_per_s * V_m3 / (R * T_K * A_m2) * 6.022 * 10**23  # H/(m^2*s)
-    permeability = J * e_m / (P_up_torr * 133.3) ** 0.5
+    J = dPdt_Pa_per_s * V_m3 / (R * T_K * A_m2) * 6.022e23  # H/(m^2*s)
+    permeability = J * e_m / ((P_up_torr * 133.3) ** 0.5)
 
     return permeability
