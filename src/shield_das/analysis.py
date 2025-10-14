@@ -53,6 +53,12 @@ def average_pressure_after_increase(time, pressure, window=5, slope_threshold=1e
 def calculate_flux_from_sample(t_data, P_data, tail_frac=0.25, tol=0.08):
     x = np.asarray(t_data)
     y = np.asarray(P_data)
+
+    # Filter data to only include pressure values between 0.03 and 0.985
+    valid_mask = (y >= 0.03) & (y <= 0.985)
+    x = x[valid_mask]
+    y = y[valid_mask]
+
     if x.size < 5:
         raise ValueError("need at least 5 points to fit an asymptote")
 
