@@ -91,3 +91,84 @@ def calculate_permeability_from_flux(
     Perm_TS = J_TS * e_m / (P_up_torr * TORR_TO_PA) ** 0.5
 
     return Perm_TS
+
+
+def evaluate_permeability_values(datasets):
+    # Calculate and plot permeability for each dataset
+    temps, perms = [], []
+    SAMPLE_DIAMETER = 0.0155  # meters
+    SAMPLE_AREA = np.pi * (SAMPLE_DIAMETER / 2) ** 2
+    SAMPLE_THICKNESS = 0.00088  # meters
+    CHAMBER_VOLUME = 7.9e-5  # m³
+
+    for dataset in datasets.values():
+        temp = dataset["temperature"]
+        time = dataset["time_data"]
+        p_up = dataset["upstream_data"]["pressure_data"]
+        p_down = dataset["downstream_data"]["pressure_data"]
+
+        # Calculate permeability
+        p_avg_up = average_pressure_after_increase(time, p_up)
+        flux = calculate_flux_from_sample(time, p_down)
+        perm = calculate_permeability_from_flux(
+            flux,
+            CHAMBER_VOLUME,
+            temp,
+            SAMPLE_AREA,
+            SAMPLE_THICKNESS,
+            p_down,
+            p_avg_up,
+        )
+
+        temps.append(temp)
+        perms.append(perm)
+
+    # Group data by temperature to calculate error bars
+    from collections import defaultdict
+
+    temp_groups = defaultdict(list)
+    for temp, perm in zip(temps, perms):
+        temp_groups[temp].append(perm)
+
+    # Calculate error bars for each unique temperature
+    unique_temps = []
+    error_lower = []
+    error_upper = []
+
+    for temp in sorted(temp_groups.keys()):
+        perm_values = np.array(temp_groups[temp])
+        min_perm = perm_values.min()
+        max_perm = perm_values.max()
+
+        unique_temps.append(temp)
+        # Error bars: from 10% below min to 10% above max
+        # Calculate relative to the center point between min and max
+        center = (min_perm + max_perm) / 2
+        error_lower.append(center - min_perm * 0.9)
+        error_upper.append(max_perm * 1.1 - center)
+
+    # Convert to arrays for plotting
+    x_error = 1000 / np.array(unique_temps)
+    y_error = [
+        (min_perm * 0.9 + max_perm * 1.1) / 2
+        for min_perm, max_perm in [
+            (
+                np.array(temp_groups[temp]).min(),
+                np.array(temp_groups[temp]).max(),
+            )
+            for temp in sorted(temp_groups.keys())
+        ]
+    ]
+
+    return temps, perms, x_error, y_error, error_lower, error_upper
+
+
+def fit_permeability_data(temps, perms):
+    log_y = np.log10(perms)
+    x_all = 1000 / np.array(temps)
+    # Linear fit: log10(perm) = m * (1000/T) + c
+    coeffs = np.polyfit(x_all, log_y, 1)
+    fit_x = np.linspace(x_all.min(), x_all.max(), 100)
+    fit_y = 10 ** (coeffs[0] * fit_x + coeffs[1])
+
+    return fit_x, fit_y
