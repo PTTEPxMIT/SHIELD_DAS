@@ -2673,7 +2673,13 @@ class DataPlotter:
             p_avg_up = average_pressure_after_increase(time, p_up)
             flux = calculate_flux_from_sample(time, p_down)
             perm = calculate_permeability_from_flux(
-                flux, CHAMBER_VOLUME, temp, SAMPLE_AREA, SAMPLE_THICKNESS, p_avg_up
+                flux,
+                CHAMBER_VOLUME,
+                temp,
+                SAMPLE_AREA,
+                SAMPLE_THICKNESS,
+                p_down,
+                p_avg_up,
             )
 
             temps.append(temp)
@@ -2701,6 +2707,9 @@ class DataPlotter:
                 orientation="v", yanchor="top", y=0.99, xanchor="right", x=0.99
             ),
         )
+
+        # Configure y-axis to show exponent at top (matplotlib style)
+        fig.update_yaxes(exponentformat="e", showexponent="all")
 
         # Clean up resampler annotations
         for trace in fig.data:
