@@ -210,7 +210,10 @@ class TestDataPlotterV1Processing:
         # Create v1.0 metadata with proper structure
         metadata = {
             "version": "1.0",
-            "run_info": {"data_filename": "pressure_gauge_data.csv"},
+            "run_info": {
+                "data_filename": "pressure_gauge_data.csv",
+                "furnace_setpoint": 500,
+            },
             "gauges": [
                 {
                     "name": "TestUpstream",
@@ -268,7 +271,10 @@ class TestDataPlotterV1Processing:
 
         metadata = {
             "version": "1.0",
-            "run_info": {"data_filename": "missing_file.csv"},
+            "run_info": {
+                "data_filename": "missing_file.csv",
+                "furnace_setpoint": 500,
+            },
             "gauges": [
                 {
                     "name": "TestGauge",
@@ -291,7 +297,10 @@ class TestDataPlotterV1Processing:
 
         metadata = {
             "version": "1.0",
-            "run_info": {"data_filename": "malformed_data.csv"},
+            "run_info": {
+                "data_filename": "malformed_data.csv",
+                "furnace_setpoint": 500,
+            },
             "gauges": [
                 {
                     "name": "TestGauge",
@@ -322,7 +331,10 @@ class TestDataPlotterV1Processing:
 
         metadata = {
             "version": "1.0",
-            "run_info": {"data_filename": "invalid_timestamps.csv"},
+            "run_info": {
+                "data_filename": "invalid_timestamps.csv",
+                "furnace_setpoint": 500,
+            },
             "gauges": [
                 {
                     "name": "TestGauge",
@@ -395,7 +407,10 @@ class TestDataPlotterDataProcessing:
         # Create realistic v1.0 metadata
         metadata = {
             "version": "1.0",
-            "run_info": {"data_filename": "pressure_gauge_data.csv"},
+            "run_info": {
+                "data_filename": "pressure_gauge_data.csv",
+                "furnace_setpoint": 500,
+            },
             "gauges": [
                 {
                     "name": "TestGauge1",
@@ -460,6 +475,10 @@ class TestDataPlotterIntegration:
         # Create realistic v0.0 metadata that matches the expected format
         metadata = {
             "version": "0.0",
+            "run_info": {
+                "data_filename": "pressure_gauge_data.csv",
+                "furnace_setpoint": 500,
+            },
             "gauges": [
                 {
                     "name": "TestGauge1",
@@ -544,6 +563,7 @@ class TestDataPlotterIntegration:
             thermocouples=[],
             results_dir=str(tmp_path),
             run_type="test_mode",
+            furnace_setpoint=500,
             recording_interval=0.05,  # Fast recording for testing
         )
 
@@ -679,7 +699,10 @@ class TestDataPlotterPlotGeneration:
 
         metadata = {
             "version": "1.0",
-            "run_info": {"data_filename": "pressure_gauge_data.csv"},
+            "run_info": {
+                "data_filename": "pressure_gauge_data.csv",
+                "furnace_setpoint": 500,
+            },
             "gauges": [
                 {
                     "name": "TestGauge",
@@ -721,7 +744,10 @@ class TestDataPlotterPlotGeneration:
 
         metadata = {
             "version": "1.0",
-            "run_info": {"data_filename": "pressure_gauge_data.csv"},
+            "run_info": {
+                "data_filename": "pressure_gauge_data.csv",
+                "furnace_setpoint": 500,
+            },
             "gauges": [
                 {
                     "name": "ErrorTestGauge",
