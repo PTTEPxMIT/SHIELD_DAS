@@ -345,19 +345,12 @@ class DataPlotter:
         # Get start time for relative calculation
         start_time_str = run_info.get("start_time")
         if start_time_str:
-            try:
-                # Try with seconds first, then without
-                start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S.%f")
+            start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
 
             for key, value in run_info.items():
                 if "_time" in key and key.startswith("v"):
-                    try:
-                        valve_dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
-                        valve_times[key] = (valve_dt - start_time).total_seconds()
-                    except (ValueError, TypeError):
-                        pass
+                    valve_dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
+                    valve_times[key] = (valve_dt - start_time).total_seconds()
 
         dataset = {
             "name": dataset_name,
