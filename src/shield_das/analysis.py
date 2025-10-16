@@ -28,8 +28,11 @@ def calculate_flux_from_sample(t_data, P_data):
     valid = (y >= 0.05) & (y <= 0.95)
     x, y = x[valid], y[valid]
 
-    # Linear fit to stable region
-    slope, _ = np.polyfit(x, y, 1)
+    # Create weights that emphasize later points (exponential weighting)
+    weights = np.exp(np.linspace(-1, 0, len(x)))
+
+    # Weighted linear fit
+    slope, _ = np.polyfit(x, y, 1, w=weights)
 
     return slope
 
