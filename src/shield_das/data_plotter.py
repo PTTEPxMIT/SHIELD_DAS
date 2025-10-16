@@ -2685,14 +2685,91 @@ class DataPlotter:
             temps.append(temp)
             perms.append(perm)
 
-        # Add measured data
+        # Group data by temperature to calculate error bars
+        from collections import defaultdict
+
+        temp_groups = defaultdict(list)
+        for temp, perm in zip(temps, perms):
+            temp_groups[temp].append(perm)
+
+        # Calculate error bars for each unique temperature
+        unique_temps = []
+        error_lower = []
+        error_upper = []
+
+        for temp in sorted(temp_groups.keys()):
+            perm_values = np.array(temp_groups[temp])
+            min_perm = perm_values.min()
+            max_perm = perm_values.max()
+
+            unique_temps.append(temp)
+            # Error bars: from 10% below min to 10% above max
+            # Calculate relative to the center point between min and max
+            center = (min_perm + max_perm) / 2
+            error_lower.append(center - min_perm * 0.9)
+            error_upper.append(max_perm * 1.1 - center)
+
+        # Convert to arrays for plotting
+        x_error = 1000 / np.array(unique_temps)
+        y_error = [
+            (min_perm * 0.9 + max_perm * 1.1) / 2
+            for min_perm, max_perm in [
+                (
+                    np.array(temp_groups[temp]).min(),
+                    np.array(temp_groups[temp]).max(),
+                )
+                for temp in sorted(temp_groups.keys())
+            ]
+        ]
+
+        # Add error bars (no visible markers, just the bars)
+        fig.add_trace(
+            go.Scatter(
+                x=x_error,
+                y=y_error,
+                mode="markers",
+                name="Error Range",
+                marker=dict(size=0.1, color="black", opacity=0),
+                error_y=dict(
+                    type="data",
+                    symmetric=False,
+                    array=error_upper,
+                    arrayminus=error_lower,
+                    color="black",
+                    thickness=2,
+                    width=6,
+                ),
+                showlegend=False,
+            )
+        )
+
+        # Add individual data points on top (no legend)
         fig.add_trace(
             go.Scatter(
                 x=1000 / np.array(temps),
                 y=perms,
                 mode="markers",
-                name="SHIELD Data",
-                marker=dict(size=4, color="black"),
+                marker=dict(size=6, color="black"),
+                showlegend=False,
+            )
+        )
+
+        # Fit a line through all data points (in log space for permeability)
+        log_y = np.log10(perms)
+        x_all = 1000 / np.array(temps)
+        # Linear fit: log10(perm) = m * (1000/T) + c
+        coeffs = np.polyfit(x_all, log_y, 1)
+        fit_x = np.linspace(x_all.min(), x_all.max(), 100)
+        fit_y = 10 ** (coeffs[0] * fit_x + coeffs[1])
+
+        fig.add_trace(
+            go.Scatter(
+                x=fit_x,
+                y=fit_y,
+                mode="lines",
+                name="SHIELD data",
+                line=dict(color="black", width=2, dash="solid"),
+                showlegend=True,
             )
         )
 
