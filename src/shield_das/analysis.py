@@ -20,7 +20,7 @@ def average_pressure_after_increase(time, pressure, window=5, slope_threshold=1e
     return np.mean(pressure[settled_index:])
 
 
-def calculate_flux_from_sample(t_data, P_data, tail_frac=0.25, tol=0.08):
+def calculate_flux_from_sample(t_data, P_data):
     """Calculate flux from downstream pressure rise, filtering unreliable gauge data."""
     x, y = np.asarray(t_data), np.asarray(P_data)
 
@@ -28,28 +28,8 @@ def calculate_flux_from_sample(t_data, P_data, tail_frac=0.25, tol=0.08):
     valid = (y >= 0.05) & (y <= 0.95)
     x, y = x[valid], y[valid]
 
-    if len(x) < 5:
-        raise ValueError("Need at least 5 valid points to fit asymptote")
-
-    # Find stable tail region where gradient is constant
-    grad = np.gradient(y, x)
-    tail_start = max(0, int(len(x) * (1 - tail_frac)))
-    tail_grad = grad[tail_start:]
-
-    # Identify where gradient variation is within tolerance
-    med = np.median(tail_grad) or np.mean(tail_grad) or 1e-12
-    stable = np.abs((tail_grad - med) / med) <= tol
-
-    # Find first index where all subsequent gradients are stable
-    for i in range(len(stable)):
-        if stable[i:].all():
-            fit_start = tail_start + i
-            break
-    else:
-        fit_start = tail_start
-
     # Linear fit to stable region
-    slope, _ = np.polyfit(x[fit_start:], y[fit_start:], 1)
+    slope, _ = np.polyfit(x, y, 1)
 
     return slope
 
@@ -60,16 +40,51 @@ def calculate_permeability_from_flux(
     T_K: float,
     A_m2: float,
     e_m: float,
+    P_down_torr: float,
     P_up_torr: float,
 ) -> float:
-    """Calculate permeability from flux method."""
+    """Calculates permeability using Takaishi-Sensui method, see 10.1039/tf9635902503
+    for more details"""
+
     TORR_TO_PA = 133.3
     R = 8.314  # J/(mol·K)
     N_A = 6.022e23  # Avogadro's number
 
-    # Convert flux to H atoms per m²·s
-    flux_Pa_per_s = slope_torr_per_s * TORR_TO_PA
-    flux_H_atoms = flux_Pa_per_s * V_m3 * N_A / (R * T_K * A_m2)
+    V1_ratio = 0.35  # ratio of V1 to total volume
 
-    # Calculate permeability
-    return flux_H_atoms * e_m / (P_up_torr * TORR_TO_PA) ** 0.5
+    V1 = V_m3 * V1_ratio
+    V2 = V_m3 * (1 - V1_ratio)
+    T1 = T_K
+    T2 = 300  # ambient temperature in Kelvin
+
+    A = 1.24 * 56.3 / 10e-5
+    B = 8 * 7.7 / 10e-2
+    C = 10.6 * 2.73
+    d = 0.0155  # diameter of pipe
+
+    P2dot = slope_torr_per_s * TORR_TO_PA
+    P2 = P_down_torr[-1] * TORR_TO_PA  # convert Torr to Pa
+
+    # --- helper quantities ---
+    num2 = C * (d * P2) ** 0.5 + (T2 / T1) ** 0.5 + A * d**2 * P2**2 + B * d * P2  # #2
+    den3 = C * (d * P2) ** 0.5 + A * d**2 * P2**2 + B * d * P2 + 1  # #3
+
+    num1 = (
+        B * d * P2dot
+        + (C * d * P2dot) / (2 * (d * P2) ** 0.5)
+        + 2 * A * d**2 * P2 * P2dot
+    )
+
+    # --- assemble dn/dt ---
+    n_dot = (
+        (V2 * P2dot) / (R * T2)
+        + (V1 * P2dot) / (R * T1 * num2)
+        + (V1 * P2 * num1) / (R * T1 * num2 * den3)
+        - (V1 * P2 * num1) / (R * T1 * num2**2)
+    )
+
+    J_TS = n_dot / A_m2 * N_A  # H/(m^2*s)
+
+    Perm_TS = J_TS * e_m / (P_up_torr * TORR_TO_PA) ** 0.5
+
+    return Perm_TS
