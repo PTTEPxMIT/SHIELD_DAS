@@ -1901,7 +1901,6 @@ class DataPlotter:
 
             # Extract the index from the triggered button
             button_id = ctx.triggered[0]["prop_id"]
-            import json
 
             try:
                 button_data = json.loads(button_id.split(".")[0])
@@ -1942,8 +1941,6 @@ class DataPlotter:
 
             # Extract the index from the triggered button
             button_id = ctx.triggered[0]["prop_id"]
-            import json
-
             try:
                 button_data = json.loads(button_id.split(".")[0])
                 download_index = int(button_data["index"])
