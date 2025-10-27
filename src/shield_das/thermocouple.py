@@ -34,8 +34,7 @@ class Thermocouple:
         self,
         labjack,  # Remove type hint to avoid import issues
         resolution_index: int | None = 8,
-        gain_index: int | None = 0,
-        settling_factor: int | None = 2,
+        gain_index: int | None = 3,
     ) -> float:
         """
         Read temperature from a Type K thermocouple connected to a LabJack U6 using
@@ -61,18 +60,32 @@ class Thermocouple:
             ain_channel_voltage = rng.uniform(4, 6)
         else:
             ain_channel_voltage = labjack.getAIN(
-                ain_channel=0,
+                positiveChannel=0,
                 resolutionIndex=resolution_index,
                 gainIndex=gain_index,
-                settlingFactor=settling_factor,
                 differential=True,
             )
             # convert volts to millivolts
             ain_channel_voltage *= 1000
+            ain_channel_voltage *= -1
+            # print(f"Thermocouple Voltage (mV): {ain_channel_voltage}")
+
+            # local_temperature = labjack.getTemperature() - 273.15 + 2.5
+
+            # # Calculate cold junction compensation voltage (mV)
+            # cjc_mv = temp_c_to_mv(local_temperature)
+
+            # # Total thermocouple voltage including cold junction compensation
+            # total_mv = -ain_channel_voltage + cjc_mv
+
+            # # Convert total voltage to temperature in Celsius
+            # measured_temperature = mv_to_temp_c(total_mv)
+            # print(f"CJC Temp = {local_temperature} C")
+            # print(f"Measured Temp = {measured_temperature} C")
 
         self.voltage_data.append(ain_channel_voltage)
 
-        local_temperature = labjack.getTemperature() - 273.15 + 2.5
+        # local_temperature = labjack.getTemperature() - 273.15 + 2.5
 
         # # Calculate cold junction compensation voltage (mV)
         # cjc_mv = temp_c_to_mv(local_temperature)
@@ -81,36 +94,7 @@ class Thermocouple:
         # total_mv = tc_mv + cjc_mv
 
         # # Convert total voltage to temperature in Celsius
-        # measured_temperature = mv_to_temp_c(total_mv)
-
-        """Create a backup file with all current data."""
-        if self.backup_dir is None:
-            return  # Backup not initialized
-
-        # Create a new backup filename with incrementing counter
-        backup_filename = os.path.join(
-            self.backup_dir, f"{self.name}_backup_{self.backup_counter:05d}.csv"
-        )
-
-        # Write all current data to the backup file
-        with open(backup_filename, "w") as f:
-            f.write("RealTimestamp,RelativeTime,LocalTemp (C),MeasuredTemp (C)\n")
-            for i in range(len(self.timestamp_data)):
-                real_ts = self.real_timestamp_data[i].strftime("%Y-%m-%d %H:%M:%S.%f")[
-                    :-3
-                ]
-                rel_ts = self.timestamp_data[i]
-                measured_temperature = (
-                    self.measured_temperature_data[i]
-                    if i < len(self.measured_temperature_data)
-                    else 0
-                )
-                f.write(
-                    f"{real_ts},{rel_ts},{self.local_temperature_data[i]},{measured_temperature}\n"
-                )
-
-        print(f"Created backup file: {backup_filename}")
-        self.backup_counter += 1
+        # measured_temperature = mv_to_temp_c(total_mv
 
 
 def evaluate_poly(coeffs: list[float] | tuple[float], x: float) -> float:
