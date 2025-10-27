@@ -442,22 +442,40 @@ class DataRecorder:
         backup_frequency = max(1, int(self.backup_interval / self.recording_interval))
 
         # Data buffers
-        data_buffer = []
+        pressure_data_buffer = []
+        thermo_data_buffer = []
         measurement_count = 0
         backup_count = 1
 
         while not self.stop_event.is_set():
             timestamp = self._get_current_timestamp()
-            data_row = self._collect_measurement_data(labjack, timestamp)
-            data_buffer.append(data_row)
+            pressure_data_row = self._collect_pressure_measurement_data(
+                labjack, timestamp
+            )
+            pressure_data_buffer.append(pressure_data_row)
+            thermo_data_row = self._collect_thermocouple_measurement_data(
+                labjack, timestamp
+            )
+            thermo_data_buffer.append(thermo_data_row)
             measurement_count += 1
 
-            # Write individual measurement to main CSV
-            self._write_single_measurement(data_row, is_first=(measurement_count == 1))
+            # Write individual measurement to main CSV files
+            self._write_single_measurement(
+                filename="pressure_gauge_data",
+                data_row=pressure_data_row,
+                is_first=(measurement_count == 1),
+            )
+            self._write_single_measurement(
+                filename="thermocouple_data",
+                data_row=thermo_data_row,
+                is_first=(measurement_count == 1),
+            )
 
             # Handle backup if needed
             if measurement_count % backup_frequency == 0:
-                self._write_backup_data(data_buffer[-backup_frequency:], backup_count)
+                self._write_backup_data(
+                    pressure_data_buffer[-backup_frequency:], backup_count
+                )
                 backup_count += 1
 
             # Control timing
@@ -484,7 +502,7 @@ class DataRecorder:
         """Get formatted timestamp for current measurement."""
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
-    def _collect_measurement_data(self, labjack, timestamp: str) -> dict:
+    def _collect_pressure_measurement_data(self, labjack, timestamp: str) -> dict:
         """Collect data from all gauges for a single measurement.
 
         Args:
@@ -504,14 +522,36 @@ class DataRecorder:
             **{f"{g.name}_Voltage (V)": g.voltage_data[-1] for g in self.gauges},
         }
 
-    def _write_single_measurement(self, data_row: dict, is_first: bool):
+    def _collect_thermocouple_measurement_data(self, labjack, timestamp: str) -> dict:
+        """Collect data from all gauges for a single measurement.
+
+        Args:
+            labjack: LabJack device instance
+            timestamp: Formatted timestamp string
+
+        Returns:
+            Dictionary containing measurement data
+        """
+        # Collect voltages from all gauges
+        for thermocouple in self.thermocouples:
+            thermocouple.record_ain_channel_voltage(labjack=labjack)
+
+        # Prepare data row for CSV
+        return {
+            "RealTimestamp": timestamp,
+            **{
+                f"{T.name}_Voltage (mV)": T.voltage_data[-1] for T in self.thermocouples
+            },
+        }
+
+    def _write_single_measurement(self, filename: str, data_row: dict, is_first: bool):
         """Write a single measurement to the main CSV file.
 
         Args:
             data_row: Dictionary containing measurement data
             is_first: Whether this is the first measurement (determines header)
         """
-        csv_path = os.path.join(self.run_dir, "pressure_gauge_data.csv")
+        csv_path = os.path.join(self.run_dir, f"{filename}.csv")
         pd.DataFrame([data_row]).to_csv(
             csv_path,
             mode="a",
