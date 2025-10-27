@@ -325,39 +325,28 @@ class TestThermocouple:
         """Test Thermocouple initialization with default values."""
         tc = Thermocouple()
         assert tc.name == "type K thermocouple"
-        assert tc.export_filename == "temperature_data.csv"
-        assert tc.timestamp_data == []
-        assert tc.real_timestamp_data == []
-        assert tc.local_temperature_data == []
-        assert tc.measured_temperature_data == []
-        assert tc.backup_interval == 10
+        assert tc.voltage_data == []
 
     def test_thermocouple_init_custom_values(self):
         """Test Thermocouple initialization with custom values."""
-        tc = Thermocouple(name="Custom TC", export_filename="custom_data.csv")
+        tc = Thermocouple(name="Custom TC")
         assert tc.name == "Custom TC"
-        assert tc.export_filename == "custom_data.csv"
+        assert tc.voltage_data == []
 
     def test_get_temperature_test_mode(self):
         """Test get_temperature method in test mode (labjack=None)."""
         tc = Thermocouple()
-        initial_count = len(tc.timestamp_data)
+        initial_count = len(tc.voltage_data)
 
         # Call get_temperature with None labjack (test mode)
-        tc.get_temperature(labjack=None, timestamp=123.45)
+        tc.record_ain_channel_voltage(labjack=None)
 
         # Check that data was added
-        assert len(tc.timestamp_data) == initial_count + 1
-        assert len(tc.real_timestamp_data) == initial_count + 1
-        assert len(tc.local_temperature_data) == initial_count + 1
-        assert len(tc.measured_temperature_data) == initial_count + 1
-
-        # Check that timestamp was recorded correctly
-        assert tc.timestamp_data[-1] == 123.45
+        assert len(tc.voltage_data) == initial_count + 1
 
         # Check that temperatures are in reasonable range (25-30°C for test mode)
-        assert 25 <= tc.local_temperature_data[-1] <= 30
-        assert 25 <= tc.measured_temperature_data[-1] <= 30
+        assert 4 <= tc.voltage_data[-1] <= 6
+        assert 4 <= tc.voltage_data[-1] <= 6
 
     def test_multiple_temperature_readings(self):
         """Test multiple temperature readings build up data correctly."""
@@ -365,16 +354,10 @@ class TestThermocouple:
 
         # Take multiple readings
         for i in range(5):
-            tc.get_temperature(labjack=None, timestamp=float(i))
+            tc.record_ain_channel_voltage(labjack=None)
 
         # Check that all data was stored
-        assert len(tc.timestamp_data) == 5
-        assert len(tc.real_timestamp_data) == 5
-        assert len(tc.local_temperature_data) == 5
-        assert len(tc.measured_temperature_data) == 5
-
-        # Check timestamps are correct
-        assert tc.timestamp_data == [0.0, 1.0, 2.0, 3.0, 4.0]
+        assert len(tc.voltage_data) == 5
 
 
 # Integration tests
