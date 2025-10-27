@@ -1,5 +1,4 @@
 import os
-from datetime import datetime
 
 import numpy as np
 
@@ -16,32 +15,27 @@ class Thermocouple:
         cjc_mv: Cold junction compensation voltage in millivolts.
     """
 
+    name: str
+
+    voltage_data: list[float]
+    local_temperature_data: list[float]
+    measured_temperature_data: list[float]
+
     def __init__(
         self,
         name: str = "type K thermocouple",
-        export_filename: str = "temperature_data.csv",
     ):
         self.name = name
-        self.export_filename = export_filename
 
         # Data storage
-        self.timestamp_data = []
-        self.real_timestamp_data = []
-        self.local_temperature_data = []
-        self.measured_temperature_data = []
+        self.voltage_data = []
 
-        # Backup settings
-        self.backup_dir = None
-        self.backup_counter = 0
-        self.measurements_since_backup = 0
-        self.backup_interval = 10  # Save backup every 10 measurements
-
-    def get_temperature(
+    def record_ain_channel_voltage(
         self,
         labjack,  # Remove type hint to avoid import issues
-        timestamp: float,
-        ain_channel: int = 0,
-        gain_index: int = 3,
+        resolution_index: int | None = 8,
+        gain_index: int | None = 0,
+        settling_factor: int | None = 2,
     ) -> float:
         """
         Read temperature from a Type K thermocouple connected to a LabJack U6 using
@@ -62,82 +56,33 @@ class Thermocouple:
         returns:
             float: The calculated temperature in degrees Celsius.
         """
-        real_timestamp = datetime.now()
-
         if labjack is None:
             rng = np.random.default_rng()
-            temp_l = rng.uniform(25, 30)
-            temp_m = rng.uniform(25, 30)
-            self.timestamp_data.append(timestamp)
-            self.real_timestamp_data.append(real_timestamp)
-            self.local_temperature_data.append(temp_l)
-            self.measured_temperature_data.append(temp_m)
-            return
+            ain_channel_voltage = rng.uniform(4, 6)
+        else:
+            ain_channel_voltage = labjack.getAIN(
+                ain_channel=0,
+                resolutionIndex=resolution_index,
+                gainIndex=gain_index,
+                settlingFactor=settling_factor,
+                differential=True,
+            )
+            # convert volts to millivolts
+            ain_channel_voltage *= 1000
 
-        # Read cold junction temperature in Celsius (LabJack returns Kelvin)
+        self.voltage_data.append(ain_channel_voltage)
+
         local_temperature = labjack.getTemperature() - 273.15 + 2.5
 
-        # Read differential thermocouple voltage (volts)
-        tc_v = labjack.getAIN(
-            ain_channel, resolutionIndex=8, gainIndex=gain_index, differential=True
-        )
+        # # Calculate cold junction compensation voltage (mV)
+        # cjc_mv = temp_c_to_mv(local_temperature)
 
-        # Convert thermocouple voltage to millivolts
-        tc_mv = tc_v * 1000
+        # # Total thermocouple voltage including cold junction compensation
+        # total_mv = tc_mv + cjc_mv
 
-        # Calculate cold junction compensation voltage (mV)
-        cjc_mv = temp_c_to_mv(local_temperature)
+        # # Convert total voltage to temperature in Celsius
+        # measured_temperature = mv_to_temp_c(total_mv)
 
-        # Total thermocouple voltage including cold junction compensation
-        total_mv = tc_mv + cjc_mv
-
-        # Convert total voltage to temperature in Celsius
-        measured_temperature = mv_to_temp_c(total_mv)
-
-        # Append the data to the lists
-        self.timestamp_data.append(timestamp)
-        self.real_timestamp_data.append(real_timestamp)
-        self.local_temperature_data.append(local_temperature)
-        self.measured_temperature_data.append(measured_temperature)
-
-    def initialise_export(self):
-        """Initialize the main export file."""
-        # Create the directory if it doesn't exist
-        os.makedirs(os.path.dirname(self.export_filename), exist_ok=True)
-
-        # Create and write the header to the file
-        with open(self.export_filename, "w") as f:
-            f.write("RealTimestamp,RelativeTime,LocalTemp (C),MeasuredTemp (C)\n")
-
-    def export_write(self):
-        """Write the latest data point to the main export file."""
-        if len(self.timestamp_data) > 0:
-            # Get the latest data point
-            idx = len(self.timestamp_data) - 1
-            rel_timestamp = self.timestamp_data[idx]
-            real_timestamp = self.real_timestamp_data[idx].strftime(
-                "%Y-%m-%d %H:%M:%S.%f"
-            )[:-3]
-            local_temp = self.local_temperature_data[idx]
-            measured_temp = (
-                self.measured_temperature_data[idx]
-                if idx < len(self.measured_temperature_data)
-                else 0
-            )
-
-            # Write to the main export file
-            with open(self.export_filename, "a") as f:
-                f.write(
-                    f"{real_timestamp},{rel_timestamp},{local_temp},{measured_temp}\n"
-                )
-
-            # Increment the backup counter and check if we need to create a backup
-            self.measurements_since_backup += 1
-            if self.measurements_since_backup >= self.backup_interval:
-                self.create_backup()
-                self.measurements_since_backup = 0
-
-    def create_backup(self):
         """Create a backup file with all current data."""
         if self.backup_dir is None:
             return  # Backup not initialized
