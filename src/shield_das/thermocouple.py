@@ -1,6 +1,5 @@
-import os
-
 import numpy as np
+import numpy.typing as npt
 
 
 class Thermocouple:
@@ -10,16 +9,20 @@ class Thermocouple:
     This class reads the thermocouple voltage and converts it to temperature
     using NIST ITS-90 polynomial coefficients.
 
+    Args:
+        name: Name of the thermocouple
+
     Attributes:
-        labjack: LabJack U6 device instance for reading thermocouple data.
-        cjc_mv: Cold junction compensation voltage in millivolts.
+        name: Name of the thermocouple
+        voltage_data: List to store voltage readings in millivolts
+        local_temperature_data: List to store local temperature readings for
+            cold junction compensation in degrees Celsius
     """
 
     name: str
 
     voltage_data: list[float]
     local_temperature_data: list[float]
-    measured_temperature_data: list[float]
 
     def __init__(
         self,
@@ -29,6 +32,7 @@ class Thermocouple:
 
         # Data storage
         self.voltage_data = []
+        self.local_temperature_data = []
 
     def record_ain_channel_voltage(
         self,
@@ -57,7 +61,8 @@ class Thermocouple:
         """
         if labjack is None:
             rng = np.random.default_rng()
-            ain_channel_voltage = rng.uniform(4, 6)
+            ain_channel_voltage = rng.uniform(0.1, 0.2)
+            local_temperature = rng.uniform(20, 25)
         else:
             ain_channel_voltage = labjack.getAIN(
                 positiveChannel=0,
@@ -68,33 +73,34 @@ class Thermocouple:
             # convert volts to millivolts
             ain_channel_voltage *= 1000
             ain_channel_voltage *= -1
-            # print(f"Thermocouple Voltage (mV): {ain_channel_voltage}")
 
-            # local_temperature = labjack.getTemperature() - 273.15 + 2.5
+            # get cold junction temperature in Celsius
+            local_temperature = labjack.getTemperature() - 273.15 + 2.5
 
-            # # Calculate cold junction compensation voltage (mV)
-            # cjc_mv = temp_c_to_mv(local_temperature)
-
-            # # Total thermocouple voltage including cold junction compensation
-            # total_mv = -ain_channel_voltage + cjc_mv
-
-            # # Convert total voltage to temperature in Celsius
-            # measured_temperature = mv_to_temp_c(total_mv)
-            # print(f"CJC Temp = {local_temperature} C")
-            # print(f"Measured Temp = {measured_temperature} C")
-
+        self.local_temperature_data.append(local_temperature)
         self.voltage_data.append(ain_channel_voltage)
 
-        # local_temperature = labjack.getTemperature() - 273.15 + 2.5
+    def voltage_to_temperature(self, voltage: npt.NDArray) -> npt.NDArray:
+        """
+        Converts the voltage reading from a type K thermocouple to temperature in celsius.
 
-        # # Calculate cold junction compensation voltage (mV)
-        # cjc_mv = temp_c_to_mv(local_temperature)
+        Args:
+            voltage: The voltage reading from the thermocouple
 
-        # # Total thermocouple voltage including cold junction compensation
-        # total_mv = tc_mv + cjc_mv
+        Returns:
+            float: The temperature in celsius
+        """
 
-        # # Convert total voltage to temperature in Celsius
-        # measured_temperature = mv_to_temp_c(total_mv
+        # Calculate cold junction compensation voltage (mV)
+        cjc_mv = temp_c_to_mv(np.array(self.local_temperature_data))
+
+        # Total thermocouple voltage including cold junction compensation
+        total_mv = np.array(voltage) + cjc_mv
+
+        # Convert total voltage to temperature in Celsius
+        measured_temperature = mv_to_temp_c(total_mv)
+
+        return measured_temperature
 
 
 def evaluate_poly(coeffs: list[float] | tuple[float], x: float) -> float:
