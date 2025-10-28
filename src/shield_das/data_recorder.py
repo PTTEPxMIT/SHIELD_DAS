@@ -546,6 +546,7 @@ class DataRecorder:
         # Prepare data row for CSV
         return {
             "RealTimestamp": timestamp,
+            "Local_temperature (C)": self.thermocouples[0].local_temperature_data[-1],
             **{
                 f"{T.name}_Voltage (mV)": T.voltage_data[-1] for T in self.thermocouples
             },
