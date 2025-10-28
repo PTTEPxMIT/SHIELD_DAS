@@ -473,9 +473,15 @@ class DataRecorder:
 
             # Handle backup if needed
             if measurement_count % backup_frequency == 0:
-                self._write_backup_data(
-                    pressure_data_buffer[-backup_frequency:], backup_count
-                )
+                for name, buffer in zip(
+                    ["pressure_gauge", "thermocouple"],
+                    [pressure_data_buffer, thermo_data_buffer],
+                ):
+                    self._write_backup_data(
+                        filename=name,
+                        recent_data=buffer[-backup_frequency:],
+                        backup_number=backup_count,
+                    )
                 backup_count += 1
 
             # Control timing
@@ -559,7 +565,9 @@ class DataRecorder:
             index=False,
         )
 
-    def _write_backup_data(self, recent_data: list[dict], backup_number: int):
+    def _write_backup_data(
+        self, filename: str, recent_data: list[dict], backup_number: int
+    ):
         """Write backup data to a separate CSV file.
 
         Args:
@@ -570,7 +578,7 @@ class DataRecorder:
             return
 
         backup_path = os.path.join(
-            self.backup_dir, f"pressure_gauge_backup_data_{backup_number}.csv"
+            self.backup_dir, f"{filename}_backup_data_{backup_number}.csv"
         )
         pd.DataFrame(recent_data).to_csv(backup_path, index=False)
 
