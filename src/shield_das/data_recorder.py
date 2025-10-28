@@ -265,7 +265,8 @@ class DataRecorder:
                 "furnace_setpoint": self.furnace_setpoint,
                 "recording_interval_seconds": self.recording_interval,
                 "backup_interval_seconds": self.backup_interval,
-                "data_filename": "pressure_gauge_data.csv",
+                "pressure_data_filename": "pressure_gauge_data.csv",
+                "temperature_data_filename": "thermocouple_data.csv",
                 "sample_material": self.sample_material,
             },
             "gauges": [
