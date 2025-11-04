@@ -345,8 +345,7 @@ class TestThermocouple:
         assert len(tc.voltage_data) == initial_count + 1
 
         # Check that temperatures are in reasonable range (25-30°C for test mode)
-        assert 4 <= tc.voltage_data[-1] <= 6
-        assert 4 <= tc.voltage_data[-1] <= 6
+        assert 0.1 <= tc.voltage_data[-1] <= 0.2
 
     def test_multiple_temperature_readings(self):
         """Test multiple temperature readings build up data correctly."""

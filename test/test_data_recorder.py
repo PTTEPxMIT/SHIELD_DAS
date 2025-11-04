@@ -4,7 +4,7 @@ import shutil
 import tempfile
 import threading
 import time
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -114,9 +114,7 @@ class TestDataRecorder:
         time.sleep(0.1)  # Give it time to initialize
 
         # Check that CSV file was created
-        expected_csv_path = os.path.join(
-            self.recorder.run_dir, "pressure_gauge_data.csv"
-        )
+        expected_csv_path = os.path.join(self.recorder.run_dir, "shield_data.csv")
         assert os.path.exists(expected_csv_path)
 
         # Stop recorder
@@ -133,7 +131,7 @@ class TestDataRecorder:
         assert self.mock_gauge2.record_ain_channel_voltage.called
 
         # Check CSV file has data
-        csv_path = os.path.join(self.recorder.run_dir, "pressure_gauge_data.csv")
+        csv_path = os.path.join(self.recorder.run_dir, "shield_data.csv")
         assert os.path.exists(csv_path)
 
         with open(csv_path) as f:
@@ -163,7 +161,7 @@ class TestDataRecorder:
         assert os.path.exists(self.recorder.backup_dir)
 
         # Check CSV file gets created when recording starts
-        csv_path = os.path.join(self.recorder.run_dir, "pressure_gauge_data.csv")
+        csv_path = os.path.join(self.recorder.run_dir, "shield_data.csv")
         assert os.path.exists(csv_path)
 
         # Check thread is running
@@ -203,7 +201,7 @@ class TestDataRecorder:
         assert self.mock_gauge2.record_ain_channel_voltage.called
 
         # Verify the CSV file has the expected structure
-        csv_path = os.path.join(self.recorder.run_dir, "pressure_gauge_data.csv")
+        csv_path = os.path.join(self.recorder.run_dir, "shield_data.csv")
         with open(csv_path) as f:
             lines = f.readlines()
 
@@ -246,7 +244,7 @@ class TestDataRecorder:
         self.recorder.stop()
 
         # Check CSV file has data
-        csv_path = os.path.join(self.recorder.run_dir, "pressure_gauge_data.csv")
+        csv_path = os.path.join(self.recorder.run_dir, "shield_data.csv")
         with open(csv_path) as f:
             lines = f.readlines()
 
@@ -364,7 +362,7 @@ class TestDataRecorder:
         recorder.stop()
 
         # Check header
-        csv_path = os.path.join(recorder.run_dir, "pressure_gauge_data.csv")
+        csv_path = os.path.join(recorder.run_dir, "shield_data.csv")
         with open(csv_path) as f:
             header = f.readline().strip()
 
@@ -379,9 +377,7 @@ class TestDataRecorder:
         self.recorder.start()
         time.sleep(0.1)
 
-        expected_filename = os.path.join(
-            self.recorder.run_dir, "pressure_gauge_data.csv"
-        )
+        expected_filename = os.path.join(self.recorder.run_dir, "shield_data.csv")
         assert os.path.exists(expected_filename)
 
         self.recorder.stop()
@@ -404,7 +400,7 @@ class TestDataRecorder:
         assert "version" in metadata
         assert "run_info" in metadata
         assert "gauges" in metadata
-        assert "thermocouples" in metadata
+        assert "thermocouples" not in metadata
 
         # Verify version info
         assert isinstance(metadata["version"], str)
