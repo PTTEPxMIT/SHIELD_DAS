@@ -257,7 +257,7 @@ class DataRecorder:
     def _create_metadata_file(self):
         """Create a JSON metadata file with run information."""
         metadata = {
-            "version": "1.1",
+            "version": "1.2",
             "run_info": {
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -265,10 +265,12 @@ class DataRecorder:
                 "furnace_setpoint": self.furnace_setpoint,
                 "recording_interval_seconds": self.recording_interval,
                 "backup_interval_seconds": self.backup_interval,
-                "data_filename": "pressure_gauge_data.csv",
                 "sample_material": self.sample_material,
+                "data_filename": "shield_data.csv",
             },
-            "gauges": [
+        }
+        if len(self.gauges) > 0:
+            metadata["gauges"] = [
                 {
                     "name": gauge.name,
                     "type": type(gauge).__name__,
@@ -281,8 +283,9 @@ class DataRecorder:
                     ),
                 }
                 for gauge in self.gauges
-            ],
-            "thermocouples": [
+            ]
+        if len(self.thermocouples) > 0:
+            metadata["thermocouples"] = [
                 {
                     "name": (
                         thermocouple.name
@@ -291,8 +294,7 @@ class DataRecorder:
                     )
                 }
                 for i, thermocouple in enumerate(self.thermocouples)
-            ],
-        }
+            ]
 
         metadata_path = os.path.join(self.run_dir, "run_metadata.json")
         with open(metadata_path, "w") as f:
@@ -451,13 +453,18 @@ class DataRecorder:
             data_row = self._collect_measurement_data(labjack, timestamp)
             data_buffer.append(data_row)
             measurement_count += 1
+            self._write_single_measurement(
+                filename="shield_data",
+                data_row=data_row,
+                is_first=(measurement_count == 1),
+            )
 
-            # Write individual measurement to main CSV
-            self._write_single_measurement(data_row, is_first=(measurement_count == 1))
-
-            # Handle backup if needed
             if measurement_count % backup_frequency == 0:
-                self._write_backup_data(data_buffer[-backup_frequency:], backup_count)
+                self._write_backup_data(
+                    filename="shield_data",
+                    recent_data=data_buffer[-backup_frequency:],
+                    backup_number=backup_count,
+                )
                 backup_count += 1
 
             # Control timing
@@ -498,20 +505,34 @@ class DataRecorder:
         for gauge in self.gauges:
             gauge.record_ain_channel_voltage(labjack=labjack)
 
-        # Prepare data row for CSV
-        return {
-            "RealTimestamp": timestamp,
-            **{f"{g.name}_Voltage (V)": g.voltage_data[-1] for g in self.gauges},
-        }
+        # Collect voltages from all gauges
+        for thermocouple in self.thermocouples:
+            thermocouple.record_ain_channel_voltage(labjack=labjack)
 
-    def _write_single_measurement(self, data_row: dict, is_first: bool):
+        # Prepare data row for CSV
+        data_row = {
+            "RealTimestamp": timestamp,
+        }
+        if len(self.thermocouples) > 0:
+            data_row["Local_temperature (C)"] = self.thermocouples[
+                0
+            ].local_temperature_data[-1]
+            for T in self.thermocouples:
+                data_row[f"{T.name}_Voltage (mV)"] = T.voltage_data[-1]
+        if len(self.gauges) > 0:
+            for g in self.gauges:
+                data_row[f"{g.name}_Voltage (V)"] = g.voltage_data[-1]
+
+        return data_row
+
+    def _write_single_measurement(self, filename: str, data_row: dict, is_first: bool):
         """Write a single measurement to the main CSV file.
 
         Args:
             data_row: Dictionary containing measurement data
             is_first: Whether this is the first measurement (determines header)
         """
-        csv_path = os.path.join(self.run_dir, "pressure_gauge_data.csv")
+        csv_path = os.path.join(self.run_dir, f"{filename}.csv")
         pd.DataFrame([data_row]).to_csv(
             csv_path,
             mode="a",
@@ -519,7 +540,9 @@ class DataRecorder:
             index=False,
         )
 
-    def _write_backup_data(self, recent_data: list[dict], backup_number: int):
+    def _write_backup_data(
+        self, filename: str, recent_data: list[dict], backup_number: int
+    ):
         """Write backup data to a separate CSV file.
 
         Args:
@@ -530,7 +553,7 @@ class DataRecorder:
             return
 
         backup_path = os.path.join(
-            self.backup_dir, f"pressure_gauge_backup_data_{backup_number}.csv"
+            self.backup_dir, f"{filename}_backup_data_{backup_number}.csv"
         )
         pd.DataFrame(recent_data).to_csv(backup_path, index=False)
 

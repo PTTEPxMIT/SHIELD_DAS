@@ -2,6 +2,8 @@ import h_transport_materials as htm
 import numpy as np
 import numpy.typing as npt
 
+from .thermocouple import mv_to_temp_c, temp_c_to_mv
+
 
 def voltage_to_pressure(voltage: npt.NDArray, full_scale_torr: float) -> npt.NDArray:
     """
@@ -84,3 +86,28 @@ def import_htm_data(material: str):
         labels.append(label)
 
     return all_x_values, all_y_values, labels
+
+
+def voltage_to_temperature(
+    local_temperature_data: npt.NDArray, voltage: npt.NDArray
+) -> npt.NDArray:
+    """
+    Converts the voltage reading from a type K thermocouple to temperature in celsius.
+
+    Args:
+        voltage: The voltage reading from the thermocouple
+
+    Returns:
+        float: The temperature in celsius
+    """
+
+    # Calculate cold junction compensation voltage (mV)
+    cjc_mv = temp_c_to_mv(np.array(local_temperature_data))
+
+    # Total thermocouple voltage including cold junction compensation
+    total_mv = np.array(voltage) + cjc_mv
+
+    # Convert total voltage to temperature in Celsius
+    measured_temperature = mv_to_temp_c(total_mv)
+
+    return measured_temperature

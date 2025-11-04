@@ -1,6 +1,3 @@
-import os
-from datetime import datetime
-
 import numpy as np
 
 
@@ -11,37 +8,36 @@ class Thermocouple:
     This class reads the thermocouple voltage and converts it to temperature
     using NIST ITS-90 polynomial coefficients.
 
+    Args:
+        name: Name of the thermocouple
+
     Attributes:
-        labjack: LabJack U6 device instance for reading thermocouple data.
-        cjc_mv: Cold junction compensation voltage in millivolts.
+        name: Name of the thermocouple
+        voltage_data: List to store voltage readings in millivolts
+        local_temperature_data: List to store local temperature readings for
+            cold junction compensation in degrees Celsius
     """
+
+    name: str
+
+    voltage_data: list[float]
+    local_temperature_data: list[float]
 
     def __init__(
         self,
         name: str = "type K thermocouple",
-        export_filename: str = "temperature_data.csv",
     ):
         self.name = name
-        self.export_filename = export_filename
 
         # Data storage
-        self.timestamp_data = []
-        self.real_timestamp_data = []
+        self.voltage_data = []
         self.local_temperature_data = []
-        self.measured_temperature_data = []
 
-        # Backup settings
-        self.backup_dir = None
-        self.backup_counter = 0
-        self.measurements_since_backup = 0
-        self.backup_interval = 10  # Save backup every 10 measurements
-
-    def get_temperature(
+    def record_ain_channel_voltage(
         self,
         labjack,  # Remove type hint to avoid import issues
-        timestamp: float,
-        ain_channel: int = 0,
-        gain_index: int = 3,
+        resolution_index: int | None = 8,
+        gain_index: int | None = 3,
     ) -> float:
         """
         Read temperature from a Type K thermocouple connected to a LabJack U6 using
@@ -62,113 +58,31 @@ class Thermocouple:
         returns:
             float: The calculated temperature in degrees Celsius.
         """
-        real_timestamp = datetime.now()
-
         if labjack is None:
             rng = np.random.default_rng()
-            temp_l = rng.uniform(25, 30)
-            temp_m = rng.uniform(25, 30)
-            self.timestamp_data.append(timestamp)
-            self.real_timestamp_data.append(real_timestamp)
-            self.local_temperature_data.append(temp_l)
-            self.measured_temperature_data.append(temp_m)
-            return
-
-        # Read cold junction temperature in Celsius (LabJack returns Kelvin)
-        local_temperature = labjack.getTemperature() - 273.15 + 2.5
-
-        # Read differential thermocouple voltage (volts)
-        tc_v = labjack.getAIN(
-            ain_channel, resolutionIndex=8, gainIndex=gain_index, differential=True
-        )
-
-        # Convert thermocouple voltage to millivolts
-        tc_mv = tc_v * 1000
-
-        # Calculate cold junction compensation voltage (mV)
-        cjc_mv = temp_c_to_mv(local_temperature)
-
-        # Total thermocouple voltage including cold junction compensation
-        total_mv = tc_mv + cjc_mv
-
-        # Convert total voltage to temperature in Celsius
-        measured_temperature = mv_to_temp_c(total_mv)
-
-        # Append the data to the lists
-        self.timestamp_data.append(timestamp)
-        self.real_timestamp_data.append(real_timestamp)
-        self.local_temperature_data.append(local_temperature)
-        self.measured_temperature_data.append(measured_temperature)
-
-    def initialise_export(self):
-        """Initialize the main export file."""
-        # Create the directory if it doesn't exist
-        os.makedirs(os.path.dirname(self.export_filename), exist_ok=True)
-
-        # Create and write the header to the file
-        with open(self.export_filename, "w") as f:
-            f.write("RealTimestamp,RelativeTime,LocalTemp (C),MeasuredTemp (C)\n")
-
-    def export_write(self):
-        """Write the latest data point to the main export file."""
-        if len(self.timestamp_data) > 0:
-            # Get the latest data point
-            idx = len(self.timestamp_data) - 1
-            rel_timestamp = self.timestamp_data[idx]
-            real_timestamp = self.real_timestamp_data[idx].strftime(
-                "%Y-%m-%d %H:%M:%S.%f"
-            )[:-3]
-            local_temp = self.local_temperature_data[idx]
-            measured_temp = (
-                self.measured_temperature_data[idx]
-                if idx < len(self.measured_temperature_data)
-                else 0
+            ain_channel_voltage = rng.uniform(0.1, 0.2)
+            local_temperature = rng.uniform(20, 25)
+        else:
+            ain_channel_voltage = labjack.getAIN(
+                positiveChannel=0,
+                resolutionIndex=resolution_index,
+                gainIndex=gain_index,
+                differential=True,
             )
+            # convert volts to millivolts
+            ain_channel_voltage *= 1000
+            ain_channel_voltage *= -1
 
-            # Write to the main export file
-            with open(self.export_filename, "a") as f:
-                f.write(
-                    f"{real_timestamp},{rel_timestamp},{local_temp},{measured_temp}\n"
-                )
+            # get cold junction temperature in Celsius
+            local_temperature = labjack.getTemperature() - 273.15 + 2.5
 
-            # Increment the backup counter and check if we need to create a backup
-            self.measurements_since_backup += 1
-            if self.measurements_since_backup >= self.backup_interval:
-                self.create_backup()
-                self.measurements_since_backup = 0
-
-    def create_backup(self):
-        """Create a backup file with all current data."""
-        if self.backup_dir is None:
-            return  # Backup not initialized
-
-        # Create a new backup filename with incrementing counter
-        backup_filename = os.path.join(
-            self.backup_dir, f"{self.name}_backup_{self.backup_counter:05d}.csv"
-        )
-
-        # Write all current data to the backup file
-        with open(backup_filename, "w") as f:
-            f.write("RealTimestamp,RelativeTime,LocalTemp (C),MeasuredTemp (C)\n")
-            for i in range(len(self.timestamp_data)):
-                real_ts = self.real_timestamp_data[i].strftime("%Y-%m-%d %H:%M:%S.%f")[
-                    :-3
-                ]
-                rel_ts = self.timestamp_data[i]
-                measured_temperature = (
-                    self.measured_temperature_data[i]
-                    if i < len(self.measured_temperature_data)
-                    else 0
-                )
-                f.write(
-                    f"{real_ts},{rel_ts},{self.local_temperature_data[i]},{measured_temperature}\n"
-                )
-
-        print(f"Created backup file: {backup_filename}")
-        self.backup_counter += 1
+        self.local_temperature_data.append(local_temperature)
+        self.voltage_data.append(ain_channel_voltage)
 
 
-def evaluate_poly(coeffs: list[float] | tuple[float], x: float) -> float:
+def evaluate_poly(
+    coeffs: list[float] | tuple[float], x: float | np.ndarray
+) -> float | np.ndarray:
     """ "
     Evaluate a polynomial at x given the list of coefficients.
 
@@ -178,34 +92,46 @@ def evaluate_poly(coeffs: list[float] | tuple[float], x: float) -> float:
 
     args:
         coeffs:Polynomial coefficients ordered by ascending power.
-        x: The value at which to evaluate the polynomial.
+        x: The value(s) at which to evaluate the polynomial (scalar or array).
 
     returns;
-        float: The evaluated polynomial result.
+        float or ndarray: The evaluated polynomial result(s).
     """
+    if not coeffs:
+        # Return 0 for empty coefficient list (matches expected behavior)
+        return 0.0 if isinstance(x, (int, float)) else np.zeros_like(x, dtype=float)
+
     return sum(a * x**i for i, a in enumerate(coeffs))
 
 
-def volts_to_temp_constants(mv: float) -> tuple[float, ...]:
+def volts_to_temp_constants(mv: float | np.ndarray) -> tuple[float, ...]:
     """
     Select the appropriate NIST ITS-90 polynomial coefficients for converting
     Type K thermocouple voltage (in millivolts) to temperature (°C).
 
     The valid voltage range is -5.891 mV to 54.886 mV.
 
+    Note: When mv is an array, this function returns coefficients for a single
+    voltage range. For array inputs, use mv_to_temp_c which handles mixed ranges.
+
     args:
-        mv: Thermocouple voltage in millivolts.
+        mv: Thermocouple voltage in millivolts (scalar or array).
 
     returns:
-        tuple of float: Polynomial coefficients for the voltage-to-temperature conversion.
+        tuple of float: Polynomial coefficients for the voltage-to-temperature
+        conversion.
 
     raises:
         ValueError: If the input voltage is out of the valid range.
     """
+    # For arrays, use the first element to determine range
+    # (mv_to_temp_c handles mixed ranges properly)
+    voltage = np.asarray(mv).flatten()[0] if isinstance(mv, np.ndarray) else mv
+
     # Use a small tolerance for floating-point comparison
-    if mv < -5.892 or mv > 54.887:
+    if voltage < -5.892 or voltage > 54.887:
         raise ValueError("Voltage out of valid Type K range (-5.891 to 54.886 mV).")
-    if mv < 0:
+    if voltage < 0:
         # Range: -5.891 mV to 0 mV
         return (
             0.0e0,
@@ -218,7 +144,7 @@ def volts_to_temp_constants(mv: float) -> tuple[float, ...]:
             -1.0450598e-2,
             -5.1920577e-4,
         )
-    elif mv < 20.644:
+    elif voltage < 20.644:
         # Range: 0 mV to 20.644 mV
         return (
             0.0e0,
@@ -246,7 +172,7 @@ def volts_to_temp_constants(mv: float) -> tuple[float, ...]:
 
 
 def temp_to_volts_constants(
-    temp_c: float,
+    temp_c: float | np.ndarray,
 ) -> tuple[tuple[float, ...], tuple[float, float, float] | None]:
     """
     Select the appropriate NIST ITS-90 polynomial coefficients for converting
@@ -254,20 +180,32 @@ def temp_to_volts_constants(
 
     Valid temperature range is -270°C to 1372°C.
 
+    Note: When temp_c is an array, this function returns coefficients for a
+    single temperature range. For array inputs, use temp_c_to_mv which handles
+    mixed ranges.
+
     args:
-        temp_c: Temperature in degrees Celsius.
+        temp_c: Temperature in degrees Celsius (scalar or array).
 
     returns:
         Tuple containing:
-            - tuple of float: Polynomial coefficients for temperature-to-voltage conversion.
-            - tuple of three floats or None: Extended exponential term coefficients for temp >= 0°C, else None.
+            - tuple of float: Polynomial coefficients for
+              temperature-to-voltage conversion.
+            - tuple of three floats or None: Extended exponential term
+              coefficients for temp >= 0°C, else None.
 
     raises:
         ValueError: If the input temperature is out of the valid range.
     """
-    if temp_c < -270 or temp_c > 1372:
+    # For arrays, use the first element to determine range
+    # (temp_c_to_mv handles mixed ranges properly)
+    temperature = (
+        np.asarray(temp_c).flatten()[0] if isinstance(temp_c, np.ndarray) else temp_c
+    )
+
+    if temperature < -270 or temperature > 1372:
         raise ValueError("Temperature out of valid Type K range (-270 to 1372 C).")
-    if temp_c < 0:
+    if temperature < 0:
         # Range: -270 °C to 0 °C
         return (
             0.0e0,
@@ -298,36 +236,100 @@ def temp_to_volts_constants(
         ), (0.1185976e0, -0.1183432e-3, 0.1269686e3)
 
 
-def temp_c_to_mv(temp_c: float) -> float:
+def temp_c_to_mv(temp_c: float | np.ndarray) -> float | np.ndarray:
     """
     Convert temperature (°C) to Type K thermocouple voltage (mV) using
     NIST ITS-90 polynomial approximations and an exponential correction for
     temperatures ≥ 0 °C.
 
     args:
-        temp_c: Temperature in degrees Celsius.
+        temp_c: Temperature in degrees Celsius (scalar or array).
 
     returns:
-        float: Thermocouple voltage in millivolts.
+        float or ndarray: Thermocouple voltage in millivolts.
+
+    raises:
+        ValueError: If any temperature is out of the valid range (-270 to 1372 C).
     """
-    coeffs, extended = temp_to_volts_constants(temp_c)
-    mv = evaluate_poly(coeffs, temp_c)
-    if extended:
-        a0, a1, a2 = extended
-        mv += a0 * np.exp(a1 * (temp_c - a2) ** 2)
-    return mv
+    # Handle scalar case directly
+    if isinstance(temp_c, (int, float)):
+        coeffs, extended = temp_to_volts_constants(temp_c)
+        mv = evaluate_poly(coeffs, temp_c)
+        if extended:
+            a0, a1, a2 = extended
+            mv += a0 * np.exp(a1 * (temp_c - a2) ** 2)
+        return mv
+
+    # Handle array case
+    temp_c = np.asarray(temp_c)
+    is_scalar = temp_c.ndim == 0
+    temp_c = np.atleast_1d(temp_c)
+
+    # Validate temperature range
+    if np.any(temp_c < -270) or np.any(temp_c > 1372):
+        raise ValueError("Temperature out of valid Type K range (-270 to 1372 C).")
+
+    # Initialize output array
+    mv = np.zeros_like(temp_c, dtype=float)
+
+    # Handle negative temperatures (Range: -270 °C to 0 °C)
+    mask_neg = temp_c < 0
+    if np.any(mask_neg):
+        coeffs_neg, _ = temp_to_volts_constants(-100.0)  # Representative value
+        mv[mask_neg] = evaluate_poly(coeffs_neg, temp_c[mask_neg])
+
+    # Handle positive temperatures (Range: 0 °C to 1372 °C)
+    mask_pos = temp_c >= 0
+    if np.any(mask_pos):
+        coeffs_pos, extended = temp_to_volts_constants(100.0)  # Representative value
+        mv[mask_pos] = evaluate_poly(coeffs_pos, temp_c[mask_pos])
+        if extended:
+            a0, a1, a2 = extended
+            mv[mask_pos] += a0 * np.exp(a1 * (temp_c[mask_pos] - a2) ** 2)
+
+    return mv.item() if is_scalar else mv
 
 
-def mv_to_temp_c(mv: float) -> float:
+def mv_to_temp_c(mv: float | np.ndarray) -> float | np.ndarray:
     """
     Convert Type K thermocouple voltage (mV) to temperature (°C) using
     NIST ITS-90 polynomial approximations.
 
     args:
-        mv: Thermocouple voltage in millivolts.
+        mv: Thermocouple voltage in millivolts (scalar or array).
 
     returns:
-        float: Temperature in degrees Celsius.
+        float or ndarray: Temperature in degrees Celsius.
     """
-    coeffs = volts_to_temp_constants(mv)
-    return evaluate_poly(coeffs, mv)
+    # Handle scalar case directly
+    if isinstance(mv, (int, float)):
+        coeffs = volts_to_temp_constants(mv)
+        return evaluate_poly(coeffs, mv)
+
+    # Handle array case
+    mv = np.asarray(mv)
+    is_scalar = mv.ndim == 0
+    mv = np.atleast_1d(mv)
+
+    # Initialize output array
+    temp = np.zeros_like(mv, dtype=float)
+
+    # Range 1: -5.891 mV to 0 mV
+    mask_neg = mv < 0
+    if np.any(mask_neg):
+        coeffs_neg = volts_to_temp_constants(-1.0)  # Representative value
+        temp[mask_neg] = evaluate_poly(coeffs_neg, mv[mask_neg])
+
+    # Range 2: 0 mV to 20.644 mV
+    mask_mid = (mv >= 0) & (mv < 20.644)
+    if np.any(mask_mid):
+        coeffs_mid = volts_to_temp_constants(10.0)  # Representative value
+        temp[mask_mid] = evaluate_poly(coeffs_mid, mv[mask_mid])
+
+    # Range 3: 20.644 mV to 54.886 mV
+    mask_high = mv >= 20.644
+    if np.any(mask_high):
+        coeffs_high = volts_to_temp_constants(30.0)  # Representative value
+        temp[mask_high] = evaluate_poly(coeffs_high, mv[mask_high])
+
+    return temp.item() if is_scalar else temp

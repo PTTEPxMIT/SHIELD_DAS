@@ -73,7 +73,7 @@ class TestMetadata:
         assert "version" in metadata
         assert "run_info" in metadata
         assert "gauges" in metadata
-        assert "thermocouples" in metadata
+        assert "thermocouples" not in metadata
 
         # Verify version is present and correctly formatted
         assert isinstance(metadata["version"], str)
