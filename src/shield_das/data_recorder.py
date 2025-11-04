@@ -265,11 +265,12 @@ class DataRecorder:
                 "furnace_setpoint": self.furnace_setpoint,
                 "recording_interval_seconds": self.recording_interval,
                 "backup_interval_seconds": self.backup_interval,
-                "pressure_data_filename": "pressure_gauge_data.csv",
-                "temperature_data_filename": "thermocouple_data.csv",
                 "sample_material": self.sample_material,
             },
-            "gauges": [
+        }
+        if len(self.gauges) > 0:
+            metadata["run_info"]["pressure_data_filename"] = "pressure_gauge_data.csv"
+            metadata["gauges"] = [
                 {
                     "name": gauge.name,
                     "type": type(gauge).__name__,
@@ -282,8 +283,10 @@ class DataRecorder:
                     ),
                 }
                 for gauge in self.gauges
-            ],
-            "thermocouples": [
+            ]
+        if len(self.thermocouples) > 0:
+            metadata["temperature_data_filename"] = "thermocouple_data.csv"
+            metadata["thermocouples"] = [
                 {
                     "name": (
                         thermocouple.name
@@ -292,8 +295,7 @@ class DataRecorder:
                     )
                 }
                 for i, thermocouple in enumerate(self.thermocouples)
-            ],
-        }
+            ]
 
         metadata_path = os.path.join(self.run_dir, "run_metadata.json")
         with open(metadata_path, "w") as f:
