@@ -554,7 +554,7 @@ class TestDataPlotterIntegration:
 
         # Verify data was recorded
         assert recorder.run_dir is not None
-        csv_path = os.path.join(recorder.run_dir, "pressure_gauge_data.csv")
+        csv_path = os.path.join(recorder.run_dir, "shield_data.csv")
         metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
 
         assert os.path.exists(csv_path)
@@ -575,7 +575,7 @@ class TestDataPlotterIntegration:
         # Read metadata to verify structure
         with open(metadata_path) as f:
             metadata = json.load(f)
-            assert metadata["version"] == "1.1"
+            assert metadata["version"] == "1.2"
             assert "gauges" in metadata
             assert len(metadata["gauges"]) == 2
 
