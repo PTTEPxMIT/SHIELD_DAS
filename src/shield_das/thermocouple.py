@@ -1,5 +1,4 @@
 import numpy as np
-import numpy.typing as npt
 
 
 class Thermocouple:
@@ -79,28 +78,6 @@ class Thermocouple:
 
         self.local_temperature_data.append(local_temperature)
         self.voltage_data.append(ain_channel_voltage)
-
-    def voltage_to_temperature(self, voltage: npt.NDArray) -> npt.NDArray:
-        """
-        Converts the voltage reading from a type K thermocouple to temperature in celsius.
-
-        Args:
-            voltage: The voltage reading from the thermocouple
-
-        Returns:
-            float: The temperature in celsius
-        """
-
-        # Calculate cold junction compensation voltage (mV)
-        cjc_mv = temp_c_to_mv(np.array(self.local_temperature_data))
-
-        # Total thermocouple voltage including cold junction compensation
-        total_mv = np.array(voltage) + cjc_mv
-
-        # Convert total voltage to temperature in Celsius
-        measured_temperature = mv_to_temp_c(total_mv)
-
-        return measured_temperature
 
 
 def evaluate_poly(coeffs: list[float] | tuple[float], x: float) -> float:
