@@ -257,7 +257,7 @@ class DataRecorder:
     def _create_metadata_file(self):
         """Create a JSON metadata file with run information."""
         metadata = {
-            "version": "1.1",
+            "version": "1.2",
             "run_info": {
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -266,10 +266,10 @@ class DataRecorder:
                 "recording_interval_seconds": self.recording_interval,
                 "backup_interval_seconds": self.backup_interval,
                 "sample_material": self.sample_material,
+                "data_filename": "shield_data.csv",
             },
         }
         if len(self.gauges) > 0:
-            metadata["run_info"]["pressure_data_filename"] = "pressure_gauge_data.csv"
             metadata["gauges"] = [
                 {
                     "name": gauge.name,
@@ -285,7 +285,6 @@ class DataRecorder:
                 for gauge in self.gauges
             ]
         if len(self.thermocouples) > 0:
-            metadata["temperature_data_filename"] = "thermocouple_data.csv"
             metadata["thermocouples"] = [
                 {
                     "name": (
@@ -445,46 +444,27 @@ class DataRecorder:
         backup_frequency = max(1, int(self.backup_interval / self.recording_interval))
 
         # Data buffers
-        pressure_data_buffer = []
-        thermo_data_buffer = []
+        data_buffer = []
         measurement_count = 0
         backup_count = 1
 
         while not self.stop_event.is_set():
             timestamp = self._get_current_timestamp()
-            pressure_data_row = self._collect_pressure_measurement_data(
-                labjack, timestamp
-            )
-            pressure_data_buffer.append(pressure_data_row)
-            thermo_data_row = self._collect_thermocouple_measurement_data(
-                labjack, timestamp
-            )
-            thermo_data_buffer.append(thermo_data_row)
+            data_row = self._collect_measurement_data(labjack, timestamp)
+            data_buffer.append(data_row)
             measurement_count += 1
-
-            # Write individual measurement to main CSV files
             self._write_single_measurement(
-                filename="pressure_gauge_data",
-                data_row=pressure_data_row,
-                is_first=(measurement_count == 1),
-            )
-            self._write_single_measurement(
-                filename="thermocouple_data",
-                data_row=thermo_data_row,
+                filename="shield_data",
+                data_row=data_row,
                 is_first=(measurement_count == 1),
             )
 
-            # Handle backup if needed
             if measurement_count % backup_frequency == 0:
-                for name, buffer in zip(
-                    ["pressure_gauge", "thermocouple"],
-                    [pressure_data_buffer, thermo_data_buffer],
-                ):
-                    self._write_backup_data(
-                        filename=name,
-                        recent_data=buffer[-backup_frequency:],
-                        backup_number=backup_count,
-                    )
+                self._write_backup_data(
+                    filename="shield_data",
+                    recent_data=data_buffer[-backup_frequency:],
+                    backup_number=backup_count,
+                )
                 backup_count += 1
 
             # Control timing
@@ -511,7 +491,7 @@ class DataRecorder:
         """Get formatted timestamp for current measurement."""
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
-    def _collect_pressure_measurement_data(self, labjack, timestamp: str) -> dict:
+    def _collect_measurement_data(self, labjack, timestamp: str) -> dict:
         """Collect data from all gauges for a single measurement.
 
         Args:
@@ -525,34 +505,25 @@ class DataRecorder:
         for gauge in self.gauges:
             gauge.record_ain_channel_voltage(labjack=labjack)
 
-        # Prepare data row for CSV
-        return {
-            "RealTimestamp": timestamp,
-            **{f"{g.name}_Voltage (V)": g.voltage_data[-1] for g in self.gauges},
-        }
-
-    def _collect_thermocouple_measurement_data(self, labjack, timestamp: str) -> dict:
-        """Collect data from all gauges for a single measurement.
-
-        Args:
-            labjack: LabJack device instance
-            timestamp: Formatted timestamp string
-
-        Returns:
-            Dictionary containing measurement data
-        """
         # Collect voltages from all gauges
         for thermocouple in self.thermocouples:
             thermocouple.record_ain_channel_voltage(labjack=labjack)
 
         # Prepare data row for CSV
-        return {
+        data_row = {
             "RealTimestamp": timestamp,
-            "Local_temperature (C)": self.thermocouples[0].local_temperature_data[-1],
-            **{
-                f"{T.name}_Voltage (mV)": T.voltage_data[-1] for T in self.thermocouples
-            },
         }
+        if len(self.thermocouples) > 0:
+            data_row["Local_temperature (C)"] = self.thermocouples[
+                0
+            ].local_temperature_data[-1]
+            for T in self.thermocouples:
+                data_row[f"{T.name}_Voltage (mV)"] = T.voltage_data[-1]
+        if len(self.gauges) > 0:
+            for g in self.gauges:
+                data_row[f"{g.name}_Voltage (V)"] = g.voltage_data[-1]
+
+        return data_row
 
     def _write_single_measurement(self, filename: str, data_row: dict, is_first: bool):
         """Write a single measurement to the main CSV file.

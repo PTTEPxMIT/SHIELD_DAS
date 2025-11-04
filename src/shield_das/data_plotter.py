@@ -17,7 +17,7 @@ from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 from plotly_resampler import FigureResampler
 
-from .helpers import calculate_error, voltage_to_pressure
+from .helpers import calculate_error, voltage_to_pressure, voltage_to_temperature
 
 
 class DataPlotter:
@@ -157,14 +157,30 @@ class DataPlotter:
             metadata = json.load(f)
 
         # Process CSV data based on version
-        time_data, upstream_data, downstream_data = self.process_csv_data(
-            metadata, dataset_path
-        )
-
-        # Create datasets for plotting
-        self.create_dataset(
-            dataset_path, dataset_name, time_data, upstream_data, downstream_data
-        )
+        if metadata.get("version") < "1.2":
+            time_data, upstream_data, downstream_data = self.process_csv_data(
+                metadata, dataset_path
+            )
+            self.create_dataset(
+                dataset_path, dataset_name, time_data, upstream_data, downstream_data
+            )
+        else:
+            (
+                time_data,
+                upstream_data,
+                downstream_data,
+                local_temperature_data,
+                thermocouple_data,
+            ) = self.process_csv_data(metadata, dataset_path)
+            self.create_dataset_v1_2(
+                dataset_path,
+                dataset_name,
+                time_data,
+                upstream_data,
+                downstream_data,
+                local_temperature_data,
+                thermocouple_data,
+            )
 
     def process_csv_data(
         self, metadata: dict, data_folder: str
@@ -184,17 +200,33 @@ class DataPlotter:
             time_data, upstream_data, downstream_data = self.process_csv_v0_0(
                 metadata, data_folder
             )
-        elif version == "1.0" or "1.1":
+            return time_data, upstream_data, downstream_data
+
+        elif version in ["1.0", "1.1"]:
             time_data, upstream_data, downstream_data = self.process_csv_v1_0(
                 metadata, data_folder
+            )
+            return time_data, upstream_data, downstream_data
+        elif version in ["1.2"]:
+            (
+                time_data,
+                upstream_data,
+                downstream_data,
+                local_temperature_data,
+                thermocouple_data,
+            ) = self.process_csv_v1_2(metadata, data_folder)
+            return (
+                time_data,
+                upstream_data,
+                downstream_data,
+                local_temperature_data,
+                thermocouple_data,
             )
         else:
             raise NotImplementedError(
                 f"Unsupported metadata version: {version}. "
                 f"Only versions '0.0' and '1.0' are supported."
             )
-
-        return time_data, upstream_data, downstream_data
 
     def process_csv_v0_0(
         self, metadata: dict, data_folder: str
@@ -312,6 +344,102 @@ class DataPlotter:
 
         return time_data, upstream_data, downstream_data
 
+    def process_csv_v1_2(
+        self, metadata: dict, data_folder: str
+    ) -> tuple[npt.NDArray, dict, dict]:
+        """
+        Process CSV data for metadata version 1.2 (single CSV file).
+
+        Args:
+            metadata: Parsed JSON metadata dictionary
+            data_folder: Path to folder containing CSV data files
+        """
+
+        data_filename = metadata.get("run_info", {}).get("data_filename")
+        if not data_filename:
+            raise ValueError("Missing data_filename in run_info for v1.2 metadata")
+
+        csv_path = os.path.join(data_folder, data_filename)
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+        # Read structured CSV; allow text fields for timestamps
+        data = np.genfromtxt(
+            csv_path, delimiter=",", names=True, dtype=None, encoding="utf-8"
+        )
+
+        # Convert RealTimestamp strings to relative time floats
+        if "RealTimestamp" not in data.dtype.names:
+            raise ValueError("RealTimestamp column not found in v1.0 CSV")
+
+        dt_objects = [
+            datetime.strptime(t, "%Y-%m-%d %H:%M:%S.%f") for t in data["RealTimestamp"]
+        ]
+        time_data = np.array(
+            [(dt - dt_objects[0]).total_seconds() for dt in dt_objects]
+        )
+
+        upstream_pressure_data = None
+        downstream_pressure_data = None
+
+        # Iterate gauges and extract Baratron voltage columns where present
+        for gauge in metadata.get("gauges", []):
+            gname = gauge.get("name")
+            gtype = gauge.get("type")
+            loc = gauge.get("gauge_location")
+
+            # We only handle Baratron gauges (voltage -> pressure) here
+            if gtype == "Baratron626D_Gauge":
+                col_name = f"{gname}_Voltage_V"
+
+                volt_vals = np.array(data[col_name], dtype=float)
+
+                #  Convert voltage to pressure using helper
+                pressure_vals = voltage_to_pressure(
+                    volt_vals, full_scale_torr=float(gauge["full_scale_torr"])
+                )
+
+                if loc == "upstream":
+                    upstream_pressure_data = pressure_vals
+                else:
+                    downstream_pressure_data = pressure_vals
+
+        upstream_error = calculate_error(upstream_pressure_data)
+        downstream_error = calculate_error(downstream_pressure_data)
+
+        upstream_data = {
+            "pressure_data": upstream_pressure_data,
+            "error_data": upstream_error,
+        }
+        downstream_data = {
+            "pressure_data": downstream_pressure_data,
+            "error_data": downstream_error,
+        }
+
+        if len(metadata.get("thermocouples", [])) == 0:
+            local_temperature_data = None
+            thermocouple_data = None
+        else:
+            local_temperature_data = data["Local_temperature (C)"]
+
+            if len(metadata.get("thermocouples", [])) < 1:
+                raise ValueError("Can only process data from 1 thermocouple in v1.2")
+
+            tname = metadata["thermocouples"][0]["name"]
+            col_name = f"{tname}_Voltage (mV)"
+            volt_vals = np.array(data[col_name], dtype=float)
+            thermocouple_data = voltage_to_temperature(
+                local_temperature_data=local_temperature_data, voltage=volt_vals
+            )
+
+        return (
+            time_data,
+            upstream_data,
+            downstream_data,
+            local_temperature_data,
+            thermocouple_data,
+        )
+
     def create_dataset(
         self,
         dataset_path: str,
@@ -368,6 +496,72 @@ class DataPlotter:
             "upstream_data": upstream_data,
             "downstream_data": downstream_data,
             "valve_times": valve_times,
+        }
+
+        # Add the folder dataset to our list
+        i = len(self.datasets) + 1
+        self.datasets[f"dataset_{i}"] = dataset
+
+    def create_dataset_v1_2(
+        self,
+        dataset_path: str,
+        dataset_name: str,
+        time_data: npt.NDArray,
+        upstream_data: dict,
+        downstream_data: dict,
+        local_temperature_data: npt.NDArray,
+        thermocouple_data: npt.NDArray,
+    ):
+        """
+        Create dataset dictionaries from gauge instances for plotting.
+
+        Args:
+            upstream_gauges: List of gauge instances with upstream location
+            downstream_gauges: List of gauge instances with downstream location
+            data_folder: Path to folder containing the data
+        """
+
+        dataset_color = self.get_next_color(len(self.datasets))
+
+        # Extract valve times from metadata
+        valve_times = {}
+        try:
+            with open(os.path.join(dataset_path, "run_metadata.json")) as f:
+                metadata = json.load(f)
+            run_info = metadata.get("run_info", {})
+
+            # Get start time for relative calculation
+            start_time_str = run_info.get("start_time")
+            if start_time_str:
+                try:
+                    # Try with seconds first, then without
+                    start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    start_time = datetime.strptime(
+                        start_time_str, "%Y-%m-%d %H:%M:%S.%f"
+                    )
+
+                for key, value in run_info.items():
+                    if "_time" in key and key.startswith("v"):
+                        try:
+                            valve_dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
+                            valve_times[key] = (valve_dt - start_time).total_seconds()
+                        except (ValueError, TypeError):
+                            pass
+        except Exception:
+            pass
+
+        dataset = {
+            "name": dataset_name,
+            "colour": dataset_color,
+            "dataset_path": dataset_path,
+            "live_data": False,
+            "time_data": time_data,
+            "upstream_data": upstream_data,
+            "downstream_data": downstream_data,
+            "valve_times": valve_times,
+            "local_temperature_data": local_temperature_data,
+            "thermocouple_data": thermocouple_data,
         }
 
         # Add the folder dataset to our list
