@@ -61,7 +61,7 @@ class TestValveTimeVisualization:
             show_valve_times_downstream=True,
         )
 
-        assert len(plots) == 2
+        assert len(plots) == 3
         assert plots[0] is not None  # upstream plot
         assert plots[1] is not None  # downstream plot
 

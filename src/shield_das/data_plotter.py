@@ -171,6 +171,7 @@ class DataPlotter:
                 downstream_data,
                 local_temperature_data,
                 thermocouple_data,
+                thermocouple_name,
             ) = self.process_csv_data(metadata, dataset_path)
             self.create_dataset_v1_2(
                 dataset_path,
@@ -180,6 +181,7 @@ class DataPlotter:
                 downstream_data,
                 local_temperature_data,
                 thermocouple_data,
+                thermocouple_name,
             )
 
     def process_csv_data(
@@ -214,6 +216,7 @@ class DataPlotter:
                 downstream_data,
                 local_temperature_data,
                 thermocouple_data,
+                thermocouple_name,
             ) = self.process_csv_v1_2(metadata, data_folder)
             return (
                 time_data,
@@ -221,6 +224,7 @@ class DataPlotter:
                 downstream_data,
                 local_temperature_data,
                 thermocouple_data,
+                thermocouple_name,
             )
         else:
             raise NotImplementedError(
@@ -419,14 +423,16 @@ class DataPlotter:
         if len(metadata.get("thermocouples", [])) == 0:
             local_temperature_data = None
             thermocouple_data = None
+            thermocouple_name = None
         else:
-            local_temperature_data = data["Local_temperature (C)"]
+            local_temperature_data = np.array(data["Local_temperature_C"], dtype=float)
 
             if len(metadata.get("thermocouples", [])) < 1:
                 raise ValueError("Can only process data from 1 thermocouple in v1.2")
 
             tname = metadata["thermocouples"][0]["name"]
-            col_name = f"{tname}_Voltage (mV)"
+            thermocouple_name = tname
+            col_name = f"{tname}_Voltage_mV"
             volt_vals = np.array(data[col_name], dtype=float)
             thermocouple_data = voltage_to_temperature(
                 local_temperature_data=local_temperature_data, voltage=volt_vals
@@ -438,6 +444,7 @@ class DataPlotter:
             downstream_data,
             local_temperature_data,
             thermocouple_data,
+            thermocouple_name,
         )
 
     def create_dataset(
@@ -511,6 +518,7 @@ class DataPlotter:
         downstream_data: dict,
         local_temperature_data: npt.NDArray,
         thermocouple_data: npt.NDArray,
+        thermocouple_name: str,
     ):
         """
         Create dataset dictionaries from gauge instances for plotting.
@@ -562,6 +570,7 @@ class DataPlotter:
             "valve_times": valve_times,
             "local_temperature_data": local_temperature_data,
             "thermocouple_data": thermocouple_data,
+            "thermocouple_name": thermocouple_name,
         }
 
         # Add the folder dataset to our list
@@ -1352,6 +1361,30 @@ class DataPlotter:
                     ],
                     className="mt-3",
                 ),
+                # Temperature plot section
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader("Temperature Data"),
+                                        dbc.CardBody(
+                                            [
+                                                dcc.Graph(
+                                                    id="temperature-plot",
+                                                    figure=self._generate_temperature_plot(),
+                                                )
+                                            ]
+                                        ),
+                                    ]
+                                ),
+                            ],
+                            width=12,
+                        ),
+                    ],
+                    className="mt-3",
+                ),
                 # Add whitespace at the bottom of the page
                 dbc.Row(
                     [
@@ -1701,6 +1734,7 @@ class DataPlotter:
                 Output("dataset-table-container", "children", allow_duplicate=True),
                 Output("upstream-plot", "figure", allow_duplicate=True),
                 Output("downstream-plot", "figure", allow_duplicate=True),
+                Output("temperature-plot", "figure", allow_duplicate=True),
             ],
             [Input({"type": "dataset-color", "index": ALL}, "value")],
             prevent_initial_call=True,
@@ -1718,6 +1752,7 @@ class DataPlotter:
                 self.create_dataset_table(),
                 self._generate_upstream_plot(),
                 self._generate_downstream_plot(),
+                self._generate_temperature_plot(),
             ]
 
         # Callback to handle collapse/expand of dataset management
@@ -2061,6 +2096,7 @@ class DataPlotter:
                 Output("dataset-table-container", "children"),
                 Output("upstream-plot", "figure"),
                 Output("downstream-plot", "figure"),
+                Output("temperature-plot", "figure"),
             ],
             [Input({"type": "delete-dataset", "index": ALL}, "n_clicks")],
             prevent_initial_call=True,
@@ -2098,6 +2134,7 @@ class DataPlotter:
                 self.create_dataset_table(),
                 self._generate_upstream_plot(),
                 self._generate_downstream_plot(),
+                self._generate_temperature_plot(),
             ]
 
         # Callback for downloading datasets
@@ -2234,6 +2271,7 @@ class DataPlotter:
             [
                 Output("upstream-plot", "figure", allow_duplicate=True),
                 Output("downstream-plot", "figure", allow_duplicate=True),
+                Output("temperature-plot", "figure", allow_duplicate=True),
                 Output("live-data-interval", "disabled"),
             ],
             [Input({"type": "dataset-live-data", "index": ALL}, "value")],
@@ -2271,6 +2309,7 @@ class DataPlotter:
             [
                 Output("upstream-plot", "figure", allow_duplicate=True),
                 Output("downstream-plot", "figure", allow_duplicate=True),
+                Output("temperature-plot", "figure", allow_duplicate=True),
             ],
             [Input("live-data-interval", "n_intervals")],
             self.PLOT_CONTROL_STATES,
@@ -2307,11 +2346,39 @@ class DataPlotter:
                             metadata = json.load(f)
 
                         # Process CSV data based on version
-                        (
-                            time_data,
-                            upstream_data,
-                            downstream_data,
-                        ) = self.process_csv_data(metadata, dataset_path)
+                        csv_result = self.process_csv_data(metadata, dataset_path)
+
+                        # Handle different return values based on version
+                        if len(csv_result) == 3:
+                            # v0.0 or v1.0/v1.1 (no temperature data)
+                            time_data, upstream_data, downstream_data = csv_result
+                            local_temperature_data = None
+                            thermocouple_data = None
+                            thermocouple_name = None
+                        elif len(csv_result) == 5:
+                            # v1.2 (with temperature data but no thermocouple name)
+                            (
+                                time_data,
+                                upstream_data,
+                                downstream_data,
+                                local_temperature_data,
+                                thermocouple_data,
+                            ) = csv_result
+                            thermocouple_name = None
+                        elif len(csv_result) == 6:
+                            # v1.2 (with temperature data and thermocouple name)
+                            (
+                                time_data,
+                                upstream_data,
+                                downstream_data,
+                                local_temperature_data,
+                                thermocouple_data,
+                                thermocouple_name,
+                            ) = csv_result
+                        else:
+                            raise ValueError(
+                                f"Unexpected number of return values from process_csv_data: {len(csv_result)}"
+                            )
 
                         # Update valve times for live data
                         valve_times = {}
@@ -2341,14 +2408,24 @@ class DataPlotter:
 
                         # Update existing dataset in place
                         # (preserve name, colour, live_data)
-                        dataset.update(
-                            {
-                                "time_data": time_data,
-                                "upstream_data": upstream_data,
-                                "downstream_data": downstream_data,
-                                "valve_times": valve_times,
-                            }
-                        )
+                        update_dict = {
+                            "time_data": time_data,
+                            "upstream_data": upstream_data,
+                            "downstream_data": downstream_data,
+                            "valve_times": valve_times,
+                        }
+
+                        # Add temperature data if available (v1.2+)
+                        if local_temperature_data is not None:
+                            update_dict["local_temperature_data"] = (
+                                local_temperature_data
+                            )
+                        if thermocouple_data is not None:
+                            update_dict["thermocouple_data"] = thermocouple_data
+                        if thermocouple_name is not None:
+                            update_dict["thermocouple_name"] = thermocouple_name
+
+                        dataset.update(update_dict)
 
             # Regenerate plots with updated data;
             return self._generate_both_plots(
@@ -2407,6 +2484,30 @@ class DataPlotter:
                     return fig_resampler.construct_update_data_patch(relayoutData)
             return dash.no_update
 
+        @self.app.callback(
+            Output("temperature-plot", "figure", allow_duplicate=True),
+            Input("temperature-plot", "relayoutData"),
+            prevent_initial_call=True,
+        )
+        def update_temperature_plot_on_relayout(relayoutData):
+            if "temperature-plot" in self.figure_resamplers and relayoutData:
+                fig_resampler = self.figure_resamplers["temperature-plot"]
+
+                # Check if this is an autoscale/reset zoom event (double-click)
+                if (
+                    "autosize" in relayoutData
+                    or "xaxis.autorange" in relayoutData
+                    or "yaxis.autorange" in relayoutData
+                    or relayoutData.get("xaxis.autorange") is True
+                    or relayoutData.get("yaxis.autorange") is True
+                ):
+                    # Regenerate the full plot for autoscale
+                    return self._generate_temperature_plot()
+                else:
+                    # Normal zoom/pan - use resampling
+                    return fig_resampler.construct_update_data_patch(relayoutData)
+            return dash.no_update
+
     def _generate_both_plots(
         self,
         show_error_bars_upstream=True,
@@ -2428,6 +2529,7 @@ class DataPlotter:
                 show_valve_times=show_valve_times_downstream,
                 **kwargs,
             ),
+            self._generate_temperature_plot(),
         ]
 
     def _generate_upstream_plot(
@@ -2461,6 +2563,21 @@ class DataPlotter:
             pressure_data = np.ascontiguousarray(upstream_data["pressure_data"])
             pressure_error = np.ascontiguousarray(upstream_data["error_data"])
             colour = dataset["colour"]
+
+            # Debug: Check array lengths
+            if len(time_data) != len(pressure_data):
+                print(
+                    f"WARNING: Dataset {dataset_name}: time_data length={len(time_data)}, pressure_data length={len(pressure_data)}"
+                )
+                print(f"  Trimming to minimum length")
+                min_len = min(len(time_data), len(pressure_data))
+                time_data = time_data[:min_len]
+                pressure_data = pressure_data[:min_len]
+                pressure_error = (
+                    pressure_error[:min_len]
+                    if len(pressure_error) > min_len
+                    else pressure_error
+                )
 
             # Create scatter trace
             scatter_kwargs = {
@@ -2655,6 +2772,20 @@ class DataPlotter:
 
             colour = self.datasets[f"{dataset_name}"]["colour"]
 
+            # Debug: Check array lengths
+            if len(time_data) != len(pressure_data):
+                print(
+                    f"WARNING: Dataset {dataset_name}: "
+                    f"time_data length={len(time_data)}, "
+                    f"pressure_data length={len(pressure_data)}"
+                )
+                print("  Trimming to minimum length")
+                min_len = min(len(time_data), len(pressure_data))
+                time_data = time_data[:min_len]
+                pressure_data = pressure_data[:min_len]
+                if len(pressure_error) > min_len:
+                    pressure_error = pressure_error[:min_len]
+
             # Create scatter trace
             scatter_kwargs = {
                 "mode": "lines+markers",
@@ -2798,6 +2929,106 @@ class DataPlotter:
                 fig.update_yaxes(range=[math.log10(y_min_use), math.log10(y_max_use)])
             else:
                 fig.update_yaxes(range=[y_min, y_max])
+
+        # Clean up trace names to remove [R] annotations
+        for trace in fig.data:
+            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
+                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
+
+        return fig
+
+    def _generate_temperature_plot(self):
+        """Generate the temperature plot for v1.2 datasets"""
+        # Use FigureResampler with parameters to hide resampling annotations
+        fig = FigureResampler(
+            go.Figure(),
+            show_dash_kwargs={"mode": "disabled"},
+            show_mean_aggregation_size=False,
+            verbose=False,
+        )
+
+        # Store the FigureResampler instance
+        self.figure_resamplers["temperature-plot"] = fig
+
+        # Iterate through datasets and check for v1.2 datasets with temperature data
+        has_temperature_data = False
+        for dataset_name in self.datasets.keys():
+            dataset = self.datasets[f"{dataset_name}"]
+
+            # Check if dataset has temperature data (v1.2 or later)
+            if (
+                "local_temperature_data" not in dataset
+                or "thermocouple_data" not in dataset
+            ):
+                continue
+
+            # Skip if temperature data is None
+            if (
+                dataset["local_temperature_data"] is None
+                or dataset["thermocouple_data"] is None
+            ):
+                continue
+
+            has_temperature_data = True
+
+            time_data = np.ascontiguousarray(dataset["time_data"])
+            local_temp = np.ascontiguousarray(dataset["local_temperature_data"])
+            thermocouple_temp = np.ascontiguousarray(dataset["thermocouple_data"])
+            colour = dataset["colour"]
+            thermocouple_name = dataset.get("thermocouple_name", "Thermocouple")
+
+            # Add local temperature trace
+            fig.add_trace(
+                go.Scatter(
+                    mode="lines",
+                    name="Local temperature (C)",
+                    line=dict(color=colour, width=1.5, dash="dash"),
+                ),
+                hf_x=time_data,
+                hf_y=local_temp,
+            )
+
+            # Add thermocouple temperature trace
+            fig.add_trace(
+                go.Scatter(
+                    mode="lines",
+                    name=f"{thermocouple_name} (C)",
+                    line=dict(color=colour, width=2),
+                ),
+                hf_x=time_data,
+                hf_y=thermocouple_temp,
+            )
+
+        # Configure the layout
+        if has_temperature_data:
+            fig.update_layout(
+                height=400,
+                xaxis_title="Time (s)",
+                yaxis_title="Temperature (°C)",
+                template="plotly_white",
+                margin=dict(l=60, r=30, t=40, b=60),
+                legend=dict(
+                    orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
+                ),
+            )
+        else:
+            # No temperature data available, show message
+            fig.add_annotation(
+                text="No temperature data available (requires v1.2 datasets)",
+                xref="paper",
+                yref="paper",
+                x=0.5,
+                y=0.5,
+                showarrow=False,
+                font=dict(size=16, color="gray"),
+            )
+            fig.update_layout(
+                height=400,
+                xaxis_title="Time (s)",
+                yaxis_title="Temperature (°C)",
+                template="plotly_white",
+                margin=dict(l=60, r=30, t=40, b=60),
+            )
 
         # Clean up trace names to remove [R] annotations
         for trace in fig.data:
