@@ -30,6 +30,7 @@ class DataRecorder:
         backup_interval: How often to backup data (seconds)
         sample_material: Material of the sample being tested, either "316" or
             "AISI 1018"
+        sample_thickness: Thickness of the sample being tested in meters
 
     Attributes:
         gauges: List of PressureGauge instances to record data from
@@ -43,6 +44,7 @@ class DataRecorder:
         backup_interval: How often to rotate backup CSV files (seconds)
         sample_material: Material of the sample being tested, either "316" or
             "AISI 1018"
+        sample_thickness: Thickness of the sample being tested in meters
         stop_event: Event to control the recording thread
         thread: Thread for recording data
         run_dir: Directory for the current run's results
@@ -63,7 +65,8 @@ class DataRecorder:
     run_type: str
     recording_interval: float
     backup_interval: float
-    sample_material: str
+    sample_material: str | None
+    sample_thickness: float
 
     stop_event: threading.Event
     thread: threading.Thread
@@ -88,6 +91,7 @@ class DataRecorder:
         recording_interval: float = 0.5,
         backup_interval: float = 5.0,
         sample_material: str | None = None,
+        sample_thickness: float | None = None,
     ):
         self.gauges = gauges
         self.thermocouples = thermocouples
@@ -97,6 +101,7 @@ class DataRecorder:
         self.recording_interval = recording_interval
         self.backup_interval = backup_interval
         self.sample_material = sample_material
+        self.sample_thickness = sample_thickness
 
         # Thread control
         self.stop_event = threading.Event()
@@ -266,6 +271,7 @@ class DataRecorder:
                 "recording_interval_seconds": self.recording_interval,
                 "backup_interval_seconds": self.backup_interval,
                 "sample_material": self.sample_material,
+                "sample_thickness": self.sample_thickness,
                 "data_filename": "shield_data.csv",
             },
         }
