@@ -3125,10 +3125,12 @@ class DataPlotter:
         )
 
         # Add individual data points on top (no legend)
+        # Extract nominal values from ufloat objects
+        perm_values = np.array([p.n if hasattr(p, "n") else p for p in perms])
         fig.add_trace(
             go.Scatter(
                 x=1000 / np.array(temps),
-                y=perms,
+                y=perm_values,
                 mode="markers",
                 marker=dict(size=6, color="black"),
                 showlegend=False,
