@@ -37,7 +37,7 @@ class Thermocouple:
         self,
         labjack,  # Remove type hint to avoid import issues
         resolution_index: int | None = 8,
-        gain_index: int | None = 3,
+        gain_index: int | None = 2,
     ) -> float:
         """
         Read temperature from a Type K thermocouple connected to a LabJack U6 using

@@ -17,7 +17,13 @@ from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 from plotly_resampler import FigureResampler
 
-from .helpers import calculate_error, voltage_to_pressure, voltage_to_temperature
+from .analysis import evaluate_permeability_values, fit_permeability_data
+from .helpers import (
+    calculate_error,
+    import_htm_data,
+    voltage_to_pressure,
+    voltage_to_temperature,
+)
 
 
 class DataPlotter:
@@ -468,31 +474,23 @@ class DataPlotter:
 
         # Extract valve times from metadata
         valve_times = {}
-        try:
-            with open(os.path.join(dataset_path, "run_metadata.json")) as f:
-                metadata = json.load(f)
-            run_info = metadata.get("run_info", {})
+        with open(os.path.join(dataset_path, "run_metadata.json")) as f:
+            metadata = json.load(f)
+        run_info = metadata.get("run_info", {})
 
-            # Get start time for relative calculation
-            start_time_str = run_info.get("start_time")
-            if start_time_str:
-                try:
-                    # Try with seconds first, then without
-                    start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    start_time = datetime.strptime(
-                        start_time_str, "%Y-%m-%d %H:%M:%S.%f"
-                    )
+        # get furnace set_point temperature
+        furnace_set_point_C = run_info["furnace_setpoint"]
+        furnace_set_point_K = furnace_set_point_C + 273.15
 
-                for key, value in run_info.items():
-                    if "_time" in key and key.startswith("v"):
-                        try:
-                            valve_dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
-                            valve_times[key] = (valve_dt - start_time).total_seconds()
-                        except (ValueError, TypeError):
-                            pass
-        except Exception:
-            pass
+        # Get start time for relative calculation
+        start_time_str = run_info.get("start_time")
+        if start_time_str:
+            start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+
+            for key, value in run_info.items():
+                if "_time" in key and key.startswith("v"):
+                    valve_dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
+                    valve_times[key] = (valve_dt - start_time).total_seconds()
 
         dataset = {
             "name": dataset_name,
@@ -503,6 +501,7 @@ class DataPlotter:
             "upstream_data": upstream_data,
             "downstream_data": downstream_data,
             "valve_times": valve_times,
+            "temperature": furnace_set_point_K,
         }
 
         # Add the folder dataset to our list
@@ -1385,6 +1384,32 @@ class DataPlotter:
                     ],
                     className="mt-3",
                 ),
+                # Permeability plot section
+                dbc.Row(
+                    [
+                        dbc.Col(width=3),  # Left spacing
+                        dbc.Col(
+                            [
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader("Measured Permeability"),
+                                        dbc.CardBody(
+                                            [
+                                                dcc.Graph(
+                                                    id="permeability-plot",
+                                                    figure=self._generate_permeability_plot(),
+                                                )
+                                            ]
+                                        ),
+                                    ]
+                                ),
+                            ],
+                            width=6,
+                        ),
+                        dbc.Col(width=3),  # Right spacing
+                    ],
+                    className="mt-3",
+                ),
                 # Add whitespace at the bottom of the page
                 dbc.Row(
                     [
@@ -1399,6 +1424,8 @@ class DataPlotter:
                 # Download components for plot exports
                 dcc.Download(id="download-upstream-plot"),
                 dcc.Download(id="download-downstream-plot"),
+                dcc.Download(id="download-temperature-plot"),
+                dcc.Download(id="download-permeability-plot"),
                 # Interval component for live data updates
                 dcc.Interval(
                     id="live-data-interval",
@@ -2113,7 +2140,6 @@ class DataPlotter:
 
             # Extract the index from the triggered button
             button_id = ctx.triggered[0]["prop_id"]
-            import json
 
             try:
                 button_data = json.loads(button_id.split(".")[0])
@@ -2155,8 +2181,6 @@ class DataPlotter:
 
             # Extract the index from the triggered button
             button_id = ctx.triggered[0]["prop_id"]
-            import json
-
             try:
                 button_data = json.loads(button_id.split(".")[0])
                 download_index = int(button_data["index"])
@@ -2503,6 +2527,30 @@ class DataPlotter:
                 ):
                     # Regenerate the full plot for autoscale
                     return self._generate_temperature_plot()
+                else:
+                    # Normal zoom/pan - use resampling
+                    return fig_resampler.construct_update_data_patch(relayoutData)
+            return dash.no_update
+
+        @self.app.callback(
+            Output("permeability-plot", "figure", allow_duplicate=True),
+            Input("permeability-plot", "relayoutData"),
+            prevent_initial_call=True,
+        )
+        def update_permeability_plot_on_relayout(relayoutData):
+            if "permeability-plot" in self.figure_resamplers and relayoutData:
+                fig_resampler = self.figure_resamplers["permeability-plot"]
+
+                # Check if this is an autoscale/reset zoom event (double-click)
+                if (
+                    "autosize" in relayoutData
+                    or "xaxis.autorange" in relayoutData
+                    or "yaxis.autorange" in relayoutData
+                    or relayoutData.get("xaxis.autorange") is True
+                    or relayoutData.get("yaxis.autorange") is True
+                ):
+                    # Regenerate the full plot for autoscale
+                    return self._generate_permeability_plot()
                 else:
                     # Normal zoom/pan - use resampling
                     return fig_resampler.construct_update_data_patch(relayoutData)
@@ -3031,6 +3079,96 @@ class DataPlotter:
             )
 
         # Clean up trace names to remove [R] annotations
+        for trace in fig.data:
+            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
+                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
+
+        return fig
+
+    def _generate_permeability_plot(self):
+        """Generate permeability plot with HTM reference and measured data."""
+        fig = FigureResampler(
+            go.Figure(),
+            show_dash_kwargs={"mode": "disabled"},
+            show_mean_aggregation_size=False,
+            verbose=False,
+        )
+        self.figure_resamplers["permeability-plot"] = fig
+
+        # Add HTM reference data
+        htm_x, htm_y, htm_labels = import_htm_data("316l_steel")
+        for x, y, label in zip(htm_x, htm_y, htm_labels):
+            fig.add_trace(go.Scatter(x=1000 / x, y=y, name=label))
+
+        # Calculate and plot permeability for each dataset
+        temps, perms, x_error, y_error, error_lower, error_upper = (
+            evaluate_permeability_values(self.datasets)
+        )
+
+        # Add error bars (no visible markers, just the bars)
+        fig.add_trace(
+            go.Scatter(
+                x=x_error,
+                y=y_error,
+                mode="markers",
+                name="Error Range",
+                marker=dict(size=0.1, color="black", opacity=0),
+                error_y=dict(
+                    type="data",
+                    symmetric=False,
+                    array=error_upper,
+                    arrayminus=error_lower,
+                    color="black",
+                    thickness=2,
+                    width=6,
+                ),
+                showlegend=False,
+            )
+        )
+
+        # Add individual data points on top (no legend)
+        # Extract nominal values from ufloat objects
+        perm_values = np.array([p.n if hasattr(p, "n") else p for p in perms])
+        fig.add_trace(
+            go.Scatter(
+                x=1000 / np.array(temps),
+                y=perm_values,
+                mode="markers",
+                marker=dict(size=6, color="black"),
+                showlegend=False,
+            )
+        )
+
+        # Fit a line through all data points (in log space for permeability)
+        fit_x, fit_y = fit_permeability_data(temps, perms)
+
+        fig.add_trace(
+            go.Scatter(
+                x=fit_x,
+                y=fit_y,
+                mode="lines",
+                name="SHIELD data",
+                line=dict(color="black", width=2, dash="solid"),
+                showlegend=True,
+            )
+        )
+
+        # Configure layout
+        fig.update_layout(
+            xaxis_title="1000/T (K-1)",
+            yaxis_title="Permeability (m-1 s-1 Pa-0.5)",
+            yaxis_type="log",
+            hovermode="closest",
+            template="plotly_white",
+            legend=dict(
+                orientation="v", yanchor="top", y=0.99, xanchor="right", x=0.99
+            ),
+        )
+
+        # Configure y-axis to show exponent at top (matplotlib style)
+        fig.update_yaxes(exponentformat="e", showexponent="all")
+
+        # Clean up resampler annotations
         for trace in fig.data:
             if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
                 trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
