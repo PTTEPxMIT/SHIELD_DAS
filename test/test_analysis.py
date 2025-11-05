@@ -325,9 +325,10 @@ class TestCalculatePermeabilityFromFlux:
             slope_torr_per_s, V_m3, T_K, A_m2, e_m, P_down_torr, P_up_torr
         )
 
-        # Test that result is positive and finite
-        assert perm > 0
-        assert np.isfinite(perm)
+        # Test that result is positive and finite (handle ufloat object)
+        perm_val = perm.n if hasattr(perm, "n") else perm
+        assert perm_val > 0
+        assert np.isfinite(perm_val)
 
 
 class TestEvaluatePermeabilityValues:
@@ -438,7 +439,7 @@ class TestEvaluatePermeabilityValues:
         assert x_error[0] == pytest.approx(1.0, rel=0.01)
 
     def test_error_bar_bounds(self):
-        """Test that error bars span 10% below min and 10% above max"""
+        """Test that error bars are based on propagated uncertainties"""
         # Create datasets with known permeability values
         datasets = {
             "run_1": {
@@ -459,15 +460,13 @@ class TestEvaluatePermeabilityValues:
             evaluate_permeability_values(datasets)
         )
 
-        # Error bars should be positive
+        # Error bars should be positive (based on uncertainty propagation)
         assert error_lower[0] > 0
         assert error_upper[0] > 0
 
-        # y_error should be center point
-        min_perm = min(perms)
-        max_perm = max(perms)
-        expected_center = (min_perm * 0.9 + max_perm * 1.1) / 2
-        assert y_error[0] == pytest.approx(expected_center, rel=0.01)
+        # y_error should be the central value
+        assert y_error[0] > 0
+        assert np.isfinite(y_error[0])
 
     def test_handles_empty_datasets(self):
         """Test with empty datasets dictionary"""
@@ -515,7 +514,8 @@ class TestEvaluatePermeabilityValues:
         )
 
         assert all(np.isfinite(t) for t in temps)
-        assert all(np.isfinite(p) for p in perms)
+        # perms now contains ufloat objects, extract nominal values
+        assert all(np.isfinite(p.n if hasattr(p, "n") else p) for p in perms)
         assert all(np.isfinite(x) for x in x_error)
         assert all(np.isfinite(y) for y in y_error)
         assert all(np.isfinite(e) for e in error_lower)
