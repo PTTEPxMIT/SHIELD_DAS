@@ -1387,6 +1387,7 @@ class DataPlotter:
                 # Permeability plot section
                 dbc.Row(
                     [
+                        dbc.Col(width=3),  # Left spacing
                         dbc.Col(
                             [
                                 dbc.Card(
@@ -1403,8 +1404,9 @@ class DataPlotter:
                                     ]
                                 ),
                             ],
-                            width=12,
+                            width=6,
                         ),
+                        dbc.Col(width=3),  # Right spacing
                     ],
                     className="mt-3",
                 ),
