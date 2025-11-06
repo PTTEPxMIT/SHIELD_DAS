@@ -1,4 +1,8 @@
 # SHIELD permeation rig Data Acquisition System
+[![CI](https://github.com/PTTEPxMIT/SHIELD-DAS/actions/workflows/ci_conda.yml/badge.svg)](https://github.com/PTTEPxMIT/SHIELD-DAS/actions/workflows/ci_conda.yml)
+[![codecov](https://codecov.io/gh/PTTEPxMIT/SHIELD-DAS/graph/badge.svg?token=mDUOcHgDN5)](https://codecov.io/gh/PTTEPxMIT/SHIELD-DAS)
+[![Code style: Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![DOI](https://zenodo.org/badge/981399539.svg)](https://doi.org/10.5281/zenodo.17544899)
 
 This is a tool to be used with the SHIELD hydrogen permeation rig, providing a way to both record data from the rig and have a live UI displaying plots of the pressure values in the gauges connected to the rig and the temperature of the connected thermocouple.
 
