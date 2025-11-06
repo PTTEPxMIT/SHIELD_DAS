@@ -18,7 +18,11 @@ from shield_das.analysis import (
 
 
 def test_average_pressure_returns_stable_value():
-    """Test: Pressure jumps from 10 to 100 at t=5s. Expect: Returns 100."""
+    """
+    Test average_pressure_after_increase to ensure it correctly identifies and
+    returns the stable pressure value after a step increase from 10 to 100 torr
+    at t=5 seconds.
+    """
     time = np.linspace(0, 20, 200)
     pressure = np.where(time < 5, 10, 100)
     result = average_pressure_after_increase(time, pressure)
@@ -26,7 +30,11 @@ def test_average_pressure_returns_stable_value():
 
 
 def test_average_pressure_handles_gradual_rise():
-    """Test: Pressure rises to t=10s then stabilizes at 50. Expect: Returns 50."""
+    """
+    Test average_pressure_after_increase to verify it handles a gradual
+    pressure rise that stabilizes at 50 torr after t=10 seconds and returns
+    the correct stabilized value.
+    """
     time = np.linspace(0, 30, 300)
     pressure = np.where(time < 10, time * 5, 50)
     result = average_pressure_after_increase(time, pressure)
@@ -34,7 +42,11 @@ def test_average_pressure_handles_gradual_rise():
 
 
 def test_average_pressure_handles_noisy_data():
-    """Test: Stable pressure with random noise (±1 torr). Expect: Returns ~100."""
+    """
+    Test average_pressure_after_increase to confirm it can handle noisy
+    pressure data with random fluctuations (±1 torr) and still accurately
+    identify the stable pressure around 100 torr.
+    """
     time = np.linspace(0, 20, 200)
     pressure = np.where(time < 5, 10, 100)
     rng = np.random.default_rng(seed=42)
@@ -45,7 +57,11 @@ def test_average_pressure_handles_noisy_data():
 
 
 def test_average_pressure_uses_fallback_for_unstable():
-    """Test: Continuously increasing pressure. Expect: Returns positive value."""
+    """
+    Test average_pressure_after_increase to ensure it uses fallback behavior
+    when pressure never stabilizes (continuously increasing), returning a
+    positive average value.
+    """
     time = np.linspace(0, 20, 200)
     pressure = time * 10
     result = average_pressure_after_increase(time, pressure)
@@ -53,7 +69,11 @@ def test_average_pressure_uses_fallback_for_unstable():
 
 
 def test_average_pressure_ignores_first_five_seconds():
-    """Test: Constant pressure from t=0. Expect: Ignores first 5s, returns 50."""
+    """
+    Test average_pressure_after_increase to verify it correctly ignores the
+    first 5 seconds of data when calculating the average, even with constant
+    pressure of 50 torr from the start.
+    """
     time = np.linspace(0, 20, 200)
     pressure = np.full_like(time, 50)
     result = average_pressure_after_increase(time, pressure)
@@ -62,7 +82,11 @@ def test_average_pressure_ignores_first_five_seconds():
 
 @pytest.mark.parametrize("input_type", ["list", "tuple", "array"])
 def test_average_pressure_accepts_multiple_input_types(input_type):
-    """Test: Input as list/tuple/array. Expect: All accepted, returns 100."""
+    """
+    Test average_pressure_after_increase to ensure it accepts and correctly
+    processes time and pressure data provided as lists, tuples, or numpy arrays,
+    returning 100 torr for all input types.
+    """
     time_list = [0, 5, 10, 15, 20]
     pressure_list = [10, 10, 100, 100, 100]
     if input_type == "list":
@@ -77,7 +101,11 @@ def test_average_pressure_accepts_multiple_input_types(input_type):
 
 @pytest.mark.parametrize("window_size", [3, 5, 10, 20])
 def test_average_pressure_respects_window_parameter(window_size):
-    """Test: Different window sizes for smoothing. Expect: Returns 100 for all."""
+    """
+    Test average_pressure_after_increase to verify it respects the window
+    parameter for slope smoothing with different window sizes (3, 5, 10, 20),
+    all returning 100 torr for stable pressure.
+    """
     time = np.linspace(0, 20, 200)
     pressure = np.where(time < 5, 10, 100)
     result = average_pressure_after_increase(time, pressure, window=window_size)
@@ -86,7 +114,11 @@ def test_average_pressure_respects_window_parameter(window_size):
 
 @pytest.mark.parametrize("threshold", [1e-4, 1e-3, 1e-2, 1e-1])
 def test_average_pressure_respects_slope_threshold(threshold):
-    """Test: Different slope thresholds. Expect: Returns ~100 for all."""
+    """
+    Test average_pressure_after_increase to confirm it respects the
+    slope_threshold parameter for stability detection with different thresholds
+    (1e-4 to 1e-1), returning approximately 100 torr.
+    """
     time = np.linspace(0, 20, 200)
     pressure = np.where(time < 5, 10, 100)
     result = average_pressure_after_increase(time, pressure, slope_threshold=threshold)
@@ -99,7 +131,10 @@ def test_average_pressure_respects_slope_threshold(threshold):
 
 
 def test_flux_returns_positive_slope():
-    """Test: Linearly increasing pressure data. Expect: Positive flux value."""
+    """
+    Test calculate_flux_from_sample to ensure it correctly calculates a positive
+    flux value from linearly increasing pressure data rising at 0.001 torr/s.
+    """
     time = np.linspace(0, 100, 50)
     pressure = 0.1 + time * 0.001
     flux = calculate_flux_from_sample(time, pressure)
@@ -107,7 +142,11 @@ def test_flux_returns_positive_slope():
 
 
 def test_flux_filters_low_pressure_values():
-    """Test: Pressure from 0.01 to 0.5 torr. Expect: Filters <0.05, returns finite."""
+    """
+    Test calculate_flux_from_sample to verify it filters out unreliable low
+    pressure values (<0.05 torr) from gauge data ranging from 0.01 to 0.5 torr
+    and returns a finite flux value.
+    """
     time = np.linspace(0, 100, 50)
     pressure = np.linspace(0.01, 0.5, 50)
     flux = calculate_flux_from_sample(time, pressure)
@@ -115,7 +154,11 @@ def test_flux_filters_low_pressure_values():
 
 
 def test_flux_filters_high_pressure_values():
-    """Test: Pressure from 0.1 to 1.5 torr. Expect: Filters >0.95, returns finite."""
+    """
+    Test calculate_flux_from_sample to verify it filters out unreliable high
+    pressure values (>0.95 torr) from gauge data ranging from 0.1 to 1.5 torr
+    and returns a finite flux value.
+    """
     time = np.linspace(0, 100, 50)
     pressure = np.linspace(0.1, 1.5, 50)
     flux = calculate_flux_from_sample(time, pressure)
@@ -123,7 +166,11 @@ def test_flux_filters_high_pressure_values():
 
 
 def test_flux_uses_weighted_fit():
-    """Test: Linear pressure rise at 0.001 torr/s. Expect: Flux ≈ 0.001."""
+    """
+    Test calculate_flux_from_sample to confirm it uses weighted linear fitting
+    with exponential weighting favoring later data points, returning approximately
+    0.001 torr/s for a linear pressure rise at that rate.
+    """
     time = np.linspace(0, 100, 50)
     pressure = 0.1 + time * 0.001
     flux = calculate_flux_from_sample(time, pressure)
@@ -131,7 +178,10 @@ def test_flux_uses_weighted_fit():
 
 
 def test_flux_handles_array_input():
-    """Test: Numpy array inputs. Expect: Returns finite flux value."""
+    """
+    Test calculate_flux_from_sample to ensure it accepts numpy array inputs for
+    time and pressure data and returns a finite flux value.
+    """
     time = np.array([0, 10, 20, 30, 40])
     pressure = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
     flux = calculate_flux_from_sample(time, pressure)
@@ -139,7 +189,10 @@ def test_flux_handles_array_input():
 
 
 def test_flux_handles_list_input():
-    """Test: Python list inputs. Expect: Returns finite flux value."""
+    """
+    Test calculate_flux_from_sample to ensure it accepts Python list inputs for
+    time and pressure data and returns a finite flux value.
+    """
     time = [0, 10, 20, 30, 40]
     pressure = [0.1, 0.2, 0.3, 0.4, 0.5]
     flux = calculate_flux_from_sample(time, pressure)
@@ -147,7 +200,10 @@ def test_flux_handles_list_input():
 
 
 def test_flux_returns_near_zero_for_constant_pressure():
-    """Test: Constant pressure at 0.5 torr. Expect: Flux ≈ 0."""
+    """
+    Test calculate_flux_from_sample to verify it returns a flux value near zero
+    when pressure remains constant at 0.5 torr (no pressure rise).
+    """
     time = np.linspace(0, 100, 50)
     pressure = np.full(50, 0.5)
     flux = calculate_flux_from_sample(time, pressure)
@@ -160,7 +216,11 @@ def test_flux_returns_near_zero_for_constant_pressure():
 
 
 def test_permeability_returns_ufloat():
-    """Test: Standard inputs. Expect: Returns ufloat object with .n and .s."""
+    """
+    Test calculate_permeability_from_flux to ensure it returns a ufloat object
+    with nominal value (.n) and standard deviation (.s) attributes for
+    uncertainty propagation.
+    """
     slope = 0.001
     V_m3 = 7.9e-5
     T_K = 873
@@ -173,7 +233,11 @@ def test_permeability_returns_ufloat():
 
 
 def test_permeability_returns_positive_value():
-    """Test: Standard inputs. Expect: Positive nominal permeability value."""
+    """
+    Test calculate_permeability_from_flux to verify it returns a positive nominal
+    permeability value with standard inputs, as permeability is a physical quantity
+    that must be positive.
+    """
     slope = 0.001
     V_m3 = 7.9e-5
     T_K = 873
@@ -186,7 +250,10 @@ def test_permeability_returns_positive_value():
 
 
 def test_permeability_returns_finite_value():
-    """Test: Standard inputs. Expect: Finite nominal permeability value."""
+    """
+    Test calculate_permeability_from_flux to confirm it returns a finite (not
+    infinite or NaN) nominal permeability value with standard inputs.
+    """
     slope = 0.001
     V_m3 = 7.9e-5
     T_K = 873
@@ -199,7 +266,11 @@ def test_permeability_returns_finite_value():
 
 
 def test_permeability_has_positive_uncertainty():
-    """Test: Standard inputs. Expect: Positive uncertainty value."""
+    """
+    Test calculate_permeability_from_flux to verify it propagates uncertainties
+    through the calculation and returns a positive uncertainty value reflecting
+    measurement precision.
+    """
     slope = 0.001
     V_m3 = 7.9e-5
     T_K = 873
@@ -212,7 +283,11 @@ def test_permeability_has_positive_uncertainty():
 
 
 def test_permeability_increases_with_flux():
-    """Test: Double the flux. Expect: Higher permeability."""
+    """
+    Test calculate_permeability_from_flux to confirm that permeability scales
+    linearly with flux, where doubling the flux from 0.001 to 0.002 torr/s results
+    in a higher permeability value.
+    """
     V_m3 = 7.9e-5
     T_K = 873
     A_m2 = 1.88e-4
@@ -225,7 +300,11 @@ def test_permeability_increases_with_flux():
 
 
 def test_permeability_scales_with_temperature():
-    """Test: 600K vs 900K. Expect: Different permeabilities."""
+    """
+    Test calculate_permeability_from_flux to verify that permeability values
+    differ when calculated at different temperatures (600K vs 900K), reflecting
+    the temperature dependence of hydrogen permeation.
+    """
     slope = 0.001
     V_m3 = 7.9e-5
     A_m2 = 1.88e-4
@@ -242,7 +321,11 @@ def test_permeability_scales_with_temperature():
 
 
 def test_permeability_decreases_with_upstream_pressure():
-    """Test: 50 vs 100 torr upstream. Expect: Lower perm at higher pressure."""
+    """
+    Test calculate_permeability_from_flux to confirm that permeability decreases
+    with increasing upstream pressure, where 100 torr upstream pressure yields
+    lower permeability than 50 torr due to the Sieverts law dependency (P^0.5).
+    """
     slope = 0.001
     V_m3 = 7.9e-5
     T_K = 873
@@ -255,7 +338,11 @@ def test_permeability_decreases_with_upstream_pressure():
 
 
 def test_permeability_increases_with_thickness():
-    """Test: Double thickness. Expect: Permeability doubles."""
+    """
+    Test calculate_permeability_from_flux to verify that permeability scales
+    linearly with sample thickness, where doubling thickness from 0.001m to
+    0.002m results in permeability doubling.
+    """
     slope = 0.001
     V_m3 = 7.9e-5
     T_K = 873
@@ -272,7 +359,11 @@ def test_permeability_increases_with_thickness():
 
 
 def test_permeability_decreases_with_area():
-    """Test: Double area. Expect: Permeability halves."""
+    """
+    Test calculate_permeability_from_flux to verify that permeability scales
+    inversely with sample area, where doubling area from 1e-4 to 2e-4 m² results
+    in permeability halving.
+    """
     slope = 0.001
     V_m3 = 7.9e-5
     T_K = 873
@@ -285,7 +376,11 @@ def test_permeability_decreases_with_area():
 
 
 def test_permeability_uses_final_downstream_pressure():
-    """Test: P_down array vs final value. Expect: Same result."""
+    """
+    Test calculate_permeability_from_flux to ensure it correctly uses the final
+    value from a downstream pressure array, producing the same result whether
+    passing the full array [0.1, 0.2, 0.5] or just the final scalar value 0.5.
+    """
     slope = 0.001
     V_m3 = 7.9e-5
     T_K = 873
@@ -303,7 +398,11 @@ def test_permeability_uses_final_downstream_pressure():
 
 
 def test_permeability_value_is_physically_reasonable():
-    """Test: Standard inputs. Expect: Positive and finite."""
+    """
+    Test calculate_permeability_from_flux to ensure the calculated permeability
+    value is physically reasonable (positive and finite) with standard experimental
+    inputs, avoiding unphysical results like negative, infinite, or NaN values.
+    """
     slope = 0.001
     V_m3 = 7.9e-5
     T_K = 873
@@ -321,7 +420,11 @@ def test_permeability_value_is_physically_reasonable():
 
 
 def test_evaluate_returns_six_outputs():
-    """Test: Single dataset. Expect: Returns 6 outputs."""
+    """
+    Test evaluate_permeability_values to ensure it returns a tuple of 6 outputs
+    (temps, perms, x_error, y_error, error_lower, error_upper) when processing
+    a single experimental dataset.
+    """
     datasets = {
         "run1": {
             "temperature": 873,
@@ -336,7 +439,10 @@ def test_evaluate_returns_six_outputs():
 
 
 def test_evaluate_temps_list_has_correct_length():
-    """Test: Two datasets. Expect: temps list has length 2."""
+    """
+    Test evaluate_permeability_values to verify it correctly processes two
+    datasets and returns a temps list with length 2, one entry per dataset.
+    """
     datasets = {
         "run1": {
             "temperature": 873,
@@ -358,7 +464,10 @@ def test_evaluate_temps_list_has_correct_length():
 
 
 def test_evaluate_perms_list_has_correct_length():
-    """Test: Two datasets. Expect: perms list has length 2."""
+    """
+    Test evaluate_permeability_values to verify it correctly calculates
+    permeability values for two datasets and returns a perms list with length 2.
+    """
     datasets = {
         "run1": {
             "temperature": 873,
@@ -380,7 +489,11 @@ def test_evaluate_perms_list_has_correct_length():
 
 
 def test_evaluate_perms_are_ufloats():
-    """Test: Single dataset. Expect: perms contain ufloat objects."""
+    """
+    Test evaluate_permeability_values to confirm it returns permeability values
+    as ufloat objects with both nominal values (.n) and uncertainties (.s) for
+    proper error propagation.
+    """
     datasets = {
         "run1": {
             "temperature": 873,
@@ -396,7 +509,11 @@ def test_evaluate_perms_are_ufloats():
 
 
 def test_evaluate_groups_by_temperature():
-    """Test: Two runs at same temp. Expect: One unique temp in error arrays."""
+    """
+    Test evaluate_permeability_values to ensure it groups multiple runs at the
+    same temperature (873K) and returns a single unique temperature point in the
+    error arrays after averaging.
+    """
     datasets = {
         "run1": {
             "temperature": 873,
@@ -418,7 +535,11 @@ def test_evaluate_groups_by_temperature():
 
 
 def test_evaluate_x_error_is_inverse_temperature():
-    """Test: 873 K dataset. Expect: x_error ≈ 1.145 (1000/873)."""
+    """
+    Test evaluate_permeability_values to verify it correctly calculates x_error
+    as the inverse temperature (1000/T), expecting approximately 1.145 for a
+    dataset at 873 Kelvin.
+    """
     datasets = {
         "run1": {
             "temperature": 873,
@@ -434,7 +555,10 @@ def test_evaluate_x_error_is_inverse_temperature():
 
 
 def test_evaluate_y_error_is_positive():
-    """Test: Standard dataset. Expect: y_error values are positive."""
+    """
+    Test evaluate_permeability_values to confirm it returns positive y_error
+    values (nominal permeability values) for a standard experimental dataset.
+    """
     datasets = {
         "run1": {
             "temperature": 873,
@@ -450,7 +574,11 @@ def test_evaluate_y_error_is_positive():
 
 
 def test_evaluate_error_bars_are_positive():
-    """Test: Standard dataset. Expect: error_lower and error_upper are positive."""
+    """
+    Test evaluate_permeability_values to ensure it returns positive error bar
+    values (error_lower and error_upper) representing measurement uncertainties
+    for standard datasets.
+    """
     datasets = {
         "run1": {
             "temperature": 873,
@@ -466,7 +594,11 @@ def test_evaluate_error_bars_are_positive():
 
 
 def test_evaluate_uses_default_thickness():
-    """Test: No sample_thickness key. Expect: Uses default 0.00088 m."""
+    """
+    Test evaluate_permeability_values to verify it uses the default sample
+    thickness of 0.00088 meters when the sample_thickness key is not provided
+    in the dataset dictionary.
+    """
     datasets = {
         "run1": {
             "temperature": 873,
@@ -482,7 +614,11 @@ def test_evaluate_uses_default_thickness():
 
 
 def test_evaluate_uses_custom_thickness():
-    """Test: Custom sample_thickness. Expect: Different permeability than default."""
+    """
+    Test evaluate_permeability_values to confirm it uses custom sample_thickness
+    values when provided (0.002m) instead of the default (0.00088m), resulting
+    in different calculated permeability values.
+    """
     datasets_default = {
         "run1": {
             "temperature": 873,
@@ -506,7 +642,11 @@ def test_evaluate_uses_custom_thickness():
 
 
 def test_evaluate_weighted_average_for_multiple_runs():
-    """Test: Two runs at same temp. Expect: Combined uncertainty."""
+    """
+    Test evaluate_permeability_values to verify it performs weighted averaging
+    when multiple runs are conducted at the same temperature (873K), combining
+    measurements and returning positive combined uncertainty.
+    """
     datasets = {
         "run1": {
             "temperature": 873,
@@ -528,7 +668,11 @@ def test_evaluate_weighted_average_for_multiple_runs():
 
 
 def test_evaluate_sorts_temperatures():
-    """Test: Temps 973, 773, 873. Expect: x_error in descending order."""
+    """
+    Test evaluate_permeability_values to ensure it sorts datasets by temperature
+    in ascending order (773K, 873K, 973K), resulting in x_error values (1000/T)
+    in descending order for Arrhenius plotting.
+    """
     datasets = {
         "run1": {
             "temperature": 973,
@@ -558,7 +702,11 @@ def test_evaluate_sorts_temperatures():
 
 
 def test_evaluate_handles_non_ufloat_permeability():
-    """Test: Mock returns regular float instead of ufloat. Expect: Zero error bars."""
+    """
+    Test evaluate_permeability_values to verify it handles edge cases where
+    permeability calculation returns a regular float instead of a ufloat object,
+    resulting in zero error bars when uncertainty propagation is not available.
+    """
     datasets = {
         "run1": {
             "temperature": 873,
@@ -586,7 +734,11 @@ def test_evaluate_handles_non_ufloat_permeability():
 
 
 def test_fit_returns_two_arrays():
-    """Test: Standard inputs. Expect: Returns two arrays."""
+    """
+    Test fit_permeability_data to ensure it returns a tuple of two arrays
+    (fit_x and fit_y) representing the Arrhenius fit for input temperature
+    and permeability data.
+    """
     temps = [773, 873, 973]
     perms = [ufloat(1e-10, 1e-11), ufloat(5e-10, 5e-11), ufloat(2e-9, 2e-10)]
     result = fit_permeability_data(temps, perms)
@@ -594,7 +746,11 @@ def test_fit_returns_two_arrays():
 
 
 def test_fit_arrays_have_100_points():
-    """Test: Standard inputs. Expect: fit_x and fit_y have 100 points."""
+    """
+    Test fit_permeability_data to verify it generates smooth fit curves with
+    exactly 100 points for both fit_x (1000/T) and fit_y (permeability) arrays
+    for Arrhenius plotting.
+    """
     temps = [773, 873, 973]
     perms = [ufloat(1e-10, 1e-11), ufloat(5e-10, 5e-11), ufloat(2e-9, 2e-10)]
     fit_x, fit_y = fit_permeability_data(temps, perms)
@@ -602,7 +758,11 @@ def test_fit_arrays_have_100_points():
 
 
 def test_fit_x_range_covers_input_data():
-    """Test: Temps 773-973 K. Expect: fit_x covers 1000/973 to 1000/773."""
+    """
+    Test fit_permeability_data to confirm it generates fit_x values spanning
+    the complete range of input temperatures, from 1000/973≈1.028 to
+    1000/773≈1.294, ensuring the fit curve covers all experimental data.
+    """
     temps = [773, 873, 973]
     perms = [ufloat(1e-10, 1e-11), ufloat(5e-10, 5e-11), ufloat(2e-9, 2e-10)]
     fit_x, fit_y = fit_permeability_data(temps, perms)
@@ -611,7 +771,11 @@ def test_fit_x_range_covers_input_data():
 
 
 def test_fit_y_values_are_positive():
-    """Test: Positive permeability inputs. Expect: All fit_y values positive."""
+    """
+    Test fit_permeability_data to ensure all fitted permeability values
+    (fit_y) are positive, as required by the physical interpretation of
+    permeability in Arrhenius models.
+    """
     temps = [773, 873, 973]
     perms = [ufloat(1e-10, 1e-11), ufloat(5e-10, 5e-11), ufloat(2e-9, 2e-10)]
     fit_x, fit_y = fit_permeability_data(temps, perms)
@@ -619,7 +783,11 @@ def test_fit_y_values_are_positive():
 
 
 def test_fit_handles_ufloat_inputs():
-    """Test: ufloat inputs with uncertainties. Expect: Returns valid arrays."""
+    """
+    Test fit_permeability_data to verify it correctly processes ufloat input
+    permeability values with uncertainties, extracting nominal values for
+    fitting and returning valid numpy arrays.
+    """
     temps = [773, 873, 973]
     perms = [ufloat(1e-10, 1e-11), ufloat(5e-10, 5e-11), ufloat(2e-9, 2e-10)]
     fit_x, fit_y = fit_permeability_data(temps, perms)
@@ -627,7 +795,11 @@ def test_fit_handles_ufloat_inputs():
 
 
 def test_fit_handles_float_inputs():
-    """Test: Regular float inputs. Expect: Returns valid arrays."""
+    """
+    Test fit_permeability_data to confirm it accepts regular float permeability
+    values (without uncertainties) and returns valid numpy arrays for the
+    Arrhenius fit.
+    """
     temps = [773, 873, 973]
     perms = [1e-10, 5e-10, 2e-9]
     fit_x, fit_y = fit_permeability_data(temps, perms)
@@ -635,7 +807,12 @@ def test_fit_handles_float_inputs():
 
 
 def test_fit_uses_weighted_least_squares():
-    """Test: Large uncertainty on middle point. Expect: Different fit."""
+    """
+    Test fit_permeability_data to verify it performs weighted least squares
+    fitting, where data points with large uncertainties (5e-10 uncertainty on
+    middle point) are weighted less than points with small uncertainties (1e-11),
+    resulting in noticeably different fit curves (>1% relative difference).
+    """
     temps = [773, 873, 973]
     perms_equal = [ufloat(1e-10, 1e-11), ufloat(5e-10, 1e-11), ufloat(2e-9, 1e-11)]
     # Give middle point huge uncertainty so it's weighted less
@@ -648,7 +825,11 @@ def test_fit_uses_weighted_least_squares():
 
 
 def test_fit_arrhenius_increases_with_temperature():
-    """Test: Increasing temps. Expect: fit_y decreases as fit_x increases."""
+    """
+    Test fit_permeability_data to ensure the Arrhenius fit shows permeability
+    decreasing as temperature decreases, with higher permeability at the start
+    of fit_y (high temperature) than at the end (low temperature).
+    """
     temps = [773, 873, 973]
     perms = [ufloat(1e-10, 1e-11), ufloat(5e-10, 5e-11), ufloat(2e-9, 2e-10)]
     fit_x, fit_y = fit_permeability_data(temps, perms)
@@ -658,7 +839,11 @@ def test_fit_arrhenius_increases_with_temperature():
 
 
 def test_fit_x_is_monotonic():
-    """Test: Standard inputs. Expect: fit_x is monotonically increasing."""
+    """
+    Test fit_permeability_data to confirm that fit_x (1000/T) values are
+    monotonically increasing from 1000/973 to 1000/773, ensuring a proper
+    Arrhenius plot x-axis.
+    """
     temps = [773, 873, 973]
     perms = [ufloat(1e-10, 1e-11), ufloat(5e-10, 5e-11), ufloat(2e-9, 2e-10)]
     fit_x, fit_y = fit_permeability_data(temps, perms)
@@ -666,7 +851,11 @@ def test_fit_x_is_monotonic():
 
 
 def test_fit_handles_numpy_array_inputs():
-    """Test: numpy array inputs. Expect: Returns valid arrays."""
+    """
+    Test fit_permeability_data to verify it accepts numpy array inputs for
+    temperatures (instead of Python lists) and returns valid numpy arrays for
+    the Arrhenius fit curve.
+    """
     temps = np.array([773, 873, 973])
     perms = [ufloat(1e-10, 1e-11), ufloat(5e-10, 5e-11), ufloat(2e-9, 2e-10)]
     fit_x, fit_y = fit_permeability_data(temps, perms)
