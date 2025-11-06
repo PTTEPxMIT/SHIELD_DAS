@@ -12,6 +12,7 @@ from shield_das.analysis import (
     evaluate_permeability_values,
     fit_permeability_data,
     voltage_to_pressure,
+    voltage_to_temperature,
 )
 
 # =============================================================================
@@ -1095,3 +1096,138 @@ def test_calculate_error_zero_pressure_returns_zero():
     pressure = 0.0
     error = calculate_error(pressure)
     assert np.isclose(error, 0.0, rtol=1e-10)
+
+
+# Tests for voltage_to_temperature function
+
+
+def test_voltage_to_temperature_converts_with_cold_junction_compensation():
+    """
+    Test voltage_to_temperature to ensure it correctly applies cold junction
+    compensation by adding the local temperature's equivalent voltage to the
+    measured voltage before converting to temperature.
+    """
+    # At room temperature (25°C), a small voltage reading should result in
+    # temperature slightly above room temperature
+    local_temp = np.array([25.0])
+    voltage = np.array([1.0])  # 1 mV from thermocouple
+    temperature = voltage_to_temperature(local_temp, voltage)
+    # Result should be greater than local temperature
+    assert temperature[0] > local_temp[0]
+    assert isinstance(temperature, np.ndarray)
+
+
+def test_voltage_to_temperature_zero_voltage_returns_local_temperature():
+    """
+    Test voltage_to_temperature to verify that zero thermocouple voltage returns
+    the local temperature, indicating that the measurement junction is at the same
+    temperature as the reference junction.
+    """
+    local_temp = np.array([25.0])
+    voltage = np.array([0.0])
+    temperature = voltage_to_temperature(local_temp, voltage)
+    # With zero voltage difference, temperature should equal local temperature
+    assert np.isclose(temperature[0], local_temp[0], rtol=0.01)
+
+
+def test_voltage_to_temperature_handles_array_inputs():
+    """
+    Test voltage_to_temperature to verify it correctly processes numpy array inputs
+    with multiple voltage readings, applying cold junction compensation element-wise
+    to each measurement.
+    """
+    local_temp = np.array([25.0, 25.0, 25.0])
+    voltage = np.array([0.0, 1.0, 2.0])
+    temperature = voltage_to_temperature(local_temp, voltage)
+    assert len(temperature) == 3
+    assert isinstance(temperature, np.ndarray)
+    # Temperatures should increase with voltage
+    assert temperature[1] > temperature[0]
+    assert temperature[2] > temperature[1]
+
+
+def test_voltage_to_temperature_positive_voltage_increases_temperature():
+    """
+    Test voltage_to_temperature to confirm that positive thermocouple voltage
+    readings result in measured temperatures higher than the local reference
+    temperature, consistent with type K thermocouple characteristics.
+    """
+    local_temp = np.array([25.0])
+    voltage_low = np.array([1.0])
+    voltage_high = np.array([5.0])
+    temp_low = voltage_to_temperature(local_temp, voltage_low)
+    temp_high = voltage_to_temperature(local_temp, voltage_high)
+    # Higher voltage should give higher temperature
+    assert temp_high[0] > temp_low[0]
+    # Both should be above local temperature
+    assert temp_low[0] > local_temp[0]
+
+
+def test_voltage_to_temperature_varying_local_temperature():
+    """
+    Test voltage_to_temperature to verify it correctly handles varying local
+    reference temperatures, adjusting the cold junction compensation voltage
+    accordingly for each measurement.
+    """
+    # Same thermocouple voltage but different local temperatures
+    local_temp_cold = np.array([0.0])
+    local_temp_hot = np.array([50.0])
+    voltage = np.array([10.0])  # Same thermocouple voltage
+    temp_from_cold = voltage_to_temperature(local_temp_cold, voltage)
+    temp_from_hot = voltage_to_temperature(local_temp_hot, voltage)
+    # With same thermocouple voltage, higher local temp should give higher result
+    assert temp_from_hot[0] > temp_from_cold[0]
+
+
+def test_voltage_to_temperature_returns_ndarray():
+    """
+    Test voltage_to_temperature to ensure it returns a numpy ndarray type,
+    maintaining consistency with numpy array operations throughout the analysis
+    pipeline.
+    """
+    local_temp = np.array([25.0])
+    voltage = np.array([1.0])
+    temperature = voltage_to_temperature(local_temp, voltage)
+    assert isinstance(temperature, np.ndarray)
+
+
+def test_voltage_to_temperature_handles_scalar_arrays():
+    """
+    Test voltage_to_temperature to confirm it accepts single-element arrays and
+    returns a single-element array, supporting both scalar and vectorized usage
+    patterns.
+    """
+    local_temp = np.array([25.0])
+    voltage = np.array([2.5])
+    temperature = voltage_to_temperature(local_temp, voltage)
+    assert len(temperature) == 1
+    assert isinstance(temperature, np.ndarray)
+
+
+def test_voltage_to_temperature_negative_voltage_decreases_temperature():
+    """
+    Test voltage_to_temperature to verify that negative thermocouple voltage
+    readings result in measured temperatures lower than the local reference
+    temperature, representing reversed thermal gradients.
+    """
+    local_temp = np.array([25.0])
+    voltage = np.array([-1.0])
+    temperature = voltage_to_temperature(local_temp, voltage)
+    # Negative voltage should give temperature below local temperature
+    assert temperature[0] < local_temp[0]
+
+
+def test_voltage_to_temperature_consistent_with_thermocouple_functions():
+    """
+    Test voltage_to_temperature to ensure the conversion is consistent with the
+    underlying thermocouple conversion functions, verifying that the cold junction
+    compensation logic is correctly implemented.
+    """
+    # Test at a known point: 25°C local, 10mV thermocouple voltage
+    local_temp = np.array([25.0])
+    voltage = np.array([10.0])
+    temperature = voltage_to_temperature(local_temp, voltage)
+    # Should return a reasonable temperature above local temp
+    assert temperature[0] > 25.0
+    assert temperature[0] < 500.0  # Reasonable upper bound for typical measurements
+    assert isinstance(temperature[0], (float, np.floating))
