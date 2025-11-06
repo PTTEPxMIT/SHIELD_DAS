@@ -442,7 +442,7 @@ class DataPlotter:
             col_name = f"{tname}_Voltage_mV"
             volt_vals = np.array(data[col_name], dtype=float)
             thermocouple_data = voltage_to_temperature(
-                local_temperature_data=local_temperature_data, voltage=volt_vals
+                local_temperature=local_temperature_data, voltage=volt_vals
             )
 
         return (
