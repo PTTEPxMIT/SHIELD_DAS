@@ -595,7 +595,7 @@ class TestDataPlotterIntegration:
         # Read metadata to verify structure
         with open(metadata_path) as f:
             metadata = json.load(f)
-            assert metadata["version"] == "1.2"
+            assert metadata["version"] == "1.3"
             assert "gauges" in metadata
             assert len(metadata["gauges"]) == 2
 
