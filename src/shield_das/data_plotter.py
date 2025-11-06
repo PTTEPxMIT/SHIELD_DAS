@@ -492,6 +492,10 @@ class DataPlotter:
                     valve_dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
                     valve_times[key] = (valve_dt - start_time).total_seconds()
 
+        # get sample material and thickness
+        sample_material = run_info.get("sample_material", "Unknown")
+        sample_thickness = run_info.get("sample_thickness", 0.00088)
+
         dataset = {
             "name": dataset_name,
             "colour": dataset_color,
@@ -502,6 +506,8 @@ class DataPlotter:
             "downstream_data": downstream_data,
             "valve_times": valve_times,
             "temperature": furnace_set_point_K,
+            "sample_material": sample_material,
+            "sample_thickness": sample_thickness,
         }
 
         # Add the folder dataset to our list

@@ -132,7 +132,6 @@ def evaluate_permeability_values(datasets):
     temps, perms = [], []
     SAMPLE_DIAMETER = 0.0155  # meters
     SAMPLE_AREA = np.pi * (SAMPLE_DIAMETER / 2) ** 2
-    SAMPLE_THICKNESS = 0.00088  # meters
     CHAMBER_VOLUME = 7.9e-5  # m³
 
     for dataset in datasets.values():
@@ -140,6 +139,8 @@ def evaluate_permeability_values(datasets):
         time = dataset["time_data"]
         p_up = dataset["upstream_data"]["pressure_data"]
         p_down = dataset["downstream_data"]["pressure_data"]
+
+        SAMPLE_THICKNESS = dataset.get("sample_thickness", 0.00088)  # meters
 
         # Calculate permeability with uncertainty propagation
         p_avg_up = average_pressure_after_increase(time, p_up)
