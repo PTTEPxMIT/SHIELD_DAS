@@ -10,14 +10,21 @@ def average_pressure_after_increase(
     slope_threshold: float = 1e-3,
 ) -> float:
     """
-    Detect when pressure stabilizes after a sudden increase and return the average
+    Detect when pressure stabilises after a sudden increase and return the average
     stable pressure value.
 
-    This function analyzes pressure vs time data to identify when the pressure has
-    stabilised after an initial transient increase. It uses a moving window to smooth
-    the pressure slope and identifies the point where the slope falls below a threshold
-    (after an initial 5-second settling period). The average pressure from that point
-    onward is returned.
+    This function analyses pressure vs time data to identify when the pressure has
+    stabilised after an initial transient increase. The algorithm:
+
+    1. Calculates instantaneous pressure slopes using numpy gradient
+    2. Applies moving average smoothing (convolution with uniform kernel) to reduce
+       noise in slope calculations
+    3. Identifies stable regions where absolute slope falls below threshold AND
+       time is after initial 5-second settling period
+    4. Returns average pressure from the first stable point onwards
+
+    If no stable region is detected, the function falls back to averaging the second
+    half of the data.
 
     Args:
         time: Time data in seconds.
@@ -27,8 +34,7 @@ def average_pressure_after_increase(
             to 1e-3 torr/s.
 
     Returns:
-        Average pressure in torr after the system has stabilised. If no stable region is
-            detected, returns the average of the second half of the data.
+        Average pressure in torr after the system has stabilised.
 
     Example:
 
@@ -86,11 +92,14 @@ def calculate_flux_from_sample(t_data: ArrayLike, P_data: ArrayLike) -> float:
     the gauge. The slope of this fit represents the flux of hydrogen permeating
     through the sample.
 
-    The function applies:
+    The algorithm applies:
 
-    - Pressure filtering to remove unreliable gauge readings (<0.05 or >0.95 torr)
-    - Exponential weighting to emphasise later data points (more stable regime)
-    - Weighted linear least squares fitting
+    1. Pressure filtering to remove unreliable gauge readings outside the range
+       0.05-0.95 torr (gauge extremes where readings are less accurate)
+    2. Exponential weighting that emphasises later data points, ranging from
+       exp(-1) ≈ 0.37 at start to exp(0) = 1.0 at end (more stable regime)
+    3. Weighted linear least squares polynomial fitting (degree 1) using numpy
+       polyfit to obtain the flux slope
 
     Args:
         t_data: Time data in seconds.
@@ -161,11 +170,27 @@ def calculate_permeability_from_flux(
 
     This function implements the Takaishi-Sensui correction for hydrogen permeation
     measurements, accounting for tube conductance effects and properly propagating
-    measurement uncertainties through all calculations.
+    measurement uncertainties through all calculations using the uncertainties package.
 
     The method is based on Takaishi & Sensui (1963): "Thermal Transpiration Effect
     of Hydrogen, Rare Gases and Methane", Trans. Faraday Soc., 59, 2503-2514,
     DOI: 10.1039/tf9635902503
+
+    The algorithm:
+
+    1. Defines physical constants (conversion factors, gas constant, Avogadro number)
+    2. Creates volume parameters with uncertainties (12% volume uncertainty, 10%
+       heated/ambient volume split uncertainty)
+    3. Splits total volume into heated section (at sample temperature) and ambient
+       section (at 300 K room temperature)
+    4. Applies Takaishi-Sensui empirical constants for hydrogen tube conductance
+       corrections (accounts for thermal transpiration and molecular flow effects)
+    5. Calculates conductance correction factors for non-ideal flow through
+       connecting tubes
+    6. Computes molar flow rate with corrections for both heated and ambient sections
+    7. Converts to hydrogen atomic flux (atoms/(m²·s)) using Avogadro's number
+    8. Calculates final permeability using Sieverts' law (depends on sqrt of
+       upstream pressure)
 
     Args:
         slope_torr_per_s: Rate of downstream pressure rise in torr/s (flux).
@@ -203,8 +228,9 @@ def calculate_permeability_from_flux(
 
     Note:
         Volume uncertainty is assumed to be 12% based on measurement precision. Volume
-        ratio (V1/V_total) has 10% uncertainty for heated/ambient volume split. All
-        uncertainties are propagated using the uncertainties package.
+        ratio (heated/ambient split) has 10% uncertainty. The heated section represents
+        35% of total volume. All uncertainties are rigorously propagated through the
+        calculation using the uncertainties package.
 
     """
     # Physical constants
@@ -329,6 +355,25 @@ def evaluate_permeability_values(
     temperature, and performs weighted averaging for runs at the same temperature.
     All uncertainties are rigorously propagated through the calculations.
 
+    The algorithm:
+
+    1. Defines experimental apparatus constants (sample diameter 0.0155 m, chamber
+       volume 7.9e-5 m³, default thickness 0.00088 m)
+    2. Processes each experimental run by:
+       - Extracting temperature, time, upstream/downstream pressure data
+       - Calculating stable upstream pressure using moving average stability detection
+       - Calculating flux from downstream pressure rise using weighted linear fitting
+       - Computing permeability with full Takaishi-Sensui corrections and uncertainty
+         propagation
+    3. Groups measurements by temperature into a defaultdict
+    4. For each unique temperature:
+       - Single measurements: uses uncertainty directly
+       - Multiple measurements: performs inverse-variance weighted averaging
+         (w = 1/sigma²) and calculates combined uncertainty as standard error
+         of weighted mean
+    5. Prepares Arrhenius plot data (x = 1000/T, y = permeability) sorted by
+       ascending temperature
+
     Args:
         datasets: Dictionary of experimental datasets where each key is a run
             identifier and each value is a dict containing 'temperature' (float, K),
@@ -338,11 +383,12 @@ def evaluate_permeability_values(
             0.00088 m).
 
     Returns:
-        A tuple of six elements: temps (list of all temperatures in K), perms (list
-            of ufloat permeabilities in mol/(m·s·Pa^0.5)), x_error (NDArray of
-            1000/T values for unique temperatures), y_error (NDArray of nominal
-            permeability values), error_lower (list of lower error bars), error_upper
-            (list of upper error bars).
+        A tuple of six elements: all_temperatures (list of all input temperatures in
+            K), all_permeabilities (list of ufloat permeabilities for each run in
+            mol/(m·s·Pa^0.5)), inverse_temperature_values (NDArray of 1000/T for unique
+            temperatures), nominal_permeability_values (NDArray of averaged
+            permeabilities), lower_error_bars (list of lower error magnitudes),
+            upper_error_bars (list of upper error magnitudes).
 
     Example:
 
@@ -371,10 +417,9 @@ def evaluate_permeability_values(
         Permeability: 1.23e-10 ± 5.67e-12
 
     Note:
-        Multiple runs at the same temperature are combined using weighted averaging
-        (weighted by inverse variance). Default sample diameter is 0.0155 m and
-        default chamber volume is 7.9e-5 m³. Results are sorted by temperature
-        (ascending) for x_error, y_error, and error arrays.
+        Multiple runs at the same temperature are combined using inverse-variance
+        weighted averaging. Measurements with zero uncertainty receive a small weight
+        (1e-10) to avoid division by zero. Results are sorted by ascending temperature.
 
     """
     # Experimental apparatus constants
@@ -514,14 +559,30 @@ def fit_permeability_data(
 
     In log space: log10(Perm) = m * (1000/T) + c
 
+    The algorithm:
+
+    1. Converts temperature input to numpy array
+    2. Extracts nominal values and standard deviations from ufloat permeabilities
+       (or creates zero uncertainties for regular floats)
+    3. Transforms to log10 space for linear fitting
+    4. Propagates uncertainties through log10 transformation using derivative
+       d(log10(x))/dx = 1/(x * ln(10)), so sigma_log10(x) = sigma_x / (x * ln(10))
+    5. Calculates inverse-uncertainty weights (w = 1/sigma) with unit weight (1.0)
+       fallback for points with zero or invalid uncertainties
+    6. Performs weighted polynomial fit (degree 1, linear) in 1000/T space using
+       numpy polyfit
+    7. Generates 100 evenly spaced x-values and transforms fit back from log space
+       using 10^(m*x + c)
+
     Args:
         temps: Temperature values in Kelvin.
         perms: Permeability values (ufloat objects with uncertainties or regular
             floats), in mol/(m·s·Pa^0.5).
 
     Returns:
-        A tuple of fit_x (NDArray of 100 inverse temperature values, 1000/T) and
-            fit_y (NDArray of 100 fitted permeability values for plotting).
+        A tuple of fit_x_values (NDArray of 100 inverse temperature values, 1000/T
+            spanning input range) and fit_y_values (NDArray of 100 fitted permeability
+            values for smooth plotting).
 
     Example:
 
@@ -547,10 +608,10 @@ def fit_permeability_data(
             plt.show()
 
     Note:
-        Weights are calculated as w = 1/sigma for each point. Points without
-        uncertainty (regular floats) receive uniform weight. Returns 100 evenly
-        spaced points for smooth plotting. Uncertainties are propagated through
-        log10 transformation.
+        Weights are calculated as w = 1/sigma for each point. Points with zero or
+        invalid uncertainties receive unit weight (1.0). Divide-by-zero warnings are
+        suppressed as they're handled by np.where. Returns 100 points for smooth
+        plotting.
 
     """
     # Convert temperature input to numpy array
