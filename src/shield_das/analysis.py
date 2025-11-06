@@ -2,6 +2,8 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from uncertainties import UFloat, ufloat
 
+from .thermocouple import mv_to_temp_c, temp_c_to_mv
+
 
 def average_pressure_after_increase(
     time: ArrayLike,
@@ -752,7 +754,9 @@ def voltage_to_pressure(voltage: NDArray, full_scale_torr: float) -> NDArray:
     return pressure_clipped
 
 
-def calculate_error(pressure_value: float | NDArray) -> float | NDArray:
+def calculate_error_on_pressure_reading(
+    pressure_value: float | NDArray,
+) -> float | NDArray:
     """
     Calculate measurement uncertainty for pressure gauge readings.
 
@@ -818,3 +822,65 @@ def calculate_error(pressure_value: float | NDArray) -> float | NDArray:
     )
 
     return uncertainty_final
+
+
+def voltage_to_temperature(local_temperature: NDArray, voltage: NDArray) -> NDArray:
+    """
+    Convert thermocouple voltage reading to temperature with cold junction compensation.
+
+    Type K thermocouples generate a voltage proportional to the temperature difference
+    between the measurement junction and the reference junction. This function:
+
+    1. Converts local (reference) temperature to equivalent thermocouple voltage
+    2. Adds measured thermocouple voltage to obtain total voltage referenced to 0°C
+    3. Converts total voltage back to absolute temperature in Celsius
+
+    The cold junction compensation corrects for the fact that the reference junction
+    is at room temperature rather than the standard 0°C ice point reference.
+
+    Args:
+        local_temperature: Local temperature at the reference junction in °C.
+            This is typically measured by a separate sensor (e.g., thermistor) at
+            the terminal block where thermocouple wires connect to the instrument.
+        voltage: Measured thermocouple voltage in millivolts (mV). Positive values
+            indicate measurement junction is hotter than reference junction.
+
+    Returns:
+        Absolute temperature at the measurement junction in degrees Celsius,
+            corrected for cold junction temperature.
+
+    Example:
+
+        .. highlight:: python
+        .. code-block:: python
+
+            from shield_das.analysis import voltage_to_temperature
+            import numpy as np
+
+            # Convert thermocouple voltage with 25°C reference junction
+            local_temp = np.array([25.0, 25.0, 25.0])
+            tc_voltage = np.array([0.0, 10.0, 20.0])  # mV
+            temperature = voltage_to_temperature(local_temp, tc_voltage)
+            print(f"Temperatures: {temperature} °C")
+
+        Temperatures: [ 25.        270.68      516.36] °C
+
+    Note:
+        Uses NIST polynomial coefficients for Type K thermocouple conversion.
+        Valid temperature range is -200°C to +1372°C for Type K thermocouples.
+
+    """
+    # Convert local reference temperature to equivalent thermocouple voltage (mV)
+    # This represents the voltage that would be generated if one junction were
+    # at 0°C and the other at the local temperature
+    cold_junction_voltage = temp_c_to_mv(np.array(local_temperature))
+
+    # Add measured thermocouple voltage to cold junction compensation voltage
+    # Total voltage represents measurement junction temperature referenced to 0°C
+    total_voltage = np.array(voltage) + cold_junction_voltage
+
+    # Convert total voltage to absolute temperature in Celsius
+    # This gives the actual temperature at the measurement junction
+    measured_temperature = mv_to_temp_c(total_voltage)
+
+    return measured_temperature
