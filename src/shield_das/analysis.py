@@ -46,18 +46,35 @@ def average_pressure_after_increase(
         Stable pressure: 100.00 torr
 
     """
-    time = np.asarray(time)
-    pressure = np.asarray(pressure)
+    # Convert inputs to numpy arrays for consistent array operations
+    time_array = np.asarray(time)
+    pressure_array = np.asarray(pressure)
 
-    # Smooth slope estimation
-    slopes = np.gradient(pressure, time)
-    smooth_slopes = np.convolve(slopes, np.ones(window) / window, mode="same")
+    # Calculate instantaneous pressure slopes using gradient
+    pressure_slopes = np.gradient(pressure_array, time_array)
 
-    # Find settled point: first time slope is flat after initial 5 seconds
-    settled_mask = (np.abs(smooth_slopes) < slope_threshold) & (time > time.min() + 5)
-    settled_index = np.argmax(settled_mask) if settled_mask.any() else len(time) // 2
+    # Apply moving average smoothing to reduce noise in slope calculation
+    # Creates a uniform kernel of size 'window' for convolution
+    smoothing_kernel = np.ones(window) / window
+    smoothed_slopes = np.convolve(pressure_slopes, smoothing_kernel, mode="same")
 
-    return float(np.mean(pressure[settled_index:]))
+    # Identify where pressure has stabilised:
+    # 1. Absolute slope must be below threshold (nearly flat)
+    # 2. Time must be after initial 5-second settling period
+    is_stable = np.abs(smoothed_slopes) < slope_threshold
+    after_settling_period = time_array > time_array.min() + 5
+    stability_mask = is_stable & after_settling_period
+
+    # Find first index where conditions are met, or use midpoint as fallback
+    if stability_mask.any():
+        stable_region_start = np.argmax(stability_mask)
+    else:
+        # No stable region found, use second half of data
+        stable_region_start = len(time_array) // 2
+
+    # Calculate and return average pressure from stable region onwards
+    stable_pressure_values = pressure_array[stable_region_start:]
+    return float(np.mean(stable_pressure_values))
 
 
 def calculate_flux_from_sample(t_data: ArrayLike, P_data: ArrayLike) -> float:
@@ -98,19 +115,35 @@ def calculate_flux_from_sample(t_data: ArrayLike, P_data: ArrayLike) -> float:
         Flux: 0.0100 torr/s
 
     """
-    x, y = np.asarray(t_data), np.asarray(P_data)
+    # Convert inputs to numpy arrays for consistent array operations
+    time_values = np.asarray(t_data)
+    pressure_values = np.asarray(P_data)
 
-    # Filter to reliable gauge range
-    valid = (y >= 0.05) & (y <= 0.95)
-    x, y = x[valid], y[valid]
+    # Define reliable pressure gauge range (avoid low/high extremes)
+    MINIMUM_RELIABLE_PRESSURE = 0.05  # torr
+    MAXIMUM_RELIABLE_PRESSURE = 0.95  # torr
 
-    # Create weights that emphasize later points (exponential weighting)
-    weights = np.exp(np.linspace(-1, 0, len(x)))
+    # Filter data to only include reliable gauge measurements
+    is_within_reliable_range = (pressure_values >= MINIMUM_RELIABLE_PRESSURE) & (
+        pressure_values <= MAXIMUM_RELIABLE_PRESSURE
+    )
+    filtered_time = time_values[is_within_reliable_range]
+    filtered_pressure = pressure_values[is_within_reliable_range]
 
-    # Weighted linear fit
-    slope, _ = np.polyfit(x, y, 1, w=weights)
+    # Create exponential weights favouring later measurements (more stable regime)
+    # Weights range from exp(-1) ≈ 0.37 at start to exp(0) = 1.0 at end
+    num_points = len(filtered_time)
+    weight_exponents = np.linspace(-1, 0, num_points)
+    exponential_weights = np.exp(weight_exponents)
 
-    return float(slope)
+    # Perform weighted linear least squares fit to get flux (slope)
+    polynomial_degree = 1  # Linear fit
+    fit_coefficients = np.polyfit(
+        filtered_time, filtered_pressure, polynomial_degree, w=exponential_weights
+    )
+    flux_slope = fit_coefficients[0]  # First coefficient is slope
+
+    return float(flux_slope)
 
 
 def calculate_permeability_from_flux(
@@ -174,60 +207,114 @@ def calculate_permeability_from_flux(
         uncertainties are propagated using the uncertainties package.
 
     """
+    # Physical constants
+    TORR_TO_PASCAL_CONVERSION = 133.3
+    GAS_CONSTANT = 8.314  # J/(mol·K), universal gas constant
+    AVOGADRO_NUMBER = 6.022e23  # molecules/mol
 
-    TORR_TO_PA = 133.3
-    R = 8.314  # J/(mol·K)
-    N_A = 6.022e23  # Avogadro's number
+    # Volume parameters with uncertainty propagation
+    VOLUME_UNCERTAINTY_FRACTION = 0.12  # 12% measurement uncertainty
+    volume_with_uncertainty = ufloat(V_m3, V_m3 * VOLUME_UNCERTAINTY_FRACTION)
 
-    # Define parameters with uncertainties (matching mwe.py approach)
-    # Volume uncertainty: ~12% based on measurement precision
-    V_with_unc = ufloat(V_m3, V_m3 * 0.12)
+    # Split volume into heated (V1) and ambient (V2) sections
+    HEATED_VOLUME_FRACTION = 0.35  # 35% of total volume is heated
+    FRACTION_UNCERTAINTY = 0.1  # 10% uncertainty in volume split
+    heated_volume_ratio = ufloat(HEATED_VOLUME_FRACTION, FRACTION_UNCERTAINTY)
 
-    # Volume ratio uncertainty: uncertainty in heated vs ambient volume split
-    V1_ratio = ufloat(0.35, 0.1)
+    volume_heated_section = volume_with_uncertainty * heated_volume_ratio
+    volume_ambient_section = volume_with_uncertainty * (1 - heated_volume_ratio)
 
-    V1 = V_with_unc * V1_ratio
-    V2 = V_with_unc * (1 - V1_ratio)
-    T1 = T_K
-    T2 = 300  # ambient temperature in Kelvin
+    # Temperature definitions
+    temperature_heated_section = T_K  # Sample temperature
+    AMBIENT_TEMPERATURE = 300  # Kelvin, room temperature
 
-    # Takaishi-Sensui constants
-    A = 1.24 * 56.3 / 10e-5
-    B = 8 * 7.7 / 10e-2
-    C = 10.6 * 2.73
-    d = 0.0155  # diameter of pipe
+    # Takaishi-Sensui empirical constants for hydrogen in tube conductance
+    # These account for thermal transpiration and molecular flow effects
+    CONSTANT_A = 1.24 * 56.3 / 10e-5
+    CONSTANT_B = 8 * 7.7 / 10e-2
+    CONSTANT_C = 10.6 * 2.73
+    TUBE_DIAMETER = 0.0155  # metres, connecting tube diameter
 
-    P2dot = slope_torr_per_s * TORR_TO_PA
+    # Convert flux from torr/s to Pa/s
+    pressure_rise_rate_pascals = slope_torr_per_s * TORR_TO_PASCAL_CONVERSION
 
-    # Use final downstream pressure (assuming P_down_torr is array-like)
+    # Extract final downstream pressure value (if array provided)
     if hasattr(P_down_torr, "__len__"):
-        P2 = P_down_torr[-1] * TORR_TO_PA
+        # Array-like input: use final pressure value
+        downstream_pressure_pascals = P_down_torr[-1] * TORR_TO_PASCAL_CONVERSION
     else:
-        P2 = P_down_torr * TORR_TO_PA
+        # Scalar input: use directly
+        downstream_pressure_pascals = P_down_torr * TORR_TO_PASCAL_CONVERSION
 
-    # --- helper quantities ---
-    num2 = C * (d * P2) ** 0.5 + (T2 / T1) ** 0.5 + A * d**2 * P2**2 + B * d * P2
-    den3 = C * (d * P2) ** 0.5 + A * d**2 * P2**2 + B * d * P2 + 1
-
-    num1 = (
-        B * d * P2dot
-        + (C * d * P2dot) / (2 * (d * P2) ** 0.5)
-        + 2 * A * d**2 * P2 * P2dot
+    # Takaishi-Sensui correction factors for tube conductance
+    # These correct for non-ideal flow through connecting tubes
+    conductance_numerator_2 = (
+        CONSTANT_C * (TUBE_DIAMETER * downstream_pressure_pascals) ** 0.5
+        + (AMBIENT_TEMPERATURE / temperature_heated_section) ** 0.5
+        + CONSTANT_A * TUBE_DIAMETER**2 * downstream_pressure_pascals**2
+        + CONSTANT_B * TUBE_DIAMETER * downstream_pressure_pascals
     )
 
-    # --- assemble dn/dt with uncertainty propagation ---
-    n_dot = (
-        (V2 * P2dot) / (R * T2)
-        + (V1 * P2dot) / (R * T1 * num2)
-        + (V1 * P2 * num1) / (R * T1 * num2 * den3)
-        - (V1 * P2 * num1) / (R * T1 * num2**2)
+    conductance_denominator_3 = (
+        CONSTANT_C * (TUBE_DIAMETER * downstream_pressure_pascals) ** 0.5
+        + CONSTANT_A * TUBE_DIAMETER**2 * downstream_pressure_pascals**2
+        + CONSTANT_B * TUBE_DIAMETER * downstream_pressure_pascals
+        + 1
     )
 
-    J_TS = n_dot / A_m2 * N_A  # H/(m^2*s)
+    conductance_numerator_1 = (
+        CONSTANT_B * TUBE_DIAMETER * pressure_rise_rate_pascals
+        + (CONSTANT_C * TUBE_DIAMETER * pressure_rise_rate_pascals)
+        / (2 * (TUBE_DIAMETER * downstream_pressure_pascals) ** 0.5)
+        + 2
+        * CONSTANT_A
+        * TUBE_DIAMETER**2
+        * downstream_pressure_pascals
+        * pressure_rise_rate_pascals
+    )
 
-    Perm_TS = J_TS * e_m / (P_up_torr * TORR_TO_PA) ** 0.5
+    # Calculate molar flow rate (dn/dt) with Takaishi-Sensui corrections
+    # This accounts for gas flow through both heated and ambient sections
+    molar_flow_rate = (
+        # Contribution from ambient volume section
+        (volume_ambient_section * pressure_rise_rate_pascals)
+        / (GAS_CONSTANT * AMBIENT_TEMPERATURE)
+        # Contribution from heated volume (without correction)
+        + (volume_heated_section * pressure_rise_rate_pascals)
+        / (GAS_CONSTANT * temperature_heated_section * conductance_numerator_2)
+        # Conductance correction term (positive)
+        + (
+            volume_heated_section
+            * downstream_pressure_pascals
+            * conductance_numerator_1
+        )
+        / (
+            GAS_CONSTANT
+            * temperature_heated_section
+            * conductance_numerator_2
+            * conductance_denominator_3
+        )
+        # Conductance correction term (negative)
+        - (
+            volume_heated_section
+            * downstream_pressure_pascals
+            * conductance_numerator_1
+        )
+        / (GAS_CONSTANT * temperature_heated_section * conductance_numerator_2**2)
+    )
 
-    return Perm_TS
+    # Convert molar flow rate to hydrogen atomic flux
+    # Multiply by Avogadro's number and divide by area
+    hydrogen_flux = molar_flow_rate / A_m2 * AVOGADRO_NUMBER  # H atoms/(m²·s)
+
+    # Calculate permeability using Sieverts' law (depends on sqrt(P))
+    # Permeability = (flux * thickness) / sqrt(upstream pressure)
+    upstream_pressure_pascals = P_up_torr * TORR_TO_PASCAL_CONVERSION
+    permeability_takaishi_sensui = (
+        hydrogen_flux * e_m / (upstream_pressure_pascals) ** 0.5
+    )
+
+    return permeability_takaishi_sensui
 
 
 def evaluate_permeability_values(
@@ -290,90 +377,127 @@ def evaluate_permeability_values(
         (ascending) for x_error, y_error, and error arrays.
 
     """
-    # Calculate and plot permeability for each dataset
-    temps, perms = [], []
-    SAMPLE_DIAMETER = 0.0155  # meters
-    SAMPLE_AREA = np.pi * (SAMPLE_DIAMETER / 2) ** 2
-    CHAMBER_VOLUME = 7.9e-5  # m³
+    # Experimental apparatus constants
+    SAMPLE_DIAMETER_METRES = 0.0155
+    SAMPLE_AREA_M2 = np.pi * (SAMPLE_DIAMETER_METRES / 2) ** 2
+    CHAMBER_VOLUME_M3 = 7.9e-5
+    DEFAULT_SAMPLE_THICKNESS_METRES = 0.00088
 
-    for dataset in datasets.values():
-        temp = dataset["temperature"]
-        time = dataset["time_data"]
-        p_up = dataset["upstream_data"]["pressure_data"]
-        p_down = dataset["downstream_data"]["pressure_data"]
+    # Initialize lists to store results from each dataset
+    all_temperatures = []
+    all_permeabilities = []
 
-        SAMPLE_THICKNESS = dataset.get("sample_thickness", 0.00088)  # meters
+    # Process each experimental run
+    for run_name, dataset in datasets.items():
+        # Extract data from dataset dictionary
+        temperature_kelvin = dataset["temperature"]
+        time_data_seconds = dataset["time_data"]
+        upstream_pressure_torr = dataset["upstream_data"]["pressure_data"]
+        downstream_pressure_torr = dataset["downstream_data"]["pressure_data"]
 
-        # Calculate permeability with uncertainty propagation
-        p_avg_up = average_pressure_after_increase(time, p_up)
-        flux = calculate_flux_from_sample(time, p_down)
-
-        # This now returns a ufloat with uncertainty
-        perm = calculate_permeability_from_flux(
-            flux,
-            CHAMBER_VOLUME,
-            temp,
-            SAMPLE_AREA,
-            SAMPLE_THICKNESS,
-            p_down,
-            p_avg_up,
+        # Get sample thickness (use default if not specified)
+        sample_thickness_metres = dataset.get(
+            "sample_thickness", DEFAULT_SAMPLE_THICKNESS_METRES
         )
 
-        temps.append(temp)
-        perms.append(perm)
+        # Calculate stable upstream pressure after initial transient
+        average_upstream_pressure = average_pressure_after_increase(
+            time_data_seconds, upstream_pressure_torr
+        )
 
-    # Group data by temperature to combine measurements
+        # Calculate flux from downstream pressure rise
+        flux_torr_per_second = calculate_flux_from_sample(
+            time_data_seconds, downstream_pressure_torr
+        )
+
+        # Calculate permeability with full uncertainty propagation
+        permeability_with_uncertainty = calculate_permeability_from_flux(
+            flux_torr_per_second,
+            CHAMBER_VOLUME_M3,
+            temperature_kelvin,
+            SAMPLE_AREA_M2,
+            sample_thickness_metres,
+            downstream_pressure_torr,
+            average_upstream_pressure,
+        )
+
+        all_temperatures.append(temperature_kelvin)
+        all_permeabilities.append(permeability_with_uncertainty)
+
+    # Group measurements by temperature for weighted averaging
     from collections import defaultdict
 
-    temp_groups = defaultdict(list)
-    for temp, perm in zip(temps, perms):
-        temp_groups[temp].append(perm)
+    temperature_grouped_perms = defaultdict(list)
+    for temp, perm in zip(all_temperatures, all_permeabilities):
+        temperature_grouped_perms[temp].append(perm)
 
-    # Calculate weighted average and combined uncertainties for each temperature
-    unique_temps = []
-    avg_perms = []
-    error_lower = []
-    error_upper = []
+    # Calculate weighted averages for each unique temperature
+    unique_temperatures = []
+    averaged_permeabilities = []
+    lower_error_bars = []
+    upper_error_bars = []
 
-    for temp in sorted(temp_groups.keys()):
-        perm_values = temp_groups[temp]
+    for temperature in sorted(temperature_grouped_perms.keys()):
+        permeability_measurements = temperature_grouped_perms[temperature]
 
-        if len(perm_values) == 1:
-            # Single measurement - use its uncertainty directly
-            avg_perm = perm_values[0]
+        if len(permeability_measurements) == 1:
+            # Single measurement: use its uncertainty directly
+            average_permeability = permeability_measurements[0]
         else:
-            # Multiple measurements - combine using weighted average
-            # Weight by inverse variance (1/sigma^2)
-            vals = np.array([p.n if hasattr(p, "n") else p for p in perm_values])
-            stds = np.array([p.s if hasattr(p, "s") else 0 for p in perm_values])
+            # Multiple measurements: perform weighted average
+            # Extract nominal values and standard deviations
+            nominal_values = np.array(
+                [p.n if hasattr(p, "n") else p for p in permeability_measurements]
+            )
+            standard_deviations = np.array(
+                [p.s if hasattr(p, "s") else 0 for p in permeability_measurements]
+            )
 
-            # Avoid division by zero - if std is 0, use small weight
-            weights = np.where(stds > 0, 1.0 / stds**2, 1e-10)
+            # Calculate inverse-variance weights (w = 1/sigma^2)
+            # Use small weight for measurements with zero uncertainty
+            SMALL_WEIGHT = 1e-10
+            variance_weights = np.where(
+                standard_deviations > 0, 1.0 / standard_deviations**2, SMALL_WEIGHT
+            )
 
-            # Weighted mean
-            mean_val = np.sum(weights * vals) / np.sum(weights)
+            # Compute weighted mean
+            weighted_mean_value = np.sum(variance_weights * nominal_values) / np.sum(
+                variance_weights
+            )
 
-            # Combined uncertainty (standard error of weighted mean)
-            mean_std = np.sqrt(1.0 / np.sum(weights))
+            # Compute combined uncertainty (standard error of weighted mean)
+            combined_uncertainty = np.sqrt(1.0 / np.sum(variance_weights))
 
-            avg_perm = ufloat(mean_val, mean_std)
+            average_permeability = ufloat(weighted_mean_value, combined_uncertainty)
 
-        unique_temps.append(temp)
-        avg_perms.append(avg_perm)
+        unique_temperatures.append(temperature)
+        averaged_permeabilities.append(average_permeability)
 
-        # Extract nominal value and uncertainty for error bars
-        if hasattr(avg_perm, "n"):
-            error_lower.append(avg_perm.s)  # symmetric error bars
-            error_upper.append(avg_perm.s)
+        # Extract error bar values for plotting
+        if hasattr(average_permeability, "n"):
+            # Symmetric error bars from standard deviation
+            error_magnitude = average_permeability.s
+            lower_error_bars.append(error_magnitude)
+            upper_error_bars.append(error_magnitude)
         else:
-            error_lower.append(0)
-            error_upper.append(0)
+            # No uncertainty available
+            lower_error_bars.append(0)
+            upper_error_bars.append(0)
 
-    # Convert to arrays for plotting
-    x_error = 1000 / np.array(unique_temps)
-    y_error = np.array([p.n if hasattr(p, "n") else p for p in avg_perms])
+    # Prepare data for Arrhenius plotting (x = 1000/T, y = permeability)
+    inverse_temperature_values = 1000 / np.array(unique_temperatures)
+    nominal_permeability_values = np.array(
+        [p.n if hasattr(p, "n") else p for p in averaged_permeabilities]
+    )
 
-    return temps, perms, x_error, y_error, error_lower, error_upper
+    return (
+        all_temperatures,
+        all_permeabilities,
+        inverse_temperature_values,
+        nominal_permeability_values,
+        lower_error_bars,
+        upper_error_bars,
+    )
 
 
 def fit_permeability_data(
@@ -429,46 +553,68 @@ def fit_permeability_data(
         log10 transformation.
 
     """
-    # Convert to numpy arrays and handle ufloat objects
-    temps = np.array(temps)
+    # Convert temperature input to numpy array
+    temperature_array = np.array(temps)
 
-    # Extract nominal values and uncertainties
+    # Extract nominal values and uncertainties from permeability data
     if hasattr(perms[0], "n"):
-        # ufloat objects - extract nominal and std dev
-        perm_vals = np.array([p.n for p in perms])
-        perm_stds = np.array([p.s for p in perms])
+        # ufloat objects: extract nominal values and standard deviations
+        permeability_nominal_values = np.array([p.n for p in perms])
+        permeability_std_deviations = np.array([p.s for p in perms])
     else:
-        # Regular floats
-        perm_vals = np.array(perms)
-        perm_stds = np.zeros_like(perm_vals)
+        # Regular floats: no uncertainties available
+        permeability_nominal_values = np.array(perms)
+        permeability_std_deviations = np.zeros_like(permeability_nominal_values)
 
-    # Log transform for Arrhenius fit
-    # For ufloats, we could use unp.log, but we'll do it manually to control
-    # weights
-    log_perm = np.log10(perm_vals)
+    # Transform to log space for Arrhenius fit
+    # Arrhenius equation: P = P0 * exp(-Ea/(R*T))
+    # Log form: log10(P) = log10(P0) - (Ea/(R*ln(10))) * (1/T)
+    log10_permeability = np.log10(permeability_nominal_values)
 
-    # Propagate uncertainties through log transform: d(log(x))/dx = 1/x
-    # So sigma_log(x) = sigma_x / x (for natural log, divide by ln(10) for
-    # log10)
-    # Suppress divide-by-zero warning when perm_stds is zero (handled by
-    # np.where)
+    # Propagate uncertainties through log10 transformation
+    # Derivative: d(log10(x))/dx = 1/(x * ln(10))
+    # Therefore: sigma_log10(x) = sigma_x / (x * ln(10))
+    # Suppress divide-by-zero warnings (handled by np.where below)
     with np.errstate(divide="ignore", invalid="ignore"):
-        log_perm_stds = perm_stds / (perm_vals * np.log(10))
-
-        # Calculate weights (inverse of variance)
-        # Use w = 1/sigma; fallback to 1 when std is 0 or missing
-        weights = np.where(
-            (log_perm_stds > 0) & np.isfinite(log_perm_stds),
-            1.0 / log_perm_stds,
-            1.0,
+        log10_permeability_uncertainties = permeability_std_deviations / (
+            permeability_nominal_values * np.log(10)
         )
 
-    # Fit in 1/T space: log10(perm) = m * (1000/T) + c
-    x_all = 1000 / temps
-    coeffs = np.polyfit(x_all, log_perm, 1, w=weights)
+        # Calculate weights for weighted least squares fitting
+        # Weight = 1/sigma (inverse of uncertainty)
+        # For points with no uncertainty or infinite uncertainty, use unit weight
+        UNIT_WEIGHT = 1.0
+        is_valid_uncertainty = (log10_permeability_uncertainties > 0) & np.isfinite(
+            log10_permeability_uncertainties
+        )
+        fit_weights = np.where(
+            is_valid_uncertainty,
+            1.0 / log10_permeability_uncertainties,
+            UNIT_WEIGHT,
+        )
 
-    # Generate smooth fit line
-    fit_x = np.linspace(x_all.min(), x_all.max(), 100)
-    fit_y = 10 ** (coeffs[0] * fit_x + coeffs[1])
+    # Perform weighted linear fit in 1/T space
+    # x-axis: 1000/T (inverse temperature, gives better numerical scaling)
+    # y-axis: log10(permeability)
+    inverse_temperature_scaled = 1000 / temperature_array
 
-    return fit_x, fit_y
+    # Fit polynomial of degree 1 (linear: y = mx + c)
+    POLYNOMIAL_DEGREE = 1
+    fit_coefficients = np.polyfit(
+        inverse_temperature_scaled, log10_permeability, POLYNOMIAL_DEGREE, w=fit_weights
+    )
+    slope_coefficient = fit_coefficients[0]
+    intercept_coefficient = fit_coefficients[1]
+
+    # Generate smooth fit curve for plotting
+    NUM_FIT_POINTS = 100
+    fit_x_values = np.linspace(
+        inverse_temperature_scaled.min(),
+        inverse_temperature_scaled.max(),
+        NUM_FIT_POINTS,
+    )
+
+    # Transform back from log space: permeability = 10^(m*x + c)
+    fit_y_values = 10 ** (slope_coefficient * fit_x_values + intercept_coefficient)
+
+    return fit_x_values, fit_y_values
