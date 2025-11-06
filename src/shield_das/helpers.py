@@ -1,4 +1,3 @@
-import h_transport_materials as htm
 import numpy as np
 import numpy.typing as npt
 
@@ -54,6 +53,8 @@ def calculate_error(pressure_value: float) -> float:
 
 
 def import_htm_data(material: str):
+    import h_transport_materials as htm
+
     permeabilities = htm.permeabilities.filter(material=f"{material}").filter(
         isotope="h"
     )
