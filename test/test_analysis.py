@@ -6,7 +6,7 @@ from uncertainties import ufloat
 
 from shield_das.analysis import (
     average_pressure_after_increase,
-    calculate_error,
+    calculate_error_on_pressure_reading,
     calculate_flux_from_sample,
     calculate_permeability_from_flux,
     evaluate_permeability_values,
@@ -987,7 +987,7 @@ def test_calculate_error_returns_half_percent_for_low_pressure():
     specifications for low-pressure accuracy.
     """
     pressure = 0.5
-    error = calculate_error(pressure)
+    error = calculate_error_on_pressure_reading(pressure)
     expected = 0.5 * 0.005
     assert np.isclose(error, expected, rtol=1e-10)
 
@@ -999,7 +999,7 @@ def test_calculate_error_returns_quarter_percent_for_high_pressure():
     higher pressures.
     """
     pressure = 10.0
-    error = calculate_error(pressure)
+    error = calculate_error_on_pressure_reading(pressure)
     expected = 10.0 * 0.0025
     assert np.isclose(error, expected, rtol=1e-10)
 
@@ -1013,9 +1013,9 @@ def test_calculate_error_boundary_at_one_torr():
     pressure_at = 1.0
     pressure_below = 0.9999
     pressure_above = 1.0001
-    error_at = calculate_error(pressure_at)
-    error_below = calculate_error(pressure_below)
-    error_above = calculate_error(pressure_above)
+    error_at = calculate_error_on_pressure_reading(pressure_at)
+    error_below = calculate_error_on_pressure_reading(pressure_below)
+    error_above = calculate_error_on_pressure_reading(pressure_above)
     assert np.isclose(error_at, 1.0 * 0.005, rtol=1e-10)
     assert np.isclose(error_below, 0.9999 * 0.005, rtol=1e-10)
     assert np.isclose(error_above, 1.0001 * 0.0025, rtol=1e-10)
@@ -1028,7 +1028,7 @@ def test_calculate_error_handles_array_input():
     (0.5% or 0.25%) element-wise to each value.
     """
     pressures = np.array([0.5, 1.0, 10.0, 100.0])
-    errors = calculate_error(pressures)
+    errors = calculate_error_on_pressure_reading(pressures)
     expected = np.array([0.5 * 0.005, 1.0 * 0.005, 10.0 * 0.0025, 100.0 * 0.0025])
     assert np.allclose(errors, expected, rtol=1e-10)
 
@@ -1040,7 +1040,7 @@ def test_calculate_error_handles_scalar_input():
     array wrapping.
     """
     pressure = 50.0
-    error = calculate_error(pressure)
+    error = calculate_error_on_pressure_reading(pressure)
     expected = 50.0 * 0.0025
     assert np.isclose(error, expected, rtol=1e-10)
     assert isinstance(error, (float, np.floating, np.ndarray))
@@ -1055,15 +1055,15 @@ def test_calculate_error_scales_linearly_with_pressure():
     # Low pressure regime (0.5%)
     p1_low = 0.5
     p2_low = 1.0
-    err1_low = calculate_error(p1_low)
-    err2_low = calculate_error(p2_low)
+    err1_low = calculate_error_on_pressure_reading(p1_low)
+    err2_low = calculate_error_on_pressure_reading(p2_low)
     assert np.isclose(err2_low / err1_low, p2_low / p1_low, rtol=1e-10)
 
     # High pressure regime (0.25%)
     p1_high = 10.0
     p2_high = 100.0
-    err1_high = calculate_error(p1_high)
-    err2_high = calculate_error(p2_high)
+    err1_high = calculate_error_on_pressure_reading(p1_high)
+    err2_high = calculate_error_on_pressure_reading(p2_high)
     assert np.isclose(err2_high / err1_high, p2_high / p1_high, rtol=1e-10)
 
 
@@ -1074,7 +1074,7 @@ def test_calculate_error_returns_positive_values():
     error propagation.
     """
     pressures = np.array([0.01, 0.1, 1.0, 10.0, 100.0])
-    errors = calculate_error(pressures)
+    errors = calculate_error_on_pressure_reading(pressures)
     assert np.all(errors > 0)
 
 
@@ -1084,7 +1084,7 @@ def test_calculate_error_returns_ndarray_for_array_input():
     input, maintaining type consistency for vectorised uncertainty calculations.
     """
     pressures = np.array([1.0, 10.0, 100.0])
-    errors = calculate_error(pressures)
+    errors = calculate_error_on_pressure_reading(pressures)
     assert isinstance(errors, np.ndarray)
 
 
@@ -1094,7 +1094,7 @@ def test_calculate_error_zero_pressure_returns_zero():
     uncertainty, as 0.5% of zero is mathematically zero (though physically rare).
     """
     pressure = 0.0
-    error = calculate_error(pressure)
+    error = calculate_error_on_pressure_reading(pressure)
     assert np.isclose(error, 0.0, rtol=1e-10)
 
 
