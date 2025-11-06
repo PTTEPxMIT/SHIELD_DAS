@@ -247,13 +247,15 @@ def fit_permeability_data(temps, perms):
 
     # Propagate uncertainties through log transform: d(log(x))/dx = 1/x
     # So sigma_log(x) = sigma_x / x (for natural log, divide by ln(10) for log10)
-    log_perm_stds = perm_stds / (perm_vals * np.log(10))
+    # Suppress divide-by-zero warning when perm_stds is zero (handled by np.where)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        log_perm_stds = perm_stds / (perm_vals * np.log(10))
 
-    # Calculate weights (inverse of variance)
-    # Use w = 1/sigma; fallback to 1 when std is 0 or missing
-    weights = np.where(
-        (log_perm_stds > 0) & np.isfinite(log_perm_stds), 1.0 / log_perm_stds, 1.0
-    )
+        # Calculate weights (inverse of variance)
+        # Use w = 1/sigma; fallback to 1 when std is 0 or missing
+        weights = np.where(
+            (log_perm_stds > 0) & np.isfinite(log_perm_stds), 1.0 / log_perm_stds, 1.0
+        )
 
     # Fit in 1/T space: log10(perm) = m * (1000/T) + c
     x_all = 1000 / temps
