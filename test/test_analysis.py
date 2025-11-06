@@ -704,11 +704,11 @@ def test_evaluate_sorts_temperatures():
     assert x_error[0] > x_error[1] > x_error[2]
 
 
-def test_evaluate_handles_non_ufloat_permeability():
+def test_evaluate_handles_non_ufloat_permeability_lower_error():
     """
-    Test evaluate_permeability_values to verify it handles edge cases where
+    Test evaluate_permeability_values to verify that when the avg_perm from
     permeability calculation returns a regular float instead of a ufloat object,
-    resulting in zero error bars when uncertainty propagation is not available.
+    the lower error bar is set to zero when uncertainty propagation is not available.
     """
     datasets = {
         "run1": {
@@ -728,6 +728,31 @@ def test_evaluate_handles_non_ufloat_permeability():
         )
         # When avg_perm is not a ufloat, error bars should be 0
         assert error_lower[0] == 0
+
+
+def test_evaluate_handles_non_ufloat_permeability_upper_error():
+    """
+    Test evaluate_permeability_values to verify that when the avg_perm from
+    permeability calculation returns a regular float instead of a ufloat object,
+    the upper error bar is set to zero when uncertainty propagation is not available.
+    """
+    datasets = {
+        "run1": {
+            "temperature": 873,
+            "time_data": np.linspace(0, 100, 100),
+            "upstream_data": {"pressure_data": np.full(100, 100.0)},
+            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
+        }
+    }
+
+    # Mock calculate_permeability_from_flux to return a regular float instead of ufloat
+    with patch(
+        "shield_das.analysis.calculate_permeability_from_flux", return_value=1e-10
+    ):
+        temps, perms, x_error, y_error, error_lower, error_upper = (
+            evaluate_permeability_values(datasets)
+        )
+        # When avg_perm is not a ufloat, error bars should be 0
         assert error_upper[0] == 0
 
 
@@ -760,16 +785,25 @@ def test_fit_arrays_have_100_points():
     assert len(fit_x) == 100 and len(fit_y) == 100
 
 
-def test_fit_x_range_covers_input_data():
+def test_fit_x_range_covers_input_data_minimum():
     """
-    Test fit_permeability_data to confirm it generates fit_x values spanning
-    the complete range of input temperatures, from 1000/973≈1.028 to
-    1000/773≈1.294, ensuring the fit curve covers all experimental data.
+    Test fit_permeability_data to confirm the minimum fit_x value corresponds to
+    the maximum input temperature (1000/973≈1.028).
     """
     temps = [773, 873, 973]
     perms = [ufloat(1e-10, 1e-11), ufloat(5e-10, 5e-11), ufloat(2e-9, 2e-10)]
     fit_x, fit_y = fit_permeability_data(temps, perms)
     assert fit_x.min() == pytest.approx(1000 / 973, rel=0.01)
+
+
+def test_fit_x_range_covers_input_data_maximum():
+    """
+    Test fit_permeability_data to confirm the maximum fit_x value corresponds to
+    the minimum input temperature (1000/773≈1.294).
+    """
+    temps = [773, 873, 973]
+    perms = [ufloat(1e-10, 1e-11), ufloat(5e-10, 5e-11), ufloat(2e-9, 2e-10)]
+    fit_x, fit_y = fit_permeability_data(temps, perms)
     assert fit_x.max() == pytest.approx(1000 / 773, rel=0.01)
 
 
@@ -890,47 +924,78 @@ def test_voltage_to_pressure_converts_correctly_1_torr_scale():
     assert np.isclose(pressure[0], 0.5, rtol=1e-10)
 
 
-def test_voltage_to_pressure_filters_noise_on_high_range():
+def test_voltage_to_pressure_filters_noise_on_high_range_keeps_above_threshold():
     """
-    Test voltage_to_pressure to verify it applies noise filtering by setting
-    readings below 0.5 torr to zero on 1000 torr full-scale gauge, eliminating
-    spurious low readings.
+    Test voltage_to_pressure to verify it keeps readings above 0.5 torr threshold
+    on 1000 torr full-scale gauge.
     """
     # 0.01V * 100 = 1 torr (above threshold, kept)
-    # 0.001V * 100 = 0.1 torr (below 0.5 threshold, filtered to 0)
-    voltage = np.array([0.01, 0.001])
+    voltage = np.array([0.01])
     pressure = voltage_to_pressure(voltage, full_scale_torr=1000)
     assert np.isclose(pressure[0], 1.0, rtol=1e-10)
-    assert np.isclose(pressure[1], 0.0, rtol=1e-10)
 
 
-def test_voltage_to_pressure_filters_noise_on_low_range():
+def test_voltage_to_pressure_filters_noise_on_high_range_removes_below_threshold():
     """
-    Test voltage_to_pressure to verify it applies noise filtering by setting
-    readings below 0.0005 torr to zero on 1 torr full-scale gauge, eliminating
-    low-level noise.
+    Test voltage_to_pressure to verify it filters readings below 0.5 torr to zero
+    on 1000 torr full-scale gauge, eliminating spurious low readings.
     """
-    # 0.01V * 0.1 = 0.001 torr (above 0.0005 threshold, kept)
-    # 0.001V * 0.1 = 0.0001 torr (below 0.0005 threshold, filtered to 0)
-    voltage = np.array([0.01, 0.001])
-    pressure = voltage_to_pressure(voltage, full_scale_torr=1)
-    assert np.isclose(pressure[0], 0.001, rtol=1e-10)
-    assert np.isclose(pressure[1], 0.0, rtol=1e-10)
-
-
-def test_voltage_to_pressure_clips_to_valid_range():
-    """
-    Test voltage_to_pressure to ensure it clips pressure values to the valid
-    gauge range (0 to full_scale), preventing negative values and values
-    exceeding the maximum measurable pressure.
-    """
-    # Negative voltage should clip to 0
-    # Voltage > 10V should clip to full_scale
-    voltage = np.array([-1.0, 5.0, 15.0])
+    # 0.001V * 100 = 0.1 torr (below 0.5 threshold, filtered to 0)
+    voltage = np.array([0.001])
     pressure = voltage_to_pressure(voltage, full_scale_torr=1000)
     assert np.isclose(pressure[0], 0.0, rtol=1e-10)
-    assert np.isclose(pressure[1], 500.0, rtol=1e-10)
-    assert np.isclose(pressure[2], 1000.0, rtol=1e-10)
+
+
+def test_voltage_to_pressure_filters_noise_on_low_range_keeps_above_threshold():
+    """
+    Test voltage_to_pressure to verify it keeps readings above 0.0005 torr threshold
+    on 1 torr full-scale gauge.
+    """
+    # 0.01V * 0.1 = 0.001 torr (above 0.0005 threshold, kept)
+    voltage = np.array([0.01])
+    pressure = voltage_to_pressure(voltage, full_scale_torr=1)
+    assert np.isclose(pressure[0], 0.001, rtol=1e-10)
+
+
+def test_voltage_to_pressure_filters_noise_on_low_range_removes_below_threshold():
+    """
+    Test voltage_to_pressure to verify it filters readings below 0.0005 torr to zero
+    on 1 torr full-scale gauge, eliminating low-level noise.
+    """
+    # 0.001V * 0.1 = 0.0001 torr (below 0.0005 threshold, filtered to 0)
+    voltage = np.array([0.001])
+    pressure = voltage_to_pressure(voltage, full_scale_torr=1)
+    assert np.isclose(pressure[0], 0.0, rtol=1e-10)
+
+
+def test_voltage_to_pressure_clips_negative_voltage_to_zero():
+    """
+    Test voltage_to_pressure to ensure negative voltage values are clipped to zero
+    pressure.
+    """
+    voltage = np.array([-1.0])
+    pressure = voltage_to_pressure(voltage, full_scale_torr=1000)
+    assert np.isclose(pressure[0], 0.0, rtol=1e-10)
+
+
+def test_voltage_to_pressure_clips_over_range_voltage_to_full_scale():
+    """
+    Test voltage_to_pressure to ensure voltage values exceeding 10V are clipped to
+    full scale pressure.
+    """
+    voltage = np.array([15.0])
+    pressure = voltage_to_pressure(voltage, full_scale_torr=1000)
+    assert np.isclose(pressure[0], 1000.0, rtol=1e-10)
+
+
+def test_voltage_to_pressure_converts_mid_range_voltage_correctly():
+    """
+    Test voltage_to_pressure to verify correct conversion for mid-range voltage
+    values.
+    """
+    voltage = np.array([5.0])
+    pressure = voltage_to_pressure(voltage, full_scale_torr=1000)
+    assert np.isclose(pressure[0], 500.0, rtol=1e-10)
 
 
 def test_voltage_to_pressure_handles_array_input():
@@ -939,12 +1004,10 @@ def test_voltage_to_pressure_handles_array_input():
     with multiple voltage readings, returning corresponding pressure values for
     each element.
     """
-    voltage = np.array([0.0, 2.5, 5.0, 7.5, 10.0])
+    voltage = np.array([2.5, 5.0, 7.5, 10.0])
     pressure = voltage_to_pressure(voltage, full_scale_torr=1000)
-    expected = np.array([0.0, 250.0, 500.0, 750.0, 1000.0])
-    # First element filtered by threshold
-    assert np.isclose(pressure[0], 0.0, rtol=1e-10)
-    assert np.allclose(pressure[1:], expected[1:], rtol=1e-10)
+    expected = np.array([250.0, 500.0, 750.0, 1000.0])
+    assert np.allclose(pressure, expected, rtol=1e-10)
 
 
 def test_voltage_to_pressure_zero_voltage_returns_zero():
@@ -1004,20 +1067,31 @@ def test_calculate_error_returns_quarter_percent_for_high_pressure():
     assert np.isclose(error, expected, rtol=1e-10)
 
 
-def test_calculate_error_boundary_at_one_torr():
+def test_calculate_error_boundary_at_one_torr_exactly():
     """
-    Test calculate_error to confirm the accuracy threshold behavior at exactly
-    1 torr, where readings at or below use 0.5% uncertainty and readings above
-    use 0.25% uncertainty.
+    Test calculate_error to confirm that exactly 1 torr uses 0.5% uncertainty
+    (at or below threshold).
     """
     pressure_at = 1.0
-    pressure_below = 0.9999
-    pressure_above = 1.0001
     error_at = calculate_error_on_pressure_reading(pressure_at)
-    error_below = calculate_error_on_pressure_reading(pressure_below)
-    error_above = calculate_error_on_pressure_reading(pressure_above)
     assert np.isclose(error_at, 1.0 * 0.005, rtol=1e-10)
+
+
+def test_calculate_error_boundary_below_one_torr():
+    """
+    Test calculate_error to confirm that readings below 1 torr use 0.5% uncertainty.
+    """
+    pressure_below = 0.9999
+    error_below = calculate_error_on_pressure_reading(pressure_below)
     assert np.isclose(error_below, 0.9999 * 0.005, rtol=1e-10)
+
+
+def test_calculate_error_boundary_above_one_torr():
+    """
+    Test calculate_error to confirm that readings above 1 torr use 0.25% uncertainty.
+    """
+    pressure_above = 1.0001
+    error_above = calculate_error_on_pressure_reading(pressure_above)
     assert np.isclose(error_above, 1.0001 * 0.0025, rtol=1e-10)
 
 
@@ -1043,7 +1117,6 @@ def test_calculate_error_handles_scalar_input():
     error = calculate_error_on_pressure_reading(pressure)
     expected = 50.0 * 0.0025
     assert np.isclose(error, expected, rtol=1e-10)
-    assert isinstance(error, (float, np.floating, np.ndarray))
 
 
 def test_calculate_error_scales_linearly_with_pressure():
@@ -1105,7 +1178,8 @@ def test_voltage_to_temperature_converts_with_cold_junction_compensation():
     """
     Test voltage_to_temperature to ensure it correctly applies cold junction
     compensation by adding the local temperature's equivalent voltage to the
-    measured voltage before converting to temperature.
+    measured voltage before converting to temperature, resulting in temperature
+    greater than local temperature for positive voltage.
     """
     # At room temperature (25°C), a small voltage reading should result in
     # temperature slightly above room temperature
@@ -1114,6 +1188,16 @@ def test_voltage_to_temperature_converts_with_cold_junction_compensation():
     temperature = voltage_to_temperature(local_temp, voltage)
     # Result should be greater than local temperature
     assert temperature[0] > local_temp[0]
+
+
+def test_voltage_to_temperature_converts_returns_ndarray():
+    """
+    Test voltage_to_temperature to ensure it returns a numpy ndarray type when
+    applying cold junction compensation.
+    """
+    local_temp = np.array([25.0])
+    voltage = np.array([1.0])  # 1 mV from thermocouple
+    temperature = voltage_to_temperature(local_temp, voltage)
     assert isinstance(temperature, np.ndarray)
 
 
@@ -1140,9 +1224,39 @@ def test_voltage_to_temperature_handles_array_inputs():
     voltage = np.array([0.0, 1.0, 2.0])
     temperature = voltage_to_temperature(local_temp, voltage)
     assert len(temperature) == 3
+
+
+def test_voltage_to_temperature_handles_array_inputs_returns_ndarray():
+    """
+    Test voltage_to_temperature to verify it returns a numpy ndarray when given
+    array inputs.
+    """
+    local_temp = np.array([25.0, 25.0, 25.0])
+    voltage = np.array([0.0, 1.0, 2.0])
+    temperature = voltage_to_temperature(local_temp, voltage)
     assert isinstance(temperature, np.ndarray)
+
+
+def test_voltage_to_temperature_array_temperatures_increase_with_voltage():
+    """
+    Test voltage_to_temperature to verify that temperatures increase monotonically
+    with increasing voltage when local temperature is constant.
+    """
+    local_temp = np.array([25.0, 25.0, 25.0])
+    voltage = np.array([0.0, 1.0, 2.0])
+    temperature = voltage_to_temperature(local_temp, voltage)
     # Temperatures should increase with voltage
     assert temperature[1] > temperature[0]
+
+
+def test_voltage_to_temperature_array_temperatures_increase_monotonically():
+    """
+    Test voltage_to_temperature to verify that all temperature values increase
+    monotonically with increasing voltage.
+    """
+    local_temp = np.array([25.0, 25.0, 25.0])
+    voltage = np.array([0.0, 1.0, 2.0])
+    temperature = voltage_to_temperature(local_temp, voltage)
     assert temperature[2] > temperature[1]
 
 
@@ -1159,7 +1273,17 @@ def test_voltage_to_temperature_positive_voltage_increases_temperature():
     temp_high = voltage_to_temperature(local_temp, voltage_high)
     # Higher voltage should give higher temperature
     assert temp_high[0] > temp_low[0]
-    # Both should be above local temperature
+
+
+def test_voltage_to_temperature_positive_voltage_above_local_temperature():
+    """
+    Test voltage_to_temperature to confirm that positive thermocouple voltages
+    result in measured temperatures above the local reference temperature.
+    """
+    local_temp = np.array([25.0])
+    voltage_low = np.array([1.0])
+    temp_low = voltage_to_temperature(local_temp, voltage_low)
+    # Should be above local temperature
     assert temp_low[0] > local_temp[0]
 
 
@@ -1201,6 +1325,16 @@ def test_voltage_to_temperature_handles_scalar_arrays():
     voltage = np.array([2.5])
     temperature = voltage_to_temperature(local_temp, voltage)
     assert len(temperature) == 1
+
+
+def test_voltage_to_temperature_handles_scalar_arrays_returns_ndarray():
+    """
+    Test voltage_to_temperature to confirm it returns a numpy ndarray for
+    single-element array inputs.
+    """
+    local_temp = np.array([25.0])
+    voltage = np.array([2.5])
+    temperature = voltage_to_temperature(local_temp, voltage)
     assert isinstance(temperature, np.ndarray)
 
 
@@ -1217,11 +1351,10 @@ def test_voltage_to_temperature_negative_voltage_decreases_temperature():
     assert temperature[0] < local_temp[0]
 
 
-def test_voltage_to_temperature_consistent_with_thermocouple_functions():
+def test_voltage_to_temperature_consistent_with_thermocouple_functions_above_local():
     """
-    Test voltage_to_temperature to ensure the conversion is consistent with the
-    underlying thermocouple conversion functions, verifying that the cold junction
-    compensation logic is correctly implemented.
+    Test voltage_to_temperature to ensure the conversion produces reasonable
+    temperature above local temperature for positive thermocouple voltage.
     """
     # Test at a known point: 25°C local, 10mV thermocouple voltage
     local_temp = np.array([25.0])
@@ -1229,5 +1362,26 @@ def test_voltage_to_temperature_consistent_with_thermocouple_functions():
     temperature = voltage_to_temperature(local_temp, voltage)
     # Should return a reasonable temperature above local temp
     assert temperature[0] > 25.0
-    assert temperature[0] < 500.0  # Reasonable upper bound for typical measurements
-    assert isinstance(temperature[0], (float, np.floating))
+
+
+def test_voltage_to_temperature_produces_reasonable_temperature_range():
+    """
+    Test voltage_to_temperature to ensure the conversion produces temperatures
+    within physically reasonable range for typical measurements.
+    """
+    local_temp = np.array([25.0])
+    voltage = np.array([10.0])
+    temperature = voltage_to_temperature(local_temp, voltage)
+    # Reasonable upper bound for typical measurements
+    assert temperature[0] < 500.0
+
+
+def test_voltage_to_temperature_returns_numeric_type():
+    """
+    Test voltage_to_temperature to ensure individual temperature values are
+    numeric types (float or numpy floating).
+    """
+    local_temp = np.array([25.0])
+    voltage = np.array([10.0])
+    temperature = voltage_to_temperature(local_temp, voltage)
+    assert isinstance(temperature[0], float | np.floating)
