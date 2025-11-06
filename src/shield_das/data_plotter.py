@@ -17,13 +17,14 @@ from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 from plotly_resampler import FigureResampler
 
-from .analysis import evaluate_permeability_values, fit_permeability_data
-from .helpers import (
-    calculate_error,
-    import_htm_data,
+from .analysis import (
+    calculate_error_on_pressure_reading,
+    evaluate_permeability_values,
+    fit_permeability_data,
     voltage_to_pressure,
     voltage_to_temperature,
 )
+from .helpers import import_htm_data
 
 
 class DataPlotter:
@@ -265,8 +266,8 @@ class DataPlotter:
                     data = np.genfromtxt(csv_path, delimiter=",", names=True)
                     downstream_pressure_data = data["Pressure_Torr"]
 
-        upstream_error = calculate_error(upstream_pressure_data)
-        downstream_error = calculate_error(downstream_pressure_data)
+        upstream_error = calculate_error_on_pressure_reading(upstream_pressure_data)
+        downstream_error = calculate_error_on_pressure_reading(downstream_pressure_data)
 
         upstream_data = {
             "pressure_data": upstream_pressure_data,
@@ -340,8 +341,8 @@ class DataPlotter:
                 else:
                     downstream_pressure_data = pressure_vals
 
-        upstream_error = calculate_error(upstream_pressure_data)
-        downstream_error = calculate_error(downstream_pressure_data)
+        upstream_error = calculate_error_on_pressure_reading(upstream_pressure_data)
+        downstream_error = calculate_error_on_pressure_reading(downstream_pressure_data)
 
         upstream_data = {
             "pressure_data": upstream_pressure_data,
@@ -414,8 +415,8 @@ class DataPlotter:
                 else:
                     downstream_pressure_data = pressure_vals
 
-        upstream_error = calculate_error(upstream_pressure_data)
-        downstream_error = calculate_error(downstream_pressure_data)
+        upstream_error = calculate_error_on_pressure_reading(upstream_pressure_data)
+        downstream_error = calculate_error_on_pressure_reading(downstream_pressure_data)
 
         upstream_data = {
             "pressure_data": upstream_pressure_data,
@@ -441,7 +442,7 @@ class DataPlotter:
             col_name = f"{tname}_Voltage_mV"
             volt_vals = np.array(data[col_name], dtype=float)
             thermocouple_data = voltage_to_temperature(
-                local_temperature_data=local_temperature_data, voltage=volt_vals
+                local_temperature=local_temperature_data, voltage=volt_vals
             )
 
         return (
