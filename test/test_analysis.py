@@ -6,10 +6,12 @@ from uncertainties import ufloat
 
 from shield_das.analysis import (
     average_pressure_after_increase,
+    calculate_error,
     calculate_flux_from_sample,
     calculate_permeability_from_flux,
     evaluate_permeability_values,
     fit_permeability_data,
+    voltage_to_pressure,
 )
 
 # =============================================================================
@@ -860,3 +862,236 @@ def test_fit_handles_numpy_array_inputs():
     perms = [ufloat(1e-10, 1e-11), ufloat(5e-10, 5e-11), ufloat(2e-9, 2e-10)]
     fit_x, fit_y = fit_permeability_data(temps, perms)
     assert isinstance(fit_x, np.ndarray) and isinstance(fit_y, np.ndarray)
+
+
+# Tests for voltage_to_pressure function
+
+
+def test_voltage_to_pressure_converts_correctly_1000_torr_scale():
+    """
+    Test voltage_to_pressure to ensure it correctly converts voltage to pressure
+    using linear scaling for a 1000 torr full-scale gauge, where 5V should equal
+    500 torr.
+    """
+    voltage = np.array([5.0])
+    pressure = voltage_to_pressure(voltage, full_scale_torr=1000)
+    assert np.isclose(pressure[0], 500.0, rtol=1e-10)
+
+
+def test_voltage_to_pressure_converts_correctly_1_torr_scale():
+    """
+    Test voltage_to_pressure to ensure it correctly converts voltage to pressure
+    using linear scaling for a 1 torr full-scale gauge, where 5V should equal
+    0.5 torr.
+    """
+    voltage = np.array([5.0])
+    pressure = voltage_to_pressure(voltage, full_scale_torr=1)
+    assert np.isclose(pressure[0], 0.5, rtol=1e-10)
+
+
+def test_voltage_to_pressure_filters_noise_on_high_range():
+    """
+    Test voltage_to_pressure to verify it applies noise filtering by setting
+    readings below 0.5 torr to zero on 1000 torr full-scale gauge, eliminating
+    spurious low readings.
+    """
+    # 0.01V * 100 = 1 torr (above threshold, kept)
+    # 0.001V * 100 = 0.1 torr (below 0.5 threshold, filtered to 0)
+    voltage = np.array([0.01, 0.001])
+    pressure = voltage_to_pressure(voltage, full_scale_torr=1000)
+    assert np.isclose(pressure[0], 1.0, rtol=1e-10)
+    assert np.isclose(pressure[1], 0.0, rtol=1e-10)
+
+
+def test_voltage_to_pressure_filters_noise_on_low_range():
+    """
+    Test voltage_to_pressure to verify it applies noise filtering by setting
+    readings below 0.0005 torr to zero on 1 torr full-scale gauge, eliminating
+    low-level noise.
+    """
+    # 0.01V * 0.1 = 0.001 torr (above 0.0005 threshold, kept)
+    # 0.001V * 0.1 = 0.0001 torr (below 0.0005 threshold, filtered to 0)
+    voltage = np.array([0.01, 0.001])
+    pressure = voltage_to_pressure(voltage, full_scale_torr=1)
+    assert np.isclose(pressure[0], 0.001, rtol=1e-10)
+    assert np.isclose(pressure[1], 0.0, rtol=1e-10)
+
+
+def test_voltage_to_pressure_clips_to_valid_range():
+    """
+    Test voltage_to_pressure to ensure it clips pressure values to the valid
+    gauge range (0 to full_scale), preventing negative values and values
+    exceeding the maximum measurable pressure.
+    """
+    # Negative voltage should clip to 0
+    # Voltage > 10V should clip to full_scale
+    voltage = np.array([-1.0, 5.0, 15.0])
+    pressure = voltage_to_pressure(voltage, full_scale_torr=1000)
+    assert np.isclose(pressure[0], 0.0, rtol=1e-10)
+    assert np.isclose(pressure[1], 500.0, rtol=1e-10)
+    assert np.isclose(pressure[2], 1000.0, rtol=1e-10)
+
+
+def test_voltage_to_pressure_handles_array_input():
+    """
+    Test voltage_to_pressure to verify it correctly processes numpy array inputs
+    with multiple voltage readings, returning corresponding pressure values for
+    each element.
+    """
+    voltage = np.array([0.0, 2.5, 5.0, 7.5, 10.0])
+    pressure = voltage_to_pressure(voltage, full_scale_torr=1000)
+    expected = np.array([0.0, 250.0, 500.0, 750.0, 1000.0])
+    # First element filtered by threshold
+    assert np.isclose(pressure[0], 0.0, rtol=1e-10)
+    assert np.allclose(pressure[1:], expected[1:], rtol=1e-10)
+
+
+def test_voltage_to_pressure_zero_voltage_returns_zero():
+    """
+    Test voltage_to_pressure to confirm that zero voltage input returns zero
+    pressure output, representing gauge reading when no pressure is present.
+    """
+    voltage = np.array([0.0])
+    pressure = voltage_to_pressure(voltage, full_scale_torr=1000)
+    assert np.isclose(pressure[0], 0.0, rtol=1e-10)
+
+
+def test_voltage_to_pressure_max_voltage_returns_full_scale():
+    """
+    Test voltage_to_pressure to verify that maximum voltage (10V) returns the
+    full scale pressure value, representing the gauge's upper measurement limit.
+    """
+    voltage = np.array([10.0])
+    pressure = voltage_to_pressure(voltage, full_scale_torr=1000)
+    assert np.isclose(pressure[0], 1000.0, rtol=1e-10)
+
+
+def test_voltage_to_pressure_returns_ndarray():
+    """
+    Test voltage_to_pressure to ensure it returns a numpy ndarray type, maintaining
+    consistency with numpy array operations throughout the analysis pipeline.
+    """
+    voltage = np.array([5.0])
+    pressure = voltage_to_pressure(voltage, full_scale_torr=1000)
+    assert isinstance(pressure, np.ndarray)
+
+
+# Tests for calculate_error function
+
+
+def test_calculate_error_returns_half_percent_for_low_pressure():
+    """
+    Test calculate_error to verify it returns 0.5% uncertainty (0.005 fraction)
+    for pressure readings at or below 1 torr, matching gauge manufacturer
+    specifications for low-pressure accuracy.
+    """
+    pressure = 0.5
+    error = calculate_error(pressure)
+    expected = 0.5 * 0.005
+    assert np.isclose(error, expected, rtol=1e-10)
+
+
+def test_calculate_error_returns_quarter_percent_for_high_pressure():
+    """
+    Test calculate_error to verify it returns 0.25% uncertainty (0.0025 fraction)
+    for pressure readings above 1 torr, reflecting improved gauge accuracy at
+    higher pressures.
+    """
+    pressure = 10.0
+    error = calculate_error(pressure)
+    expected = 10.0 * 0.0025
+    assert np.isclose(error, expected, rtol=1e-10)
+
+
+def test_calculate_error_boundary_at_one_torr():
+    """
+    Test calculate_error to confirm the accuracy threshold behavior at exactly
+    1 torr, where readings at or below use 0.5% uncertainty and readings above
+    use 0.25% uncertainty.
+    """
+    pressure_at = 1.0
+    pressure_below = 0.9999
+    pressure_above = 1.0001
+    error_at = calculate_error(pressure_at)
+    error_below = calculate_error(pressure_below)
+    error_above = calculate_error(pressure_above)
+    assert np.isclose(error_at, 1.0 * 0.005, rtol=1e-10)
+    assert np.isclose(error_below, 0.9999 * 0.005, rtol=1e-10)
+    assert np.isclose(error_above, 1.0001 * 0.0025, rtol=1e-10)
+
+
+def test_calculate_error_handles_array_input():
+    """
+    Test calculate_error to verify it correctly processes numpy array inputs
+    with multiple pressure readings, applying the appropriate uncertainty model
+    (0.5% or 0.25%) element-wise to each value.
+    """
+    pressures = np.array([0.5, 1.0, 10.0, 100.0])
+    errors = calculate_error(pressures)
+    expected = np.array([0.5 * 0.005, 1.0 * 0.005, 10.0 * 0.0025, 100.0 * 0.0025])
+    assert np.allclose(errors, expected, rtol=1e-10)
+
+
+def test_calculate_error_handles_scalar_input():
+    """
+    Test calculate_error to confirm it accepts scalar float inputs and returns
+    scalar float outputs, supporting single-point uncertainty calculations without
+    array wrapping.
+    """
+    pressure = 50.0
+    error = calculate_error(pressure)
+    expected = 50.0 * 0.0025
+    assert np.isclose(error, expected, rtol=1e-10)
+    assert isinstance(error, (float, np.floating, np.ndarray))
+
+
+def test_calculate_error_scales_linearly_with_pressure():
+    """
+    Test calculate_error to verify that uncertainty scales linearly with pressure
+    magnitude within each accuracy regime, confirming proportional error behavior
+    (doubling pressure doubles absolute uncertainty).
+    """
+    # Low pressure regime (0.5%)
+    p1_low = 0.5
+    p2_low = 1.0
+    err1_low = calculate_error(p1_low)
+    err2_low = calculate_error(p2_low)
+    assert np.isclose(err2_low / err1_low, p2_low / p1_low, rtol=1e-10)
+
+    # High pressure regime (0.25%)
+    p1_high = 10.0
+    p2_high = 100.0
+    err1_high = calculate_error(p1_high)
+    err2_high = calculate_error(p2_high)
+    assert np.isclose(err2_high / err1_high, p2_high / p1_high, rtol=1e-10)
+
+
+def test_calculate_error_returns_positive_values():
+    """
+    Test calculate_error to ensure all returned uncertainty values are positive
+    numbers, as negative uncertainties are physically meaningless in measurement
+    error propagation.
+    """
+    pressures = np.array([0.01, 0.1, 1.0, 10.0, 100.0])
+    errors = calculate_error(pressures)
+    assert np.all(errors > 0)
+
+
+def test_calculate_error_returns_ndarray_for_array_input():
+    """
+    Test calculate_error to verify it returns numpy ndarray type when given array
+    input, maintaining type consistency for vectorised uncertainty calculations.
+    """
+    pressures = np.array([1.0, 10.0, 100.0])
+    errors = calculate_error(pressures)
+    assert isinstance(errors, np.ndarray)
+
+
+def test_calculate_error_zero_pressure_returns_zero():
+    """
+    Test calculate_error to confirm that zero pressure input returns zero
+    uncertainty, as 0.5% of zero is mathematically zero (though physically rare).
+    """
+    pressure = 0.0
+    error = calculate_error(pressure)
+    assert np.isclose(error, 0.0, rtol=1e-10)

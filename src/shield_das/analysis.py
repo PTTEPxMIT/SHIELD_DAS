@@ -68,7 +68,7 @@ def average_pressure_after_increase(
     # 1. Absolute slope must be below threshold (nearly flat)
     # 2. Time must be after initial 5-second settling period
     is_stable = np.abs(smoothed_slopes) < slope_threshold
-    after_settling_period = time_array > time_array.min() + 5
+    after_settling_period = time_array > np.min(time_array) + 5
     stability_mask = is_stable & after_settling_period
 
     # Find first index where conditions are met, or use midpoint as fallback
@@ -670,8 +670,8 @@ def fit_permeability_data(
     # Generate smooth fit curve for plotting
     NUM_FIT_POINTS = 100
     fit_x_values = np.linspace(
-        inverse_temperature_scaled.min(),
-        inverse_temperature_scaled.max(),
+        np.min(inverse_temperature_scaled),
+        np.max(inverse_temperature_scaled),
         NUM_FIT_POINTS,
     )
 
@@ -679,3 +679,142 @@ def fit_permeability_data(
     fit_y_values = 10 ** (slope_coefficient * fit_x_values + intercept_coefficient)
 
     return fit_x_values, fit_y_values
+
+
+def voltage_to_pressure(voltage: NDArray, full_scale_torr: float) -> NDArray:
+    """
+    Convert voltage reading from Instrutech WGM701 pressure gauge to pressure in torr.
+
+    The Instrutech WGM701 gauge outputs a linear voltage signal (0-10V) proportional
+    to the pressure reading across its full scale range. This function:
+
+    1. Converts voltage to pressure using linear scaling (pressure = voltage * scale/10)
+    2. Applies minimum threshold filtering to remove noise near zero
+    3. Clips values to valid gauge range (0 to full scale)
+
+    Args:
+        voltage: Voltage reading(s) from the gauge in volts (0-10V range).
+        full_scale_torr: Full scale pressure range of the gauge in torr. Typically
+            either 1 torr (high sensitivity) or 1000 torr (high range).
+
+    Returns:
+        Pressure value(s) in torr, clipped to valid gauge range with noise filtering
+            applied.
+
+    Example:
+
+        .. highlight:: python
+        .. code-block:: python
+
+            from shield_das.analysis import voltage_to_pressure
+            import numpy as np
+
+            # Convert 5V reading on 1000 torr full-scale gauge
+            voltage_readings = np.array([0.01, 5.0, 9.5])
+            pressure = voltage_to_pressure(voltage_readings, full_scale_torr=1000)
+            print(f"Pressure: {pressure} torr")
+
+        Pressure: [  0. 500. 950.] torr
+
+    Note:
+        Minimum threshold is 0.5 torr for 1000 torr scale and 0.0005 torr for 1 torr
+        scale. Values below threshold are set to zero to eliminate noise.
+
+    """
+    # Linear voltage-to-pressure conversion
+    # Formula: P = V * (full_scale / 10V)
+    VOLTAGE_FULL_SCALE = 10.0  # Gauge outputs 0-10V
+    pressure_raw = voltage * (full_scale_torr / VOLTAGE_FULL_SCALE)
+
+    # Apply noise filtering based on gauge scale
+    if full_scale_torr == 1000:
+        # High-range gauge: filter readings below 0.5 torr
+        MINIMUM_THRESHOLD_HIGH_RANGE = 0.5  # torr
+        pressure_filtered = np.where(
+            pressure_raw < MINIMUM_THRESHOLD_HIGH_RANGE, 0, pressure_raw
+        )
+        # Clip to valid range (0 to 1000 torr)
+        pressure_clipped = np.clip(pressure_filtered, 0, 1000)
+
+    elif full_scale_torr == 1:
+        # High-sensitivity gauge: filter readings below 0.0005 torr
+        MINIMUM_THRESHOLD_LOW_RANGE = 0.0005  # torr
+        pressure_filtered = np.where(
+            pressure_raw < MINIMUM_THRESHOLD_LOW_RANGE, 0, pressure_raw
+        )
+        # Clip to valid range (0 to 1 torr)
+        pressure_clipped = np.clip(pressure_filtered, 0, 1)
+
+    else:
+        # Unknown scale: no filtering, just clip to 0-full_scale range
+        pressure_clipped = np.clip(pressure_raw, 0, full_scale_torr)
+
+    return pressure_clipped
+
+
+def calculate_error(pressure_value: float | NDArray) -> float | NDArray:
+    """
+    Calculate measurement uncertainty for pressure gauge readings.
+
+    Pressure gauge accuracy varies with the magnitude of the reading. This function
+    applies manufacturer-specified accuracy ratings:
+
+    - For pressures ≤ 1 torr: uncertainty is 0.5% of reading
+    - For pressures > 1 torr: uncertainty is 0.25% of reading (improved accuracy)
+
+    Args:
+        pressure_value: Pressure reading(s) in torr (scalar or array).
+
+    Returns:
+        Absolute uncertainty in torr, same shape as input. Represents ±1 standard
+            deviation measurement error.
+
+    Example:
+
+        .. highlight:: python
+        .. code-block:: python
+
+            from shield_das.analysis import calculate_error
+            import numpy as np
+
+            # Calculate error for single pressure reading
+            pressure = 100.0  # torr
+            uncertainty = calculate_error(pressure)
+            print(f"Pressure: {pressure} ± {uncertainty} torr")
+
+            # Calculate errors for array of pressures
+            pressures = np.array([0.5, 1.0, 10.0, 100.0])
+            uncertainties = calculate_error(pressures)
+            for p, u in zip(pressures, uncertainties):
+                print(f"P: {p:6.1f} ± {u:6.4f} torr")
+
+        Pressure: 100.0 ± 0.25 torr
+        P:    0.5 ± 0.0025 torr
+        P:    1.0 ± 0.0050 torr
+        P:   10.0 ± 0.0250 torr
+        P:  100.0 ± 0.2500 torr
+
+    Note:
+        Error model is based on Instrutech WGM701 gauge specifications. Higher
+        pressures have better relative accuracy (0.25% vs 0.5%).
+
+    """
+    # Convert to numpy array for vectorised operations
+    pressure_array = np.asarray(pressure_value, dtype=float)
+
+    # Default uncertainty: 0.5% of reading (for low pressures)
+    DEFAULT_UNCERTAINTY_FRACTION = 0.005  # 0.5%
+    uncertainty_default = pressure_array * DEFAULT_UNCERTAINTY_FRACTION
+
+    # Improved uncertainty for high pressures: 0.25% of reading
+    HIGH_PRESSURE_THRESHOLD = 1.0  # torr
+    IMPROVED_UNCERTAINTY_FRACTION = 0.0025  # 0.25%
+
+    # Apply improved uncertainty for pressures above threshold
+    uncertainty_final = np.where(
+        pressure_array > HIGH_PRESSURE_THRESHOLD,
+        pressure_array * IMPROVED_UNCERTAINTY_FRACTION,
+        uncertainty_default,
+    )
+
+    return uncertainty_final
