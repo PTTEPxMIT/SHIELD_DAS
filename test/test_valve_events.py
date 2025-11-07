@@ -1,235 +1,456 @@
 import json
 import os
+import shutil
 import tempfile
 import time
 from unittest.mock import Mock, patch
 
+import pytest
+
 from shield_das import DataRecorder, PressureGauge
 
+# =============================================================================
+# Fixtures
+# =============================================================================
 
-class TestValveEvents:
-    """Test suite for valve event timing functionality"""
 
-    def setup_method(self):
-        """Set up test fixtures before each test method."""
-        # Create temporary directory for test results
-        self.temp_dir = tempfile.mkdtemp()
+@pytest.fixture
+def temp_dir():
+    """Create a temporary directory for test results."""
+    temp_path = tempfile.mkdtemp()
+    yield temp_path
+    if os.path.exists(temp_path):
+        shutil.rmtree(temp_path)
 
-        # Create mock gauge
-        self.mock_gauge = Mock(spec=PressureGauge)
-        self.mock_gauge.name = "Test_Gauge"
-        self.mock_gauge.ain_channel = 10
-        self.mock_gauge.gauge_location = "test"
-        self.mock_gauge.voltage_data = [5.0]
-        self.mock_gauge.record_ain_channel_voltage.return_value = None
 
-        # Create DataRecorder instance
-        self.recorder = DataRecorder(
-            gauges=[self.mock_gauge],
-            thermocouples=[],
-            results_dir=self.temp_dir,
-            run_type="test_mode",
-            recording_interval=0.01,  # Much faster for testing
-            backup_interval=0.1,  # Much faster for testing
-        )
+@pytest.fixture
+def mock_gauge():
+    """Create a mock PressureGauge for testing."""
+    gauge = Mock(spec=PressureGauge)
+    gauge.name = "Test_Gauge"
+    gauge.ain_channel = 10
+    gauge.gauge_location = "test"
+    gauge.voltage_data = [5.0]
+    gauge.record_ain_channel_voltage.return_value = None
+    return gauge
 
-    def teardown_method(self):
-        """Clean up after each test method."""
-        if hasattr(self.recorder, "run_dir") and self.recorder.run_dir:
-            # Stop recording if running
-            if (
-                hasattr(self.recorder, "stop_event")
-                and not self.recorder.stop_event.is_set()
-            ):
-                self.recorder.stop()
 
-    def test_valve_event_initialization(self):
-        """Test that valve event attributes are properly initialized."""
-        assert self.recorder.v4_close_time is None
-        assert self.recorder.v5_close_time is None
-        assert self.recorder.v6_close_time is None
-        assert self.recorder.v3_open_time is None
-        assert self.recorder.current_valve_index == 0
-        assert self.recorder.valve_event_sequence == [
-            "v4_close_time",
-            "v5_close_time",
-            "v6_close_time",
-            "v3_open_time",
-        ]
+@pytest.fixture
+def recorder(temp_dir, mock_gauge):
+    """Create a DataRecorder instance for valve event testing."""
+    rec = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        results_dir=temp_dir,
+        run_type="test_mode",
+        recording_interval=0.01,
+        backup_interval=0.1,
+    )
+    yield rec
+    if rec.thread and rec.thread.is_alive():
+        rec.stop()
 
-    def test_valve_event_reset_on_start(self):
-        """Test that valve events are reset when starting a new recording."""
-        # Set some initial values
-        self.recorder.v5_close_time = "2025-01-01 12:00:00"
-        self.recorder.v6_close_time = "2025-01-01 12:01:00"
-        self.recorder.current_valve_index = 2
 
-        with patch("shield_das.data_recorder.keyboard"):
-            self.recorder.start()
-            time.sleep(0.02)  # Very brief sleep for testing
-            self.recorder.stop()
+# =============================================================================
+# Tests for Valve Event Initialization
+# =============================================================================
 
-        # Check that values were reset
-        assert self.recorder.v4_close_time is None
-        assert self.recorder.v5_close_time is None
-        assert self.recorder.v6_close_time is None
-        assert self.recorder.v3_open_time is None
-        assert self.recorder.current_valve_index == 0
 
-    def test_valve_event_sequence_progression(self):
-        """Test that valve events progress through the sequence correctly."""
-        test_timestamp = "2025-08-12 15:30:00.123"  # Include milliseconds
+def test_valve_event_v4_close_time_initializes_to_none(recorder):
+    """
+    Test DataRecorder to verify v4_close_time attribute is initialized to None.
+    """
+    assert recorder.v4_close_time is None
 
-        # Start the recorder first to create directories
-        with patch("shield_das.data_recorder.keyboard"):
-            self.recorder.start()
 
-            # Now simulate valve events being recorded
-            for i, event_name in enumerate(self.recorder.valve_event_sequence):
-                # Manually trigger the valve event
-                self.recorder.current_valve_index = i
-                setattr(self.recorder, event_name, test_timestamp)
-                self.recorder._update_metadata_with_valve_time(
-                    event_name, test_timestamp
-                )
+def test_valve_event_v5_close_time_initializes_to_none(recorder):
+    """
+    Test DataRecorder to verify v5_close_time attribute is initialized to None.
+    """
+    assert recorder.v5_close_time is None
 
-                # Check that the event was recorded
-                assert getattr(self.recorder, event_name) == test_timestamp
 
-                # Check metadata was updated
-                metadata_path = os.path.join(self.recorder.run_dir, "run_metadata.json")
-                with open(metadata_path) as f:
-                    metadata = json.load(f)
-                assert metadata["run_info"][event_name] == test_timestamp
+def test_valve_event_v6_close_time_initializes_to_none(recorder):
+    """
+    Test DataRecorder to verify v6_close_time attribute is initialized to None.
+    """
+    assert recorder.v6_close_time is None
 
-            self.recorder.stop()
 
-    def test_update_metadata_with_valve_time(self):
-        """Test that metadata is correctly updated with valve event times."""
-        with patch("shield_das.data_recorder.keyboard"):
-            self.recorder.start()
+def test_valve_event_v3_open_time_initializes_to_none(recorder):
+    """
+    Test DataRecorder to verify v3_open_time attribute is initialized to None.
+    """
+    assert recorder.v3_open_time is None
 
-            test_timestamp = "2025-08-12 15:30:00.456"  # Include milliseconds
-            event_name = "v5_close_time"
 
-            # Update metadata with valve time
-            self.recorder._update_metadata_with_valve_time(event_name, test_timestamp)
+def test_valve_event_current_valve_index_initializes_to_zero(recorder):
+    """
+    Test DataRecorder to verify current_valve_index is initialized to 0.
+    """
+    assert recorder.current_valve_index == 0
 
-            # Verify metadata was updated
-            metadata_path = os.path.join(self.recorder.run_dir, "run_metadata.json")
-            with open(metadata_path) as f:
-                metadata = json.load(f)
 
+def test_valve_event_sequence_contains_four_events(recorder):
+    """
+    Test DataRecorder to verify valve_event_sequence contains exactly 4 events.
+    """
+    assert len(recorder.valve_event_sequence) == 4
+
+
+def test_valve_event_sequence_first_event_is_v4_close_time(recorder):
+    """
+    Test DataRecorder to verify first event in sequence is v4_close_time.
+    """
+    assert recorder.valve_event_sequence[0] == "v4_close_time"
+
+
+def test_valve_event_sequence_second_event_is_v5_close_time(recorder):
+    """
+    Test DataRecorder to verify second event in sequence is v5_close_time.
+    """
+    assert recorder.valve_event_sequence[1] == "v5_close_time"
+
+
+def test_valve_event_sequence_third_event_is_v6_close_time(recorder):
+    """
+    Test DataRecorder to verify third event in sequence is v6_close_time.
+    """
+    assert recorder.valve_event_sequence[2] == "v6_close_time"
+
+
+def test_valve_event_sequence_fourth_event_is_v3_open_time(recorder):
+    """
+    Test DataRecorder to verify fourth event in sequence is v3_open_time.
+    """
+    assert recorder.valve_event_sequence[3] == "v3_open_time"
+
+
+# =============================================================================
+# Tests for Valve Event Reset
+# =============================================================================
+
+
+def test_valve_event_v5_close_time_resets_on_start(recorder):
+    """
+    Test DataRecorder to verify v5_close_time is reset to None when start() called.
+    """
+    recorder.v5_close_time = "2025-01-01 12:00:00"
+    with patch("shield_das.data_recorder.keyboard"):
+        recorder.start()
+        time.sleep(0.02)
+        recorder.stop()
+    assert recorder.v5_close_time is None
+
+
+def test_valve_event_v6_close_time_resets_on_start(recorder):
+    """
+    Test DataRecorder to verify v6_close_time is reset to None when start() called.
+    """
+    recorder.v6_close_time = "2025-01-01 12:01:00"
+    with patch("shield_das.data_recorder.keyboard"):
+        recorder.start()
+        time.sleep(0.02)
+        recorder.stop()
+    assert recorder.v6_close_time is None
+
+
+def test_valve_event_v4_close_time_resets_on_start(recorder):
+    """
+    Test DataRecorder to verify v4_close_time is reset to None when start() called.
+    """
+    recorder.v4_close_time = "2025-01-01 11:59:00"
+    with patch("shield_das.data_recorder.keyboard"):
+        recorder.start()
+        time.sleep(0.02)
+        recorder.stop()
+    assert recorder.v4_close_time is None
+
+
+def test_valve_event_v3_open_time_resets_on_start(recorder):
+    """
+    Test DataRecorder to verify v3_open_time is reset to None when start() called.
+    """
+    recorder.v3_open_time = "2025-01-01 12:02:00"
+    with patch("shield_das.data_recorder.keyboard"):
+        recorder.start()
+        time.sleep(0.02)
+        recorder.stop()
+    assert recorder.v3_open_time is None
+
+
+def test_valve_event_current_valve_index_resets_to_zero_on_start(recorder):
+    """
+    Test DataRecorder to verify current_valve_index resets to 0 when start() called.
+    """
+    recorder.current_valve_index = 2
+    with patch("shield_das.data_recorder.keyboard"):
+        recorder.start()
+        time.sleep(0.02)
+        recorder.stop()
+    assert recorder.current_valve_index == 0
+
+
+# =============================================================================
+# Tests for Valve Event Metadata Updates
+# =============================================================================
+
+
+def test_update_metadata_with_valve_time_adds_event_to_metadata(recorder):
+    """
+    Test DataRecorder _update_metadata_with_valve_time to verify it adds
+    event to metadata file.
+    """
+    with patch("shield_das.data_recorder.keyboard"):
+        recorder.start()
+        test_timestamp = "2025-08-12 15:30:00.456"
+        event_name = "v5_close_time"
+        recorder._update_metadata_with_valve_time(event_name, test_timestamp)
+
+        metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        assert event_name in metadata["run_info"]
+        recorder.stop()
+
+
+def test_update_metadata_with_valve_time_stores_correct_timestamp(recorder):
+    """
+    Test DataRecorder _update_metadata_with_valve_time to verify timestamp
+    is correctly stored.
+    """
+    with patch("shield_das.data_recorder.keyboard"):
+        recorder.start()
+        test_timestamp = "2025-08-12 15:30:00.456"
+        event_name = "v5_close_time"
+        recorder._update_metadata_with_valve_time(event_name, test_timestamp)
+
+        metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        assert metadata["run_info"][event_name] == test_timestamp
+        recorder.stop()
+
+
+def test_update_metadata_with_valve_time_handles_multiple_events(recorder):
+    """
+    Test DataRecorder _update_metadata_with_valve_time to verify multiple
+    valve events can be stored.
+    """
+    with patch("shield_das.data_recorder.keyboard"):
+        recorder.start()
+
+        valve_times = {
+            "v5_close_time": "2025-08-12 15:30:00.123",
+            "v6_close_time": "2025-08-12 15:31:00.456",
+        }
+
+        for event_name, timestamp in valve_times.items():
+            recorder._update_metadata_with_valve_time(event_name, timestamp)
+
+        metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        for event_name in valve_times:
             assert event_name in metadata["run_info"]
-            assert metadata["run_info"][event_name] == test_timestamp
 
-            self.recorder.stop()
+        recorder.stop()
 
-    def test_multiple_valve_events_in_metadata(self):
-        """Test that multiple valve events can be recorded in metadata."""
-        with patch("shield_das.data_recorder.keyboard"):
-            self.recorder.start()
 
-            # Record multiple valve events
-            valve_times = {
-                "v5_close_time": "2025-08-12 15:30:00.123",
-                "v6_close_time": "2025-08-12 15:31:00.456",
-                "v7_close_time": "2025-08-12 15:32:00.789",
-                "v3_open_time": "2025-08-12 15:33:00.012",
-            }
+def test_update_metadata_with_valve_time_raises_error_when_file_missing(recorder):
+    """
+    Test DataRecorder _update_metadata_with_valve_time to verify it raises
+    FileNotFoundError when metadata file is missing.
+    """
+    with patch("shield_das.data_recorder.keyboard"):
+        recorder.start()
 
-            for event_name, timestamp in valve_times.items():
-                self.recorder._update_metadata_with_valve_time(event_name, timestamp)
+        metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+        os.remove(metadata_path)
 
-            # Verify all events are in metadata
-            metadata_path = os.path.join(self.recorder.run_dir, "run_metadata.json")
-            with open(metadata_path) as f:
-                metadata = json.load(f)
-
-            for event_name, expected_time in valve_times.items():
-                assert event_name in metadata["run_info"]
-                assert metadata["run_info"][event_name] == expected_time
-
-            self.recorder.stop()
-
-    @patch("shield_das.data_recorder.keyboard")
-    def test_keyboard_monitoring_with_keyboard_module(self, mock_keyboard):
-        """Test that keyboard monitoring works when keyboard module is available."""
-        # Mock the CI detection to return False (simulate local environment)
-        with patch.object(self.recorder, "_is_ci_environment", return_value=False):
-            # Should not raise an exception and should set up listener
-            self.recorder._monitor_keyboard()
-
-            # Verify that keyboard.on_press_key was called
-            mock_keyboard.on_press_key.assert_called_once()
-            call_args = mock_keyboard.on_press_key.call_args
-            assert call_args[0][0] == "space"  # First argument should be "space"
-
-    @patch("shield_das.data_recorder.keyboard")
-    def test_keyboard_listener_setup(self, mock_keyboard):
-        """Test that keyboard listener is properly set up when not in CI."""
-        # Mock the CI detection to return False (simulate local environment)
-        with patch.object(self.recorder, "_is_ci_environment", return_value=False):
-            self.recorder.start()
-
-            # Verify that keyboard.on_press_key was called
-            mock_keyboard.on_press_key.assert_called_once()
-            call_args = mock_keyboard.on_press_key.call_args
-            assert call_args[0][0] == "space"  # First argument should be "space"
-
-            self.recorder.stop()
-
-            # Verify keyboard cleanup
-            mock_keyboard.unhook_all.assert_called_once()
-
-    @patch("shield_das.data_recorder.keyboard")
-    def test_keyboard_listener_disabled_in_ci(self, mock_keyboard):
-        """Test that keyboard listener is disabled in CI environment."""
-        # Mock the CI detection to return True (simulate CI environment)
-        with patch.object(self.recorder, "_is_ci_environment", return_value=True):
-            self.recorder.start()
-
-            # Verify that keyboard.on_press_key was NOT called
-            mock_keyboard.on_press_key.assert_not_called()
-
-            self.recorder.stop()
-
-            # Verify keyboard cleanup was NOT called in CI environment
-            mock_keyboard.unhook_all.assert_not_called()
-
-    def test_valve_event_attributes_in_class(self):
-        """Test that all valve event attributes are properly defined in the class."""
-        # Check that all expected attributes exist
-        assert hasattr(self.recorder, "v4_close_time")
-        assert hasattr(self.recorder, "v5_close_time")
-        assert hasattr(self.recorder, "v6_close_time")
-        assert hasattr(self.recorder, "v3_open_time")
-        assert hasattr(self.recorder, "valve_event_sequence")
-        assert hasattr(self.recorder, "current_valve_index")
-
-    def test_valve_sequence_order(self):
-        """Test that the valve event sequence is in the correct order."""
-        expected_sequence = [
-            "v4_close_time",
-            "v5_close_time",
-            "v6_close_time",
-            "v3_open_time",
-        ]
-        assert self.recorder.valve_event_sequence == expected_sequence
-
-    def test_metadata_error_handling(self):
-        """Test error handling when metadata file cannot be updated."""
-        # Create a scenario where metadata update would fail
-        with patch("shield_das.data_recorder.keyboard"):
-            self.recorder.start()
-
-            # Remove the run directory to cause an error
-            metadata_path = os.path.join(self.recorder.run_dir, "run_metadata.json")
-            os.remove(metadata_path)
-
-            # This should not raise an exception, but should print an error message
-            self.recorder._update_metadata_with_valve_time(
+        with pytest.raises(FileNotFoundError):
+            recorder._update_metadata_with_valve_time(
                 "v5_close_time", "2025-08-12 15:30:00.999"
             )
 
-            self.recorder.stop()
+        recorder.stop()
+
+
+# =============================================================================
+# Tests for Valve Event Sequence Progression
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "event_index,event_name",
+    [
+        (0, "v4_close_time"),
+        (1, "v5_close_time"),
+        (2, "v6_close_time"),
+        (3, "v3_open_time"),
+    ],
+)
+def test_valve_event_can_be_set_and_retrieved(recorder, event_index, event_name):
+    """
+    Test DataRecorder to verify each valve event can be set and retrieved.
+    """
+    with patch("shield_das.data_recorder.keyboard"):
+        recorder.start()
+        test_timestamp = "2025-08-12 15:30:00.123"
+
+        recorder.current_valve_index = event_index
+        setattr(recorder, event_name, test_timestamp)
+        recorder._update_metadata_with_valve_time(event_name, test_timestamp)
+
+        assert getattr(recorder, event_name) == test_timestamp
+        recorder.stop()
+
+
+@pytest.mark.parametrize(
+    "event_index,event_name",
+    [
+        (0, "v4_close_time"),
+        (1, "v5_close_time"),
+        (2, "v6_close_time"),
+        (3, "v3_open_time"),
+    ],
+)
+def test_valve_event_updates_metadata_correctly(recorder, event_index, event_name):
+    """
+    Test DataRecorder to verify valve event updates are reflected in metadata.
+    """
+    with patch("shield_das.data_recorder.keyboard"):
+        recorder.start()
+        test_timestamp = "2025-08-12 15:30:00.123"
+
+        recorder.current_valve_index = event_index
+        setattr(recorder, event_name, test_timestamp)
+        recorder._update_metadata_with_valve_time(event_name, test_timestamp)
+
+        metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        assert metadata["run_info"][event_name] == test_timestamp
+        recorder.stop()
+
+
+# =============================================================================
+# Tests for Keyboard Monitoring
+# =============================================================================
+
+
+@patch("shield_das.data_recorder.keyboard")
+def test_keyboard_monitoring_sets_up_listener_when_not_in_ci(mock_keyboard, recorder):
+    """
+    Test DataRecorder _monitor_keyboard to verify keyboard listener is set up
+    when not in CI environment.
+    """
+    with patch.object(recorder, "_is_ci_environment", return_value=False):
+        recorder._monitor_keyboard()
+        mock_keyboard.on_press_key.assert_called_once()
+
+
+@patch("shield_das.data_recorder.keyboard")
+def test_keyboard_monitoring_uses_space_key(mock_keyboard, recorder):
+    """
+    Test DataRecorder _monitor_keyboard to verify it listens for spacebar key.
+    """
+    with patch.object(recorder, "_is_ci_environment", return_value=False):
+        recorder._monitor_keyboard()
+        call_args = mock_keyboard.on_press_key.call_args
+        assert call_args[0][0] == "space"
+
+
+@patch("shield_das.data_recorder.keyboard")
+def test_keyboard_listener_setup_on_start(mock_keyboard, recorder):
+    """
+    Test DataRecorder start() to verify keyboard listener is set up.
+    """
+    with patch.object(recorder, "_is_ci_environment", return_value=False):
+        recorder.start()
+        mock_keyboard.on_press_key.assert_called_once()
+        recorder.stop()
+
+
+@patch("shield_das.data_recorder.keyboard")
+def test_keyboard_listener_cleanup_on_stop(mock_keyboard, recorder):
+    """
+    Test DataRecorder stop() to verify keyboard listener is cleaned up.
+    """
+    with patch.object(recorder, "_is_ci_environment", return_value=False):
+        recorder.start()
+        recorder.stop()
+        mock_keyboard.unhook_all.assert_called_once()
+
+
+@patch("shield_das.data_recorder.keyboard")
+def test_keyboard_listener_disabled_in_ci_environment(mock_keyboard, recorder):
+    """
+    Test DataRecorder to verify keyboard listener is not set up in CI.
+    """
+    with patch.object(recorder, "_is_ci_environment", return_value=True):
+        recorder.start()
+        mock_keyboard.on_press_key.assert_not_called()
+        recorder.stop()
+
+
+@patch("shield_das.data_recorder.keyboard")
+def test_keyboard_cleanup_not_called_in_ci_environment(mock_keyboard, recorder):
+    """
+    Test DataRecorder to verify keyboard cleanup is not called in CI.
+    """
+    with patch.object(recorder, "_is_ci_environment", return_value=True):
+        recorder.start()
+        recorder.stop()
+        mock_keyboard.unhook_all.assert_not_called()
+
+
+# =============================================================================
+# Tests for Valve Event Attributes
+# =============================================================================
+
+
+def test_valve_event_v4_close_time_attribute_exists(recorder):
+    """
+    Test DataRecorder to verify v4_close_time attribute exists.
+    """
+    assert hasattr(recorder, "v4_close_time")
+
+
+def test_valve_event_v5_close_time_attribute_exists(recorder):
+    """
+    Test DataRecorder to verify v5_close_time attribute exists.
+    """
+    assert hasattr(recorder, "v5_close_time")
+
+
+def test_valve_event_v6_close_time_attribute_exists(recorder):
+    """
+    Test DataRecorder to verify v6_close_time attribute exists.
+    """
+    assert hasattr(recorder, "v6_close_time")
+
+
+def test_valve_event_v3_open_time_attribute_exists(recorder):
+    """
+    Test DataRecorder to verify v3_open_time attribute exists.
+    """
+    assert hasattr(recorder, "v3_open_time")
+
+
+def test_valve_event_sequence_attribute_exists(recorder):
+    """
+    Test DataRecorder to verify valve_event_sequence attribute exists.
+    """
+    assert hasattr(recorder, "valve_event_sequence")
+
+
+def test_valve_event_current_valve_index_attribute_exists(recorder):
+    """
+    Test DataRecorder to verify current_valve_index attribute exists.
+    """
+    assert hasattr(recorder, "current_valve_index")

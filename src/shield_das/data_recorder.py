@@ -65,7 +65,7 @@ class DataRecorder:
     run_type: str
     recording_interval: float
     backup_interval: float
-    sample_material: str | None
+    sample_material: str
     sample_thickness: float
 
     stop_event: threading.Event
@@ -201,13 +201,9 @@ class DataRecorder:
         date_dir = os.path.join(self.results_dir, current_date)
         os.makedirs(date_dir, exist_ok=True)
 
-        # Determine directory type and message based on test mode
-        if self.test_mode:
-            prefix = "test_run"
-            message = "Created test results directory"
-        else:
-            prefix = "run"
-            message = "Created results directory"
+        # Determine directory type based on test mode
+        prefix = "test_run" if self.test_mode else "run"
+        message = f"Created {'test ' if self.test_mode else ''}results directory"
 
         return self._create_numbered_directory(date_dir, prefix, current_time, message)
 
@@ -275,7 +271,8 @@ class DataRecorder:
                 "data_filename": "shield_data.csv",
             },
         }
-        if len(self.gauges) > 0:
+
+        if self.gauges:
             metadata["gauges"] = [
                 {
                     "name": gauge.name,
@@ -290,7 +287,8 @@ class DataRecorder:
                 }
                 for gauge in self.gauges
             ]
-        if len(self.thermocouples) > 0:
+
+        if self.thermocouples:
             metadata["thermocouples"] = [
                 {
                     "name": (
@@ -318,6 +316,7 @@ class DataRecorder:
             print("CI environment detected. Keyboard monitoring disabled.")
             return
 
+        # Validate valve index is within bounds
         if not (0 <= self.current_valve_index < len(self.valve_event_sequence)):
             print(
                 "Warning: current_valve_index is out of bounds. "
@@ -355,18 +354,16 @@ class DataRecorder:
 
     def _is_ci_environment(self) -> bool:
         """Detect if we're running in a CI environment."""
-        # Common CI environment variables
         ci_indicators = [
-            "CI",  # GitHub Actions, GitLab CI, etc.
+            "CI",
             "GITHUB_ACTIONS",
             "GITLAB_CI",
             "TRAVIS",
             "CIRCLECI",
             "JENKINS_URL",
             "BUILDKITE",
-            "TF_BUILD",  # Azure DevOps
+            "TF_BUILD",
         ]
-
         return any(os.getenv(var) for var in ci_indicators)
 
     def _update_metadata_with_valve_time(self, event_name: str, timestamp: str):
@@ -378,18 +375,23 @@ class DataRecorder:
         """
         metadata_path = os.path.join(self.run_dir, "run_metadata.json")
 
-        try:
-            with open(metadata_path) as f:
-                metadata = json.load(f)
+        with open(metadata_path) as f:
+            metadata = json.load(f)
 
-            metadata["run_info"][event_name] = timestamp
+        metadata["run_info"][event_name] = timestamp
 
-            with open(metadata_path, "w") as f:
-                json.dump(metadata, f, indent=2)
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
 
-            print(f"Updated metadata with {event_name}: {timestamp}")
-        except Exception as e:
-            print(f"Error updating metadata with {event_name}: {e}")
+        print(f"Updated metadata with {event_name}: {timestamp}")
+
+    def _reset_valve_events(self):
+        """Reset all valve event times and tracking for a new recording session."""
+        self.v4_close_time = None
+        self.v5_close_time = None
+        self.v6_close_time = None
+        self.v3_open_time = None
+        self.current_valve_index = 0
 
     def start(self):
         """Start recording data"""
@@ -405,11 +407,7 @@ class DataRecorder:
         self.start_time = datetime.now()
 
         # Reset all valve events for new run
-        self.v4_close_time = None
-        self.v5_close_time = None
-        self.v6_close_time = None
-        self.v3_open_time = None
-        self.current_valve_index = 0
+        self._reset_valve_events()
 
         # Create directories and setup files only when recording starts
         self.run_dir = self._create_results_directory()
@@ -507,11 +505,10 @@ class DataRecorder:
         Returns:
             Dictionary containing measurement data
         """
-        # Collect voltages from all gauges
+        # Collect voltages from all gauges and thermocouples
         for gauge in self.gauges:
             gauge.record_ain_channel_voltage(labjack=labjack)
 
-        # Collect voltages from all gauges
         for thermocouple in self.thermocouples:
             thermocouple.record_ain_channel_voltage(labjack=labjack)
 
