@@ -5,8 +5,8 @@ class Thermocouple:
     """
     Class to handle Type K thermocouple data acquisition and conversion.
 
-    This class reads the thermocouple voltage and converts it to temperature
-    using NIST ITS-90 polynomial coefficients.
+    This class reads the thermocouple voltage and converts it to temperature using NIST
+    ITS-90 polynomial coefficients.
 
     Args:
         name: Name of the thermocouple
@@ -14,8 +14,8 @@ class Thermocouple:
     Attributes:
         name: Name of the thermocouple
         voltage_data: List to store voltage readings in millivolts
-        local_temperature_data: List to store local temperature readings for
-            cold junction compensation in degrees Celsius
+        local_temperature_data: List to store local temperature readings for cold
+            junction compensation in degrees Celsius
     """
 
     name: str
@@ -48,15 +48,15 @@ class Thermocouple:
         applies cold junction compensation, and converts the resulting voltage to
         temperature.
 
-        args:
+        Args:
             labjack: An instance of the LabJack U6 device.
-            pos_channel: The positive analog input channel number connected to the
-                thermocouple positive lead (default 0).
+            resolution_index: The LabJack resolution index for ADC measurement
+                (default 8).
             gain_index: The LabJack gain setting index to set input voltage range and
-                resolution (default 3, ±0.1 V range).
+                resolution (default 2).
 
-        returns:
-            float: The calculated temperature in degrees Celsius.
+        Returns:
+            The calculated temperature in degrees Celsius.
         """
         if labjack is None:
             rng = np.random.default_rng()
@@ -83,25 +83,46 @@ class Thermocouple:
 def evaluate_poly(
     coeffs: list[float] | tuple[float], x: float | np.ndarray
 ) -> float | np.ndarray:
-    """ "
-    Evaluate a polynomial at x given the list of coefficients.
+    """
+    Evaluate a polynomial at x using the given coefficients.
 
-    The polynomial is:
+    The polynomial is evaluated as:
         P(x) = a0 + a1*x + a2*x^2 + ... + an*x^n
     where coeffs = [a0, a1, ..., an]
 
-    args:
-        coeffs:Polynomial coefficients ordered by ascending power.
+    This implementation uses NumPy's polyval for better numerical stability
+    and performance, especially with array inputs.
+
+    Args:
+        coeffs: Polynomial coefficients ordered by ascending power
+            (constant term first).
         x: The value(s) at which to evaluate the polynomial (scalar or array).
 
-    returns;
-        float or ndarray: The evaluated polynomial result(s).
+    Returns:
+        The evaluated polynomial result(s), same shape as input x.
+
+    Example:
+
+        .. highlight:: python
+        .. code-block:: python
+
+            from shield_das.thermocouple import evaluate_poly
+
+            # Evaluate P(x) = 2 + 3x + 4x^2 at x=1
+            result = evaluate_poly([2, 3, 4], 1)
+            print(result)  # 9
+
+    Note:
+        NumPy's polyval expects coefficients in descending power order, so we
+        reverse the input coefficients internally.
     """
     if not coeffs:
-        # Return 0 for empty coefficient list (matches expected behavior)
-        return 0.0 if isinstance(x, (int, float)) else np.zeros_like(x, dtype=float)
+        # Return 0 for empty coefficient list
+        return 0.0 if isinstance(x, int | float) else np.zeros_like(x, dtype=float)
 
-    return sum(a * x**i for i, a in enumerate(coeffs))
+    # np.polyval expects coefficients in descending power order (highest first)
+    # but we receive them in ascending order (constant first), so reverse them
+    return np.polyval(coeffs[::-1], x)
 
 
 def volts_to_temp_constants(mv: float | np.ndarray) -> tuple[float, ...]:
@@ -111,18 +132,19 @@ def volts_to_temp_constants(mv: float | np.ndarray) -> tuple[float, ...]:
 
     The valid voltage range is -5.891 mV to 54.886 mV.
 
-    Note: When mv is an array, this function returns coefficients for a single
-    voltage range. For array inputs, use mv_to_temp_c which handles mixed ranges.
-
-    args:
+    Args:
         mv: Thermocouple voltage in millivolts (scalar or array).
 
-    returns:
-        tuple of float: Polynomial coefficients for the voltage-to-temperature
-        conversion.
+    Returns:
+        Polynomial coefficients for the voltage-to-temperature conversion.
 
-    raises:
+    Raises:
         ValueError: If the input voltage is out of the valid range.
+
+    Note:
+        When mv is an array, this function returns coefficients for a single
+        voltage range. For array inputs, use mv_to_temp_c which handles mixed
+        ranges properly.
     """
     # For arrays, use the first element to determine range
     # (mv_to_temp_c handles mixed ranges properly)
@@ -180,22 +202,22 @@ def temp_to_volts_constants(
 
     Valid temperature range is -270°C to 1372°C.
 
-    Note: When temp_c is an array, this function returns coefficients for a
-    single temperature range. For array inputs, use temp_c_to_mv which handles
-    mixed ranges.
-
-    args:
+    Args:
         temp_c: Temperature in degrees Celsius (scalar or array).
 
-    returns:
+    Returns:
         Tuple containing:
-            - tuple of float: Polynomial coefficients for
-              temperature-to-voltage conversion.
-            - tuple of three floats or None: Extended exponential term
-              coefficients for temp >= 0°C, else None.
+            - Polynomial coefficients for temperature-to-voltage conversion.
+            - Extended exponential term coefficients (a0, a1, a2) for temp >= 0°C,
+              or None for temp < 0°C.
 
-    raises:
+    Raises:
         ValueError: If the input temperature is out of the valid range.
+
+    Note:
+        When temp_c is an array, this function returns coefficients for a
+        single temperature range. For array inputs, use temp_c_to_mv which handles
+        mixed ranges properly.
     """
     # For arrays, use the first element to determine range
     # (temp_c_to_mv handles mixed ranges properly)
@@ -242,52 +264,69 @@ def temp_c_to_mv(temp_c: float | np.ndarray) -> float | np.ndarray:
     NIST ITS-90 polynomial approximations and an exponential correction for
     temperatures ≥ 0 °C.
 
-    args:
+    Args:
         temp_c: Temperature in degrees Celsius (scalar or array).
 
-    returns:
-        float or ndarray: Thermocouple voltage in millivolts.
+    Returns:
+        Thermocouple voltage in millivolts, same shape as input.
 
-    raises:
-        ValueError: If any temperature is out of the valid range (-270 to 1372 C).
+    Raises:
+        ValueError: If any temperature is out of the valid range (-270 to 1372 °C).
     """
     # Handle scalar case directly
-    if isinstance(temp_c, (int, float)):
-        coeffs, extended = temp_to_volts_constants(temp_c)
-        mv = evaluate_poly(coeffs, temp_c)
-        if extended:
-            a0, a1, a2 = extended
-            mv += a0 * np.exp(a1 * (temp_c - a2) ** 2)
-        return mv
+    if isinstance(temp_c, int | float):
+        polynomial_coefficients, exponential_coefficients = temp_to_volts_constants(
+            temp_c
+        )
+        voltage_millivolts = evaluate_poly(polynomial_coefficients, temp_c)
+        if exponential_coefficients:
+            amplitude, exponent_factor, reference_temp = exponential_coefficients
+            exponential_correction = amplitude * np.exp(
+                exponent_factor * (temp_c - reference_temp) ** 2
+            )
+            voltage_millivolts += exponential_correction
+        return voltage_millivolts
 
     # Handle array case
-    temp_c = np.asarray(temp_c)
-    is_scalar = temp_c.ndim == 0
-    temp_c = np.atleast_1d(temp_c)
+    temperature_array = np.asarray(temp_c)
+    input_is_scalar = temperature_array.ndim == 0
+    temperature_array = np.atleast_1d(temperature_array)
 
     # Validate temperature range
-    if np.any(temp_c < -270) or np.any(temp_c > 1372):
+    if np.any(temperature_array < -270) or np.any(temperature_array > 1372):
         raise ValueError("Temperature out of valid Type K range (-270 to 1372 C).")
 
     # Initialize output array
-    mv = np.zeros_like(temp_c, dtype=float)
+    voltage_millivolts = np.zeros_like(temperature_array, dtype=float)
 
     # Handle negative temperatures (Range: -270 °C to 0 °C)
-    mask_neg = temp_c < 0
-    if np.any(mask_neg):
-        coeffs_neg, _ = temp_to_volts_constants(-100.0)  # Representative value
-        mv[mask_neg] = evaluate_poly(coeffs_neg, temp_c[mask_neg])
+    negative_temp_mask = temperature_array < 0
+    if np.any(negative_temp_mask):
+        negative_coeffs, _ = temp_to_volts_constants(
+            -100.0
+        )  # Representative negative value
+        voltage_millivolts[negative_temp_mask] = evaluate_poly(
+            negative_coeffs, temperature_array[negative_temp_mask]
+        )
 
     # Handle positive temperatures (Range: 0 °C to 1372 °C)
-    mask_pos = temp_c >= 0
-    if np.any(mask_pos):
-        coeffs_pos, extended = temp_to_volts_constants(100.0)  # Representative value
-        mv[mask_pos] = evaluate_poly(coeffs_pos, temp_c[mask_pos])
-        if extended:
-            a0, a1, a2 = extended
-            mv[mask_pos] += a0 * np.exp(a1 * (temp_c[mask_pos] - a2) ** 2)
+    positive_temp_mask = temperature_array >= 0
+    if np.any(positive_temp_mask):
+        positive_coeffs, exponential_coefficients = temp_to_volts_constants(
+            100.0
+        )  # Representative positive value
+        voltage_millivolts[positive_temp_mask] = evaluate_poly(
+            positive_coeffs, temperature_array[positive_temp_mask]
+        )
+        if exponential_coefficients:
+            amplitude, exponent_factor, reference_temp = exponential_coefficients
+            exponential_correction = amplitude * np.exp(
+                exponent_factor
+                * (temperature_array[positive_temp_mask] - reference_temp) ** 2
+            )
+            voltage_millivolts[positive_temp_mask] += exponential_correction
 
-    return mv.item() if is_scalar else mv
+    return voltage_millivolts.item() if input_is_scalar else voltage_millivolts
 
 
 def mv_to_temp_c(mv: float | np.ndarray) -> float | np.ndarray:
@@ -295,41 +334,52 @@ def mv_to_temp_c(mv: float | np.ndarray) -> float | np.ndarray:
     Convert Type K thermocouple voltage (mV) to temperature (°C) using
     NIST ITS-90 polynomial approximations.
 
-    args:
+    Args:
         mv: Thermocouple voltage in millivolts (scalar or array).
 
-    returns:
-        float or ndarray: Temperature in degrees Celsius.
+    Returns:
+        Temperature in degrees Celsius, same shape as input.
+
+    Raises:
+        ValueError: If any voltage is out of the valid range (-5.891 to 54.886 mV).
     """
     # Handle scalar case directly
-    if isinstance(mv, (int, float)):
-        coeffs = volts_to_temp_constants(mv)
-        return evaluate_poly(coeffs, mv)
+    if isinstance(mv, int | float):
+        polynomial_coefficients = volts_to_temp_constants(mv)
+        return evaluate_poly(polynomial_coefficients, mv)
 
     # Handle array case
-    mv = np.asarray(mv)
-    is_scalar = mv.ndim == 0
-    mv = np.atleast_1d(mv)
+    voltage_array = np.asarray(mv)
+    input_is_scalar = voltage_array.ndim == 0
+    voltage_array = np.atleast_1d(voltage_array)
 
     # Initialize output array
-    temp = np.zeros_like(mv, dtype=float)
+    temperature_celsius = np.zeros_like(voltage_array, dtype=float)
 
-    # Range 1: -5.891 mV to 0 mV
-    mask_neg = mv < 0
-    if np.any(mask_neg):
-        coeffs_neg = volts_to_temp_constants(-1.0)  # Representative value
-        temp[mask_neg] = evaluate_poly(coeffs_neg, mv[mask_neg])
+    # Range 1: -5.891 mV to 0 mV (negative voltages)
+    negative_voltage_mask = voltage_array < 0
+    if np.any(negative_voltage_mask):
+        negative_range_coeffs = volts_to_temp_constants(
+            -1.0
+        )  # Representative negative value
+        temperature_celsius[negative_voltage_mask] = evaluate_poly(
+            negative_range_coeffs, voltage_array[negative_voltage_mask]
+        )
 
-    # Range 2: 0 mV to 20.644 mV
-    mask_mid = (mv >= 0) & (mv < 20.644)
-    if np.any(mask_mid):
-        coeffs_mid = volts_to_temp_constants(10.0)  # Representative value
-        temp[mask_mid] = evaluate_poly(coeffs_mid, mv[mask_mid])
+    # Range 2: 0 mV to 20.644 mV (mid-range voltages)
+    mid_voltage_mask = (voltage_array >= 0) & (voltage_array < 20.644)
+    if np.any(mid_voltage_mask):
+        mid_range_coeffs = volts_to_temp_constants(10.0)  # Representative mid value
+        temperature_celsius[mid_voltage_mask] = evaluate_poly(
+            mid_range_coeffs, voltage_array[mid_voltage_mask]
+        )
 
-    # Range 3: 20.644 mV to 54.886 mV
-    mask_high = mv >= 20.644
-    if np.any(mask_high):
-        coeffs_high = volts_to_temp_constants(30.0)  # Representative value
-        temp[mask_high] = evaluate_poly(coeffs_high, mv[mask_high])
+    # Range 3: 20.644 mV to 54.886 mV (high-range voltages)
+    high_voltage_mask = voltage_array >= 20.644
+    if np.any(high_voltage_mask):
+        high_range_coeffs = volts_to_temp_constants(30.0)  # Representative high value
+        temperature_celsius[high_voltage_mask] = evaluate_poly(
+            high_range_coeffs, voltage_array[high_voltage_mask]
+        )
 
-    return temp.item() if is_scalar else temp
+    return temperature_celsius.item() if input_is_scalar else temperature_celsius
