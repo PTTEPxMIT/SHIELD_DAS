@@ -65,7 +65,7 @@ class DataRecorder:
     run_type: str
     recording_interval: float
     backup_interval: float
-    sample_material: str | None
+    sample_material: str
     sample_thickness: float
 
     stop_event: threading.Event
@@ -318,13 +318,6 @@ class DataRecorder:
             print("CI environment detected. Keyboard monitoring disabled.")
             return
 
-        if not (0 <= self.current_valve_index < len(self.valve_event_sequence)):
-            print(
-                "Warning: current_valve_index is out of bounds. "
-                "Keyboard monitoring aborted."
-            )
-            return
-
         current_event = self.valve_event_sequence[self.current_valve_index]
         print(f"Press SPACEBAR to record {current_event}...")
 
@@ -378,18 +371,15 @@ class DataRecorder:
         """
         metadata_path = os.path.join(self.run_dir, "run_metadata.json")
 
-        try:
-            with open(metadata_path) as f:
-                metadata = json.load(f)
+        with open(metadata_path) as f:
+            metadata = json.load(f)
 
-            metadata["run_info"][event_name] = timestamp
+        metadata["run_info"][event_name] = timestamp
 
-            with open(metadata_path, "w") as f:
-                json.dump(metadata, f, indent=2)
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
 
-            print(f"Updated metadata with {event_name}: {timestamp}")
-        except Exception as e:
-            print(f"Error updating metadata with {event_name}: {e}")
+        print(f"Updated metadata with {event_name}: {timestamp}")
 
     def start(self):
         """Start recording data"""
