@@ -6,11 +6,92 @@ These tests focus on the valve lines display feature and checkbox controls.
 import json
 import os
 import tempfile
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, MagicMock, patch
 
+import numpy as np
 import pytest
 
 from shield_das.data_plotter import DataPlotter
+
+
+def create_mock_dataset(
+    name="Test Dataset",
+    colour="#FF0000",
+    time_data=None,
+    upstream_pressure=None,
+    downstream_pressure=None,
+    upstream_error=None,
+    downstream_error=None,
+    valve_times=None,
+):
+    """
+    Helper function to create a mock Dataset object for testing.
+
+    Args:
+        name: Dataset name
+        colour: Dataset color
+        time_data: Time data array
+        upstream_pressure: Upstream pressure data array
+        downstream_pressure: Downstream pressure data array
+        upstream_error: Upstream error data array
+        downstream_error: Downstream error data array
+        valve_times: Dictionary of valve timing events
+
+    Returns:
+        MagicMock object configured as a Dataset
+    """
+    dataset = MagicMock()
+
+    # Set basic attributes
+    dataset.name = name
+    dataset.colour = colour
+
+    # Set data arrays with defaults if not provided
+    default_time = (
+        time_data if time_data is not None else np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
+    )
+    dataset.time_data = default_time
+
+    dataset.upstream_pressure = (
+        upstream_pressure
+        if upstream_pressure is not None
+        else np.array([10.0, 15.0, 20.0, 25.0, 30.0, 35.0])
+    )
+    dataset.downstream_pressure = (
+        downstream_pressure
+        if downstream_pressure is not None
+        else np.array([5.0, 7.5, 10.0, 12.5, 15.0, 17.5])
+    )
+
+    dataset.upstream_error = (
+        upstream_error
+        if upstream_error is not None
+        else np.array([1.0, 1.5, 2.0, 2.5, 3.0, 3.5])
+    )
+    dataset.downstream_error = (
+        downstream_error
+        if downstream_error is not None
+        else np.array([0.5, 0.75, 1.0, 1.25, 1.5, 1.75])
+    )
+
+    # Set valve times
+    dataset.valve_times = (
+        valve_times
+        if valve_times is not None
+        else {
+            "v4_close_time": 1.5,
+            "v5_close_time": 2.5,
+            "v6_close_time": 3.5,
+            "v3_open_time": 4.5,
+        }
+    )
+
+    # Temperature data attributes (can be None)
+    dataset.thermocouple_data = None
+    dataset.local_temperature_data = None
+    dataset.thermocouple_name = None
+
+    return dataset
 
 
 class TestValveTimeVisualization:
@@ -22,33 +103,30 @@ class TestValveTimeVisualization:
         self.plotter = DataPlotter()
 
         # Create mock dataset with valve times
-        self.mock_dataset = {
-            "name": "Test Dataset",
-            "colour": "#FF0000",
-            "time_data": [0, 1, 2, 3, 4, 5],
-            "upstream_data": {
-                "pressure_data": [10, 15, 20, 25, 30, 35],
-                "error_data": [1, 1.5, 2, 2.5, 3, 3.5],
-            },
-            "downstream_data": {
-                "pressure_data": [5, 7.5, 10, 12.5, 15, 17.5],
-                "error_data": [0.5, 0.75, 1, 1.25, 1.5, 1.75],
-            },
-            "valve_times": {
+        self.mock_dataset = create_mock_dataset(
+            name="Test Dataset",
+            colour="#FF0000",
+            time_data=np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0]),
+            upstream_pressure=np.array([10.0, 15.0, 20.0, 25.0, 30.0, 35.0]),
+            downstream_pressure=np.array([5.0, 7.5, 10.0, 12.5, 15.0, 17.5]),
+            upstream_error=np.array([1.0, 1.5, 2.0, 2.5, 3.0, 3.5]),
+            downstream_error=np.array([0.5, 0.75, 1.0, 1.25, 1.5, 1.75]),
+            valve_times={
                 "v4_close_time": 1.5,
                 "v5_close_time": 2.5,
                 "v6_close_time": 3.5,
                 "v3_open_time": 4.5,
             },
-        }
+        )
 
         # Add dataset to plotter
-        self.plotter.datasets = {"test_dataset": self.mock_dataset}
+        self.plotter.datasets = [self.mock_dataset]
 
     def test_valve_times_constant_exists(self):
         """Test that PLOT_CONTROL_STATES constant includes valve time states."""
-        assert hasattr(self.plotter, "PLOT_CONTROL_STATES")
-        states = [state.component_id for state in self.plotter.PLOT_CONTROL_STATES]
+        from shield_das.callbacks.states import PLOT_CONTROL_STATES
+
+        states = [state.component_id for state in PLOT_CONTROL_STATES]
         assert "show-valve-times-upstream" in states
         assert "show-valve-times-downstream" in states
 
@@ -76,7 +154,7 @@ class TestValveTimeVisualization:
         annotations = fig.layout.annotations or []
 
         # Should have vertical lines for each valve event
-        expected_valve_count = len(self.mock_dataset["valve_times"])
+        expected_valve_count = len(self.mock_dataset.valve_times)
 
         # Note: plotly add_vline creates shapes, so we check for vertical lines
         vertical_lines = [
@@ -142,24 +220,23 @@ class TestValveTimeVisualization:
             assert downstream_fig is not None
 
     def test_empty_valve_times_handling(self):
-        """Test handling of datasets with no valve times."""
-        # Create dataset without valve times
-        dataset_no_valves = {
-            "name": "No Valves Dataset",
-            "colour": "#00FF00",
-            "time_data": [0, 1, 2],
-            "upstream_data": {"pressure_data": [10, 20, 30], "error_data": [1, 2, 3]},
-            "downstream_data": {
-                "pressure_data": [5, 10, 15],
-                "error_data": [0.5, 1, 1.5],
-            },
-            # No valve_times key
-        }
+        """Test handling of datasets with empty valve times."""
+        # Create dataset with empty valve times
+        dataset_no_valves = create_mock_dataset(
+            name="No Valves Dataset",
+            colour="#00FF00",
+            time_data=np.array([0.0, 1.0, 2.0]),
+            upstream_pressure=np.array([10.0, 20.0, 30.0]),
+            downstream_pressure=np.array([5.0, 10.0, 15.0]),
+            upstream_error=np.array([1.0, 2.0, 3.0]),
+            downstream_error=np.array([0.5, 1.0, 1.5]),
+            valve_times={},  # Empty valve times
+        )
 
         plotter = DataPlotter()
-        plotter.datasets = {"no_valves": dataset_no_valves}
+        plotter.datasets = [dataset_no_valves]
 
-        # Should handle missing valve_times gracefully
+        # Should handle empty valve_times gracefully
         upstream_fig = plotter._generate_upstream_plot(show_valve_times=True)
         downstream_fig = plotter._generate_downstream_plot(show_valve_times=True)
 
@@ -168,20 +245,19 @@ class TestValveTimeVisualization:
 
     def test_valve_times_with_empty_dict(self):
         """Test handling of datasets with empty valve_times dict."""
-        dataset_empty_valves = {
-            "name": "Empty Valves Dataset",
-            "colour": "#0000FF",
-            "time_data": [0, 1, 2],
-            "upstream_data": {"pressure_data": [10, 20, 30], "error_data": [1, 2, 3]},
-            "downstream_data": {
-                "pressure_data": [5, 10, 15],
-                "error_data": [0.5, 1, 1.5],
-            },
-            "valve_times": {},  # Empty dict
-        }
+        dataset_empty_valves = create_mock_dataset(
+            name="Empty Valves Dataset",
+            colour="#0000FF",
+            time_data=np.array([0.0, 1.0, 2.0]),
+            upstream_pressure=np.array([10.0, 20.0, 30.0]),
+            downstream_pressure=np.array([5.0, 10.0, 15.0]),
+            upstream_error=np.array([1.0, 2.0, 3.0]),
+            downstream_error=np.array([0.5, 1.0, 1.5]),
+            valve_times={},  # Empty dict
+        )
 
         plotter = DataPlotter()
-        plotter.datasets = {"empty_valves": dataset_empty_valves}
+        plotter.datasets = [dataset_empty_valves]
 
         # Should handle empty valve_times dict gracefully
         upstream_fig = plotter._generate_upstream_plot(show_valve_times=True)
@@ -193,27 +269,23 @@ class TestValveTimeVisualization:
     def test_multiple_datasets_with_different_valve_times(self):
         """Test plotting multiple datasets with different valve times."""
         # Create second dataset with different valve times
-        dataset2 = {
-            "name": "Dataset 2",
-            "colour": "#00FFFF",
-            "time_data": [0, 1, 2, 3, 4],
-            "upstream_data": {
-                "pressure_data": [5, 10, 15, 20, 25],
-                "error_data": [0.5, 1, 1.5, 2, 2.5],
-            },
-            "downstream_data": {
-                "pressure_data": [2.5, 5, 7.5, 10, 12.5],
-                "error_data": [0.25, 0.5, 0.75, 1, 1.25],
-            },
-            "valve_times": {
+        dataset2 = create_mock_dataset(
+            name="Dataset 2",
+            colour="#00FFFF",
+            time_data=np.array([0.0, 1.0, 2.0, 3.0, 4.0]),
+            upstream_pressure=np.array([5.0, 10.0, 15.0, 20.0, 25.0]),
+            downstream_pressure=np.array([2.5, 5.0, 7.5, 10.0, 12.5]),
+            upstream_error=np.array([0.5, 1.0, 1.5, 2.0, 2.5]),
+            downstream_error=np.array([0.25, 0.5, 0.75, 1.0, 1.25]),
+            valve_times={
                 "v4_close_time": 0.8,
                 "v5_close_time": 1.8,
                 "v3_open_time": 3.8,
             },
-        }
+        )
 
         plotter = DataPlotter()
-        plotter.datasets = {"dataset1": self.mock_dataset, "dataset2": dataset2}
+        plotter.datasets = [self.mock_dataset, dataset2]
 
         # Should handle multiple datasets with different valve configurations
         upstream_fig = plotter._generate_upstream_plot(show_valve_times=True)
@@ -293,7 +365,7 @@ class TestValveTimeEdgeCases:
     def test_no_datasets_loaded(self):
         """Test behavior when no datasets are loaded."""
         plotter = DataPlotter()
-        plotter.datasets = {}
+        plotter.datasets = []
 
         # Should handle empty datasets gracefully
         upstream_fig = plotter._generate_upstream_plot(show_valve_times=True)
