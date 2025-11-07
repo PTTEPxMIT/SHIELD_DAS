@@ -346,7 +346,7 @@ def calculate_permeability_from_flux(
 
 
 def evaluate_permeability_values(
-    datasets: dict[str, dict[str, any]],
+    datasets: list,
 ) -> tuple[list[float], list[UFloat], NDArray, NDArray, list[float], list[float]]:
     """
     Evaluate permeability values from multiple experimental datasets with uncertainty
@@ -377,12 +377,9 @@ def evaluate_permeability_values(
        ascending temperature
 
     Args:
-        datasets: Dictionary of experimental datasets where each key is a run
-            identifier and each value is a dict containing 'temperature' (float, K),
-            'time_data' (array-like, seconds), 'upstream_data' (dict with
-            'pressure_data' in torr), 'downstream_data' (dict with 'pressure_data' in
-            torr), and optionally 'sample_thickness' (float, metres, defaults to
-            0.00088 m).
+        datasets: List of Dataset objects with attributes: furnace_setpoint (float, K),
+            time_data (array-like, seconds), upstream_pressure (array-like, torr),
+            downstream_pressure (array-like, torr), and sample_thickness (float, metres).
 
     Returns:
         A tuple of six elements: all_temperatures (list of all input temperatures in
@@ -398,19 +395,19 @@ def evaluate_permeability_values(
         .. code-block:: python
 
             from shield_das.analysis import evaluate_permeability_values
+            from shield_das.dataset import Dataset
             import numpy as np
 
-            datasets = {
-                "run1": {
-                    "temperature": 873,
-                    "time_data": np.linspace(0, 100, 100),
-                    "upstream_data": {"pressure_data": np.full(100, 100.0)},
-                    "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-                    "sample_thickness": 0.00088
-                }
-            }
+            # Create dataset with required attributes
+            dataset = Dataset(path="data/run1", name="Run 1")
+            dataset.furnace_setpoint = 873
+            dataset.time_data = np.linspace(0, 100, 100)
+            dataset.upstream_pressure = np.full(100, 100.0)
+            dataset.downstream_pressure = np.linspace(0.1, 1.0, 100)
+            dataset.sample_thickness = 0.00088
+
             temps, perms, x_err, y_err, err_low, err_up = (
-                evaluate_permeability_values(datasets)
+                evaluate_permeability_values([dataset])
             )
             print(f"Temperature: {temps[0]} K")
             print(f"Permeability: {perms[0].n:.2e} ± {perms[0].s:.2e}")
@@ -435,16 +432,18 @@ def evaluate_permeability_values(
     all_permeabilities = []
 
     # Process each experimental run
-    for run_name, dataset in datasets.items():
-        # Extract data from dataset dictionary
-        temperature_kelvin = dataset["temperature"]
-        time_data_seconds = dataset["time_data"]
-        upstream_pressure_torr = dataset["upstream_data"]["pressure_data"]
-        downstream_pressure_torr = dataset["downstream_data"]["pressure_data"]
+    for dataset in datasets:
+        # Extract data from dataset object
+        temperature_kelvin = dataset.furnace_setpoint
+        time_data_seconds = dataset.time_data
+        upstream_pressure_torr = dataset.upstream_pressure
+        downstream_pressure_torr = dataset.downstream_pressure
 
         # Get sample thickness (use default if not specified)
-        sample_thickness_metres = dataset.get(
-            "sample_thickness", DEFAULT_SAMPLE_THICKNESS_METRES
+        sample_thickness_metres = (
+            dataset.sample_thickness
+            if dataset.sample_thickness is not None
+            else DEFAULT_SAMPLE_THICKNESS_METRES
         )
 
         # Calculate stable upstream pressure after initial transient
