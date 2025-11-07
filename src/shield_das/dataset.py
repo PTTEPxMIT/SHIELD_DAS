@@ -155,15 +155,21 @@ class Dataset:
         self.downstream_error = calculate_error_on_pressure_reading(downstream_pressure)
 
         # Process temperature data if present
-        if len(self.metadata.get("thermocouples", [])) > 0:
+        try:
             local_temperature_data = np.array(data["Local_temperature_C"], dtype=float)
-            self.local_temperature_data = local_temperature_data  # Store for plotting
+            self.local_temperature_data = local_temperature_data
             tname = self.metadata["thermocouples"][0]["name"]
             self.thermocouple_name = tname
             volt_vals = np.array(data[f"{tname}_Voltage_mV"], dtype=float)
             self.thermocouple_data = voltage_to_temperature(
                 local_temperature=local_temperature_data, voltage=volt_vals
             )
+        except (KeyError, ValueError, IndexError) as e:
+            # Temperature data not available or invalid
+            print(f"Warning: Could not load temperature data for {self.name}: {e}")
+            self.local_temperature_data = None
+            self.thermocouple_data = None
+            self.thermocouple_name = None
 
         # Extract valve times
         self.valve_times = {}

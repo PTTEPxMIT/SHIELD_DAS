@@ -661,10 +661,19 @@ def fit_permeability_data(
     inverse_temperature_scaled = 1000 / temperature_array
 
     # Fit polynomial of degree 1 (linear: y = mx + c)
+    # Suppress RankWarning about poorly conditioned fit (expected for small datasets)
     POLYNOMIAL_DEGREE = 1
-    fit_coefficients = np.polyfit(
-        inverse_temperature_scaled, log10_permeability, POLYNOMIAL_DEGREE, w=fit_weights
-    )
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        fit_coefficients = np.polyfit(
+            inverse_temperature_scaled,
+            log10_permeability,
+            POLYNOMIAL_DEGREE,
+            w=fit_weights,
+        )
+
     slope_coefficient = fit_coefficients[0]
     intercept_coefficient = fit_coefficients[1]
 
