@@ -67,6 +67,9 @@ def recorder(temp_dir, mock_gauge, mock_gauge2):
     rec = DataRecorder(
         gauges=[mock_gauge, mock_gauge2],
         thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
         results_dir=temp_dir,
         run_type="test_mode",
         recording_interval=0.1,
@@ -91,6 +94,9 @@ def test_data_recorder_initializes_with_gauges(mock_gauge, mock_gauge2):
     recorder = DataRecorder(
         gauges=[mock_gauge, mock_gauge2],
         thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
     )
     assert recorder.gauges == [mock_gauge, mock_gauge2]
 
@@ -103,6 +109,9 @@ def test_data_recorder_initializes_with_thermocouples(mock_gauge, mock_thermocou
     recorder = DataRecorder(
         gauges=[mock_gauge],
         thermocouples=[mock_thermocouple],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
     )
     assert recorder.thermocouples == [mock_thermocouple]
 
@@ -112,7 +121,13 @@ def test_data_recorder_initializes_with_default_results_dir(mock_gauge):
     Test DataRecorder to confirm it uses "results" as the default results
     directory when none is specified.
     """
-    recorder = DataRecorder(gauges=[mock_gauge], thermocouples=[])
+    recorder = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
+    )
     assert recorder.results_dir == "results"
 
 
@@ -125,6 +140,9 @@ def test_data_recorder_initializes_with_custom_results_dir(mock_gauge):
     recorder = DataRecorder(
         gauges=[mock_gauge],
         thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
         results_dir=custom_dir,
     )
     assert recorder.results_dir == custom_dir
@@ -142,6 +160,9 @@ def test_data_recorder_initializes_with_valid_run_type(mock_gauge, run_type):
     recorder = DataRecorder(
         gauges=[mock_gauge],
         thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
         run_type=run_type,
     )
     assert recorder.run_type == run_type
@@ -152,7 +173,13 @@ def test_data_recorder_initializes_with_default_recording_interval(mock_gauge):
     Test DataRecorder to confirm it uses 0.5 seconds as the default recording
     interval when none is specified.
     """
-    recorder = DataRecorder(gauges=[mock_gauge], thermocouples=[])
+    recorder = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
+    )
     assert recorder.recording_interval == 0.5
 
 
@@ -164,6 +191,9 @@ def test_data_recorder_initializes_with_custom_recording_interval(mock_gauge):
     recorder = DataRecorder(
         gauges=[mock_gauge],
         thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
         recording_interval=0.2,
     )
     assert recorder.recording_interval == 0.2
@@ -174,7 +204,13 @@ def test_data_recorder_initializes_with_default_backup_interval(mock_gauge):
     Test DataRecorder to confirm it uses 5.0 seconds as the default backup
     interval when none is specified.
     """
-    recorder = DataRecorder(gauges=[mock_gauge], thermocouples=[])
+    recorder = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
+    )
     assert recorder.backup_interval == 5.0
 
 
@@ -186,6 +222,9 @@ def test_data_recorder_initializes_with_custom_backup_interval(mock_gauge):
     recorder = DataRecorder(
         gauges=[mock_gauge],
         thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
         backup_interval=10.0,
     )
     assert recorder.backup_interval == 10.0
@@ -196,7 +235,13 @@ def test_data_recorder_initializes_stop_event_as_threading_event(mock_gauge):
     Test DataRecorder to ensure the stop_event attribute is initialized as a
     threading.Event instance for thread control.
     """
-    recorder = DataRecorder(gauges=[mock_gauge], thermocouples=[])
+    recorder = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
+    )
     assert isinstance(recorder.stop_event, threading.Event)
 
 
@@ -205,7 +250,13 @@ def test_data_recorder_initializes_thread_as_none(mock_gauge):
     Test DataRecorder to verify the thread attribute is None before recording
     starts, indicating no active recording thread.
     """
-    recorder = DataRecorder(gauges=[mock_gauge], thermocouples=[])
+    recorder = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
+    )
     assert recorder.thread is None
 
 
@@ -214,7 +265,13 @@ def test_data_recorder_initializes_elapsed_time_to_zero(mock_gauge):
     Test DataRecorder to confirm elapsed_time is initialized to 0.0 seconds
     before recording begins.
     """
-    recorder = DataRecorder(gauges=[mock_gauge], thermocouples=[])
+    recorder = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
+    )
     assert recorder.elapsed_time == 0.0
 
 
@@ -223,7 +280,13 @@ def test_data_recorder_initializes_valve_times_to_none(mock_gauge):
     Test DataRecorder to verify all valve event times (v4_close, v5_close,
     v6_close, v3_open) are initialized to None.
     """
-    recorder = DataRecorder(gauges=[mock_gauge], thermocouples=[])
+    recorder = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
+    )
     assert recorder.v4_close_time is None
     assert recorder.v5_close_time is None
     assert recorder.v6_close_time is None
@@ -235,7 +298,13 @@ def test_data_recorder_initializes_current_valve_index_to_zero(mock_gauge):
     Test DataRecorder to confirm current_valve_index starts at 0, pointing to
     the first valve event in the sequence.
     """
-    recorder = DataRecorder(gauges=[mock_gauge], thermocouples=[])
+    recorder = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
+    )
     assert recorder.current_valve_index == 0
 
 
@@ -244,7 +313,13 @@ def test_data_recorder_initializes_valve_event_sequence(mock_gauge):
     Test DataRecorder to verify valve_event_sequence is initialized with the
     correct ordered list of valve events.
     """
-    recorder = DataRecorder(gauges=[mock_gauge], thermocouples=[])
+    recorder = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
+    )
     expected = ["v4_close_time", "v5_close_time", "v6_close_time", "v3_open_time"]
     assert recorder.valve_event_sequence == expected
 
@@ -260,7 +335,13 @@ def test_data_recorder_raises_error_for_invalid_gauges_type(mock_gauge):
     is not a list.
     """
     with pytest.raises(ValueError, match="gauges must be a list"):
-        DataRecorder(gauges=mock_gauge, thermocouples=[])
+        DataRecorder(
+            gauges=mock_gauge,
+            thermocouples=[],
+            furnace_setpoint=600.0,
+            sample_material="316",
+            sample_thickness=0.001,
+        )
 
 
 def test_data_recorder_raises_error_for_non_pressure_gauge_in_list():
@@ -269,7 +350,13 @@ def test_data_recorder_raises_error_for_non_pressure_gauge_in_list():
     objects that are not PressureGauge instances.
     """
     with pytest.raises(ValueError, match="gauges must be a list of PressureGauge"):
-        DataRecorder(gauges=["not a gauge"], thermocouples=[])
+        DataRecorder(
+            gauges=["not a gauge"],
+            thermocouples=[],
+            furnace_setpoint=600.0,
+            sample_material="316",
+            sample_thickness=0.001,
+        )
 
 
 def test_data_recorder_raises_error_for_invalid_thermocouples_type(mock_gauge):
@@ -278,7 +365,13 @@ def test_data_recorder_raises_error_for_invalid_thermocouples_type(mock_gauge):
     is not a list.
     """
     with pytest.raises(ValueError, match="thermocouples must be a list"):
-        DataRecorder(gauges=[mock_gauge], thermocouples="not a list")
+        DataRecorder(
+            gauges=[mock_gauge],
+            thermocouples="not a list",
+            furnace_setpoint=600.0,
+            sample_material="316",
+            sample_thickness=0.001,
+        )
 
 
 def test_data_recorder_raises_error_for_non_thermocouple_in_list(mock_gauge):
@@ -289,7 +382,13 @@ def test_data_recorder_raises_error_for_non_thermocouple_in_list(mock_gauge):
     with pytest.raises(
         ValueError, match="thermocouples must be a list of Thermocouple"
     ):
-        DataRecorder(gauges=[mock_gauge], thermocouples=["not a thermocouple"])
+        DataRecorder(
+            gauges=[mock_gauge],
+            thermocouples=["not a thermocouple"],
+            furnace_setpoint=600.0,
+            sample_material="316",
+            sample_thickness=0.001,
+        )
 
 
 def test_data_recorder_raises_error_for_non_string_results_dir(mock_gauge):
@@ -298,7 +397,14 @@ def test_data_recorder_raises_error_for_non_string_results_dir(mock_gauge):
     a string.
     """
     with pytest.raises(ValueError, match="results_dir must be a string"):
-        DataRecorder(gauges=[mock_gauge], thermocouples=[], results_dir=123)
+        DataRecorder(
+            gauges=[mock_gauge],
+            thermocouples=[],
+            furnace_setpoint=600.0,
+            sample_material="316",
+            sample_thickness=0.001,
+            results_dir=123,
+        )
 
 
 @pytest.mark.parametrize("invalid_run_type", ["invalid", "PERMEATION_EXP", ""])
@@ -311,6 +417,9 @@ def test_data_recorder_raises_error_for_invalid_run_type(mock_gauge, invalid_run
         DataRecorder(
             gauges=[mock_gauge],
             thermocouples=[],
+            furnace_setpoint=600.0,
+            sample_material="316",
+            sample_thickness=0.001,
             run_type=invalid_run_type,
         )
 
@@ -330,7 +439,9 @@ def test_data_recorder_raises_error_for_invalid_sample_material(
         DataRecorder(
             gauges=[mock_gauge],
             thermocouples=[],
+            furnace_setpoint=600.0,
             sample_material=invalid_material,
+            sample_thickness=0.001,
         )
 
 
@@ -342,7 +453,9 @@ def test_data_recorder_accepts_none_for_sample_material(mock_gauge):
     recorder = DataRecorder(
         gauges=[mock_gauge],
         thermocouples=[],
+        furnace_setpoint=600.0,
         sample_material=None,
+        sample_thickness=0.001,
     )
     assert recorder.sample_material is None
 
@@ -360,6 +473,9 @@ def test_data_recorder_test_mode_is_true_when_run_type_is_test_mode(mock_gauge):
     recorder = DataRecorder(
         gauges=[mock_gauge],
         thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
         run_type="test_mode",
     )
     assert recorder.test_mode is True
@@ -373,6 +489,9 @@ def test_data_recorder_test_mode_is_false_when_run_type_is_permeation_exp(mock_g
     recorder = DataRecorder(
         gauges=[mock_gauge],
         thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
         run_type="permeation_exp",
     )
     assert recorder.test_mode is False
@@ -386,6 +505,9 @@ def test_data_recorder_test_mode_is_false_when_run_type_is_leak_test(mock_gauge)
     recorder = DataRecorder(
         gauges=[mock_gauge],
         thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
         run_type="leak_test",
     )
     assert recorder.test_mode is False
@@ -422,6 +544,9 @@ def test_data_recorder_creates_run_directory_in_normal_mode(temp_dir, mock_gauge
     recorder = DataRecorder(
         gauges=[mock_gauge],
         thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
         results_dir=temp_dir,
         run_type="permeation_exp",
     )
@@ -587,6 +712,9 @@ def test_data_recorder_metadata_includes_thermocouples_when_present(
     recorder = DataRecorder(
         gauges=[mock_gauge],
         thermocouples=[mock_thermocouple],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
         results_dir=temp_dir,
         run_type="test_mode",
     )
@@ -796,6 +924,9 @@ def test_data_recorder_raises_error_for_duplicate_ain_channels(
     recorder = DataRecorder(
         gauges=[mock_gauge, mock_gauge2],
         thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
         results_dir=temp_dir,
         run_type="test_mode",
     )
@@ -915,6 +1046,9 @@ def test_data_recorder_records_thermocouple_data(
     recorder = DataRecorder(
         gauges=[mock_gauge],
         thermocouples=[mock_thermocouple],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
         results_dir=temp_dir,
         run_type="test_mode",
         recording_interval=0.1,
@@ -943,6 +1077,9 @@ def test_data_recorder_calls_thermocouple_record_method(
     recorder = DataRecorder(
         gauges=[mock_gauge],
         thermocouples=[mock_thermocouple],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
         results_dir=temp_dir,
         run_type="test_mode",
         recording_interval=0.1,
@@ -1366,6 +1503,9 @@ def test_data_recorder_initialize_labjack_test_mode_property_check():
     test_recorder = DataRecorder(
         gauges=[mock_gauge],
         thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
         run_type="test_mode",
     )
     assert test_recorder._initialize_labjack() is None
