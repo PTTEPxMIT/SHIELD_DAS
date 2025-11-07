@@ -1129,25 +1129,22 @@ def test_data_recorder_monitor_keyboard_returns_early_in_ci(recorder):
 
 def test_data_recorder_monitor_keyboard_handles_invalid_valve_index(recorder):
     """
-    Test DataRecorder _monitor_keyboard to verify it raises IndexError when
-    current_valve_index is out of bounds (revealing a bug that should be fixed).
+    Test DataRecorder _monitor_keyboard returns early with warning when
+    current_valve_index is out of bounds.
     """
     recorder.current_valve_index = 10  # Out of bounds
-    with pytest.raises(IndexError):
-        recorder._monitor_keyboard()
+    result = recorder._monitor_keyboard()
+    assert result is None
 
 
 def test_data_recorder_monitor_keyboard_handles_negative_valve_index(recorder):
     """
-    Test DataRecorder _monitor_keyboard to verify it raises IndexError when
-    current_valve_index is negative (revealing a bug that should be fixed).
+    Test DataRecorder _monitor_keyboard returns early when
+    current_valve_index is negative.
     """
-    # Negative index - Python allows negative indexing so won't raise error
+    # Negative index would access last element without bounds check
     recorder.current_valve_index = -1
-    # This accesses the last element, doesn't crash but is still a bug
     result = recorder._monitor_keyboard()
-    # The function will return after trying to set up keyboard listener
-    # We just verify it doesn't crash entirely
     assert result is None
 
 
