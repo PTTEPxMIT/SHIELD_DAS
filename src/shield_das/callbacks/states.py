@@ -6,7 +6,6 @@ to maintain consistent plot control settings.
 
 from dash.dependencies import State
 
-
 # Shared callback state for plot control settings
 # Used across multiple callback modules to maintain consistent plot state
 PLOT_CONTROL_STATES = [

@@ -320,11 +320,17 @@ class DataPlotter:
                     thickness=1.5,
                     width=3,
                 )
-
-            # Use plotly-resampler for automatic downsampling
-            fig.add_trace(
-                go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
-            )
+                # Add trace without downsampling to preserve error bars
+                scatter_kwargs["x"] = time_data
+                scatter_kwargs["y"] = pressure_data
+                fig.add_trace(go.Scatter(**scatter_kwargs))
+            else:
+                # Use plotly-resampler for automatic downsampling
+                fig.add_trace(
+                    go.Scatter(**scatter_kwargs),
+                    hf_x=time_data,
+                    hf_y=pressure_data,
+                )
 
             # Add valve time vertical lines
             if show_valve_times:
@@ -374,7 +380,7 @@ class DataPlotter:
                 pos_vals = []
                 for ds in self.datasets:
                     try:
-                        vals = np.asarray(ds.time_data, dtype=float)
+                        vals = np.asarray(ds.upstream_time, dtype=float)
                         vals = vals[vals > 0]
                         if vals.size:
                             pos_vals.extend(vals.tolist())
@@ -516,11 +522,17 @@ class DataPlotter:
                     thickness=1.5,
                     width=3,
                 )
-
-            # Use plotly-resampler for automatic downsampling
-            fig.add_trace(
-                go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
-            )
+                # Add trace without downsampling to preserve error bars
+                scatter_kwargs["x"] = time_data
+                scatter_kwargs["y"] = pressure_data
+                fig.add_trace(go.Scatter(**scatter_kwargs))
+            else:
+                # Use plotly-resampler for automatic downsampling
+                fig.add_trace(
+                    go.Scatter(**scatter_kwargs),
+                    hf_x=time_data,
+                    hf_y=pressure_data,
+                )
 
             # Add valve time vertical lines
             if show_valve_times:

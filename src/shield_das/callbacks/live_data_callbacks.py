@@ -5,7 +5,7 @@ This module handles dynamic data updates for ongoing experiments:
 - Periodic automatic data refreshing via interval component
 """
 
-from dash.dependencies import ALL, Input, Output
+from dash.dependencies import ALL, Input, Output, State
 from dash.exceptions import PreventUpdate
 
 from .states import PLOT_CONTROL_STATES
@@ -112,7 +112,23 @@ def register_live_data_callbacks(plotter):
             Output("temperature-plot", "figure", allow_duplicate=True),
         ],
         [Input("live-data-interval", "n_intervals")],
-        PLOT_CONTROL_STATES,
+        [
+            *PLOT_CONTROL_STATES,
+            # Upstream plot settings
+            State("upstream-x-scale", "value"),
+            State("upstream-y-scale", "value"),
+            State("upstream-x-min", "value"),
+            State("upstream-x-max", "value"),
+            State("upstream-y-min", "value"),
+            State("upstream-y-max", "value"),
+            # Downstream plot settings
+            State("downstream-x-scale", "value"),
+            State("downstream-y-scale", "value"),
+            State("downstream-x-min", "value"),
+            State("downstream-x-max", "value"),
+            State("downstream-y-min", "value"),
+            State("downstream-y-max", "value"),
+        ],
         prevent_initial_call=True,
     )
     def update_live_data(
@@ -121,11 +137,24 @@ def register_live_data_callbacks(plotter):
         show_error_bars_downstream,
         show_valve_times_upstream,
         show_valve_times_downstream,
+        upstream_x_scale,
+        upstream_y_scale,
+        upstream_x_min,
+        upstream_x_max,
+        upstream_y_min,
+        upstream_y_max,
+        downstream_x_scale,
+        downstream_y_scale,
+        downstream_x_min,
+        downstream_x_max,
+        downstream_y_min,
+        downstream_y_max,
     ):
         """Periodically refresh data for live datasets.
 
         Called automatically by the interval component when enabled.
         Reprocesses data for all datasets with live_data=True and regenerates plots.
+        Preserves all current plot settings (scale, ranges, error bars, valve times).
 
         Args:
             n_intervals: Number of intervals elapsed (unused, just triggers callback)
@@ -133,6 +162,18 @@ def register_live_data_callbacks(plotter):
             show_error_bars_downstream: Whether to show downstream error bars
             show_valve_times_upstream: Whether to show upstream valve markers
             show_valve_times_downstream: Whether to show downstream valve markers
+            upstream_x_scale: Upstream X-axis scale mode
+            upstream_y_scale: Upstream Y-axis scale mode
+            upstream_x_min: Upstream X-axis minimum value
+            upstream_x_max: Upstream X-axis maximum value
+            upstream_y_min: Upstream Y-axis minimum value
+            upstream_y_max: Upstream Y-axis maximum value
+            downstream_x_scale: Downstream X-axis scale mode
+            downstream_y_scale: Downstream Y-axis scale mode
+            downstream_x_min: Downstream X-axis minimum value
+            downstream_x_max: Downstream X-axis maximum value
+            downstream_y_min: Downstream Y-axis minimum value
+            downstream_y_max: Downstream Y-axis maximum value
 
         Returns:
             tuple: (upstream_plot, downstream_plot, temperature_plot)
@@ -143,9 +184,31 @@ def register_live_data_callbacks(plotter):
         if not _refresh_live_datasets(plotter.datasets):
             raise PreventUpdate
 
-        return plotter._generate_both_plots(
-            show_error_bars_upstream=show_error_bars_upstream,
-            show_error_bars_downstream=show_error_bars_downstream,
-            show_valve_times_upstream=show_valve_times_upstream,
-            show_valve_times_downstream=show_valve_times_downstream,
+        # Generate upstream plot with current settings
+        upstream_plot = plotter._generate_upstream_plot(
+            show_error_bars=show_error_bars_upstream,
+            show_valve_times=show_valve_times_upstream,
+            x_scale=upstream_x_scale,
+            y_scale=upstream_y_scale,
+            x_min=upstream_x_min,
+            x_max=upstream_x_max,
+            y_min=upstream_y_min,
+            y_max=upstream_y_max,
         )
+
+        # Generate downstream plot with current settings
+        downstream_plot = plotter._generate_downstream_plot(
+            show_error_bars=show_error_bars_downstream,
+            show_valve_times=show_valve_times_downstream,
+            x_scale=downstream_x_scale,
+            y_scale=downstream_y_scale,
+            x_min=downstream_x_min,
+            x_max=downstream_x_max,
+            y_min=downstream_y_min,
+            y_max=downstream_y_max,
+        )
+
+        # Generate temperature plot
+        temperature_plot = plotter._generate_temperature_plot()
+
+        return [upstream_plot, downstream_plot, temperature_plot]
