@@ -218,18 +218,21 @@ class TestValveEvents:
         assert self.recorder.valve_event_sequence == expected_sequence
 
     def test_metadata_error_handling(self):
-        """Test error handling when metadata file cannot be updated."""
+        """Test that missing metadata file raises FileNotFoundError."""
         # Create a scenario where metadata update would fail
         with patch("shield_das.data_recorder.keyboard"):
             self.recorder.start()
 
-            # Remove the run directory to cause an error
+            # Remove the metadata file to cause an error
             metadata_path = os.path.join(self.recorder.run_dir, "run_metadata.json")
             os.remove(metadata_path)
 
-            # This should not raise an exception, but should print an error message
-            self.recorder._update_metadata_with_valve_time(
-                "v5_close_time", "2025-08-12 15:30:00.999"
-            )
+            # This should raise FileNotFoundError
+            import pytest
+
+            with pytest.raises(FileNotFoundError):
+                self.recorder._update_metadata_with_valve_time(
+                    "v5_close_time", "2025-08-12 15:30:00.999"
+                )
 
             self.recorder.stop()
