@@ -38,6 +38,11 @@ Issues = "https://github.com/PTTEPxMIT/SHIELD_DAS/issues"
 [tool.setuptools_scm]
 write_to = "src/shield_das/_version.py"
 
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:The NumPy module was reloaded:UserWarning",
+]
+
 [tool.coverage.run]
 omit = ["src/shield_das/_version.py"]
 
