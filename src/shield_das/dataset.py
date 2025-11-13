@@ -137,8 +137,6 @@ class Dataset:
         )
 
         # Process gauge data
-        upstream_pressure = None
-        downstream_pressure = None
         for gauge in self.metadata.get("gauges", []):
             if gauge.get("type") == "Baratron626D_Gauge":
                 col_name = f"{gauge['name']}_Voltage_V"
@@ -151,8 +149,12 @@ class Dataset:
                 else:
                     self.downstream_pressure = pressure_vals
 
-        self.upstream_error = calculate_error_on_pressure_reading(upstream_pressure)
-        self.downstream_error = calculate_error_on_pressure_reading(downstream_pressure)
+        self.upstream_error = calculate_error_on_pressure_reading(
+            self.upstream_pressure
+        )
+        self.downstream_error = calculate_error_on_pressure_reading(
+            self.downstream_pressure
+        )
 
         # Process temperature data if present
         try:

@@ -110,3 +110,35 @@ def register_ui_callbacks(plotter):
         return _create_toggle_callback(
             "collapse-downstream-controls", "collapse-downstream-controls-button"
         )(n_clicks, is_open)
+
+    # Temperature controls collapse toggle
+    @plotter.app.callback(
+        [
+            Output("collapse-temperature-controls", "is_open"),
+            Output("collapse-temperature-controls-button", "children"),
+        ],
+        [Input("collapse-temperature-controls-button", "n_clicks")],
+        [State("collapse-temperature-controls", "is_open")],
+        prevent_initial_call=True,
+    )
+    def toggle_temperature_controls_collapse(n_clicks, is_open):
+        """Toggle temperature plot controls visibility."""
+        return _create_toggle_callback(
+            "collapse-temperature-controls", "collapse-temperature-controls-button"
+        )(n_clicks, is_open)
+
+    # Permeability controls collapse toggle
+    @plotter.app.callback(
+        [
+            Output("collapse-permeability-controls", "is_open"),
+            Output("collapse-permeability-controls-button", "children"),
+        ],
+        [Input("collapse-permeability-controls-button", "n_clicks")],
+        [State("collapse-permeability-controls", "is_open")],
+        prevent_initial_call=True,
+    )
+    def toggle_permeability_controls_collapse(n_clicks, is_open):
+        """Toggle permeability plot controls visibility."""
+        return _create_toggle_callback(
+            "collapse-permeability-controls", "collapse-permeability-controls-button"
+        )(n_clicks, is_open)

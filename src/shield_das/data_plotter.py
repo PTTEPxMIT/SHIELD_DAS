@@ -1,22 +1,26 @@
+"""Data plotter module for SHIELD Data Acquisition System.
+
+This module provides the main DataPlotter class which creates an interactive
+Dash web application for visualizing pressure, temperature, and permeability
+data from multiple experimental datasets.
+"""
+
 import io
-import math
 import os
 import threading
 import webbrowser
 import zipfile
+from typing import Any
 
 import dash
 import dash_bootstrap_components as dbc
-import numpy as np
-import plotly.graph_objects as go
-from plotly_resampler import FigureResampler
+from dash import html
 
 from . import layout_components as lc
-from .analysis import evaluate_permeability_values, fit_permeability_data
 from .callbacks import register_all_callbacks
 from .dataset import Dataset
 from .dataset_table import DatasetTable
-from .helpers import import_htm_data
+from .figures import PermeabilityPlot, PressurePlot, TemperaturePlot
 
 
 class DataPlotter:
@@ -49,12 +53,27 @@ class DataPlotter:
     upstream_datasets: list[dict]
     downstream_datasets: list[dict]
 
-    def __init__(self, dataset_paths=None, dataset_names=None, port=8050):
+    def __init__(
+        self,
+        dataset_paths: list[str] | None = None,
+        dataset_names: list[str] | None = None,
+        port: int = 8050,
+    ):
+        """Initialize the DataPlotter with datasets and configuration.
+
+        Args:
+            dataset_paths: List of folder paths containing datasets to load.
+                Each path should contain run_metadata.json and data files.
+            dataset_names: List of display names for each dataset.
+                Must match length of dataset_paths if provided.
+            port: Port number for the Dash web server (default: 8050).
+        """
+        # Initialize dataset configuration
         self.dataset_paths = dataset_paths or []
         self.dataset_names = dataset_names or []
         self.port = port
 
-        # Initialize Dash app``
+        # Initialize Dash app with Bootstrap theme and Font Awesome icons
         self.app = dash.Dash(
             __name__,
             external_stylesheets=[
@@ -62,37 +81,64 @@ class DataPlotter:
                 "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
             ],
         )
-        # set the browser tab title
+        # Set the browser tab title
         self.app.title = "SHIELD Data Visualisation"
 
-        # Store datasets as a list
-        self.datasets = []
+        # Initialize empty datasets list (populated via load_data())
+        self.datasets: list[Dataset] = []
 
-        # Store FigureResampler instances for callback registration
-        self.figure_resamplers = {}
+        # Store FigureResampler instances for interactive zoom/pan callbacks
+        self.figure_resamplers: dict[str, Any] = {}
+
+        # Initialize plot generators (created after datasets are loaded)
+        self.upstream_plot: PressurePlot | None = None
+        self.downstream_plot: PressurePlot | None = None
+        self.temperature_plot: TemperaturePlot | None = None
+        self.permeability_plot: PermeabilityPlot | None = None
 
     @property
     def dataset_paths(self) -> list[str]:
+        """Get the list of dataset folder paths.
+
+        Returns:
+            list[str]: List of absolute paths to dataset folders
+        """
         return self._dataset_paths
 
     @dataset_paths.setter
-    def dataset_paths(self, value: list[str]):
-        # if value not a list of strings raise ValueError
+    def dataset_paths(self, value: list[str]) -> None:
+        """Set and validate dataset folder paths.
+
+        Validates that:
+        - Value is a list of strings
+        - All paths exist on filesystem
+        - All paths are unique
+        - Each path contains CSV data files
+        - Each path contains run_metadata.json
+
+        Args:
+            value: List of folder paths to validate
+
+        Raises:
+            ValueError: If validation fails
+            FileNotFoundError: If required files are missing
+        """
+        # Validate input type
         if not isinstance(value, list) or not all(
             isinstance(item, str) for item in value
         ):
             raise ValueError("dataset_paths must be a list of strings")
 
-        # Check if all dataset paths exist
+        # Validate all paths exist
         for dataset_path in value:
             if not os.path.exists(dataset_path):
                 raise ValueError(f"Dataset path does not exist: {dataset_path}")
 
-        # check all dataset paths are unique
+        # Ensure all paths are unique
         if len(value) != len(set(value)):
             raise ValueError("dataset_paths must contain unique paths")
 
-        # check csv files exist in each dataset path
+        # Verify CSV files exist in each path
         for dataset_path in value:
             csv_files = [
                 f for f in os.listdir(dataset_path) if f.lower().endswith(".csv")
@@ -102,7 +148,7 @@ class DataPlotter:
                     f"No data CSV files found in dataset path: {dataset_path}"
                 )
 
-        # check that run_metadata.json exists in each dataset path
+        # Verify metadata file exists in each path
         for dataset_path in value:
             metadata_file = os.path.join(dataset_path, "run_metadata.json")
             if not os.path.exists(metadata_file):
@@ -114,64 +160,87 @@ class DataPlotter:
 
     @property
     def dataset_names(self) -> list[str]:
+        """Get the list of dataset display names.
+
+        Returns:
+            list[str]: List of names for each dataset
+        """
         return self._dataset_names
 
     @dataset_names.setter
-    def dataset_names(self, value: list[str]):
-        # if value not a list of strings raise ValueError
+    def dataset_names(self, value: list[str]) -> None:
+        """Set and validate dataset display names.
+
+        Validates that:
+        - Value is a list of strings
+        - Length matches dataset_paths length
+        - All names are unique
+
+        Args:
+            value: List of display names for datasets
+
+        Raises:
+            ValueError: If validation fails
+        """
+        # Validate input type
         if not isinstance(value, list) or not all(
             isinstance(item, str) for item in value
         ):
             raise ValueError("dataset_names must be a list of strings")
 
-        # Check if dataset_names length matches dataset_paths length
+        # Ensure length matches paths
         if len(value) != len(self.dataset_paths):
             raise ValueError(
                 f"dataset_names length ({len(value)}) must match dataset_paths "
                 f"length ({len(self.dataset_paths)})"
             )
 
-        # Check if all dataset names are unique
+        # Ensure all names are unique
         if len(value) != len(set(value)):
             raise ValueError("dataset_names must contain unique names")
 
         self._dataset_names = value
 
-    def load_data(self, dataset_path: str, dataset_name: str):
-        """
-        Load and process data from specified data path using Dataset class.
+    def load_data(self, dataset_path: str, dataset_name: str) -> None:
+        """Load and process data from a dataset folder.
+
+        Creates a Dataset instance, assigns a color, processes the data files,
+        and adds it to the internal datasets list.
 
         Only supports metadata version 1.3. Will raise ValueError for other versions.
 
         Args:
-            dataset_path: Path to dataset folder containing run_metadata.json
-            dataset_name: Name to assign to this dataset
+            dataset_path: Absolute path to folder containing run_metadata.json
+                and data CSV files
+            dataset_name: Display name to assign to this dataset
 
         Raises:
             ValueError: If metadata version is not 1.3
-            FileNotFoundError: If metadata file or data files are missing
+            FileNotFoundError: If metadata file or required data files are missing
         """
-        # Create Dataset instance
+        # Create Dataset instance with path and name
         dataset = Dataset(path=dataset_path, name=dataset_name)
 
-        # Assign color
+        # Assign color based on dataset index for consistent visualization
         dataset.colour = self.get_next_color(len(self.datasets))
 
-        # Process the data (loads from files)
+        # Load and process data from CSV files
         dataset.process_data()
 
-        # Add to list
+        # Add to internal datasets list
         self.datasets.append(dataset)
 
     def get_next_color(self, index: int) -> str:
-        """
-        Get a color for the dataset based on its index.
+        """Get a color for a dataset based on its index.
+
+        Cycles through a predefined color palette to ensure visual distinction
+        between datasets in plots.
 
         Args:
-            index: Index of the dataset
+            index: Zero-based index of the dataset in the datasets list
 
         Returns:
-            str: Color hex code
+            str: Hex color code (e.g., "#000000" for black)
         """
         colors = [
             "#000000",  # Black
@@ -185,709 +254,96 @@ class DataPlotter:
         ]
         return colors[index % len(colors)]
 
-    def create_layout(self):
-        """Create the main Dash layout using component builders.
+    def create_layout(self) -> dbc.Container:
+        """Create the main Dash application layout.
+
+        Builds the complete web interface layout by assembling all UI components
+        including header, dataset management, plots, controls, and hidden data stores.
+        Uses layout component builders from layout_components module.
 
         Returns:
-            dbc.Container: The complete Dash layout
+            dbc.Container: Bootstrap container with all dashboard components arranged
+                in fluid layout for responsive design
+
+        Layout Structure:
+            1. Header with SHIELD logo and title
+            2. Dataset management card with table and controls
+            3. Hidden data stores for plot settings
+            4. Pressure plots (upstream/downstream) in row
+            5. Pressure plot controls
+            6. Temperature plot with controls
+            7. Permeability plot with controls
+            8. Bottom spacing
+            9. Download components
+            10. Live data update interval component
         """
         from .layout_components import create_download_components, create_hidden_stores
 
+        dataset_table = DatasetTable(self.datasets)
+
         return dbc.Container(
             [
+                # Dashboard header with title and branding
                 lc.create_header(),
-                lc.create_dataset_management_card(self.create_dataset_table()),
+                # Dataset management: table with add/edit/delete controls
+                lc.create_dataset_management_card(dataset_table.create()),
+                # Hidden stores for plot settings (upstream, downstream, temp, perm)
                 *create_hidden_stores(),
+                # Pressure plots side-by-side in a row
                 lc.create_pressure_plots_row(
                     self._generate_upstream_plot(),
                     self._generate_downstream_plot(),
                 ),
+                # Pressure plot controls (apply to both upstream and downstream)
                 lc.create_plot_controls_row(),
+                # Temperature plot with dedicated controls below
                 lc.create_temperature_plot_card(self._generate_temperature_plot()),
+                # Permeability (Arrhenius) plot with dedicated controls below
                 lc.create_permeability_plot_card(self._generate_permeability_plot()),
+                # Spacing at bottom for better layout
                 lc.create_bottom_spacing(),
+                # Download modals for dataset and plot exports
                 *create_download_components(),
+                # Interval component for live data refresh
                 lc.create_live_data_interval(),
             ],
-            fluid=True,
+            fluid=True,  # Use full width for responsive design
         )
 
-    def create_dataset_table(self):
-        """Create the dataset table using DatasetTable class.
+    def _create_dataset_download(self, dataset_path: str) -> dict[str, Any]:
+        """Package original dataset files for download as a ZIP archive.
+
+        Creates an in-memory ZIP file containing all files from the dataset
+        folder, preserving the relative directory structure.
+
+        Args:
+            dataset_path: Absolute path to the dataset folder to package
 
         Returns:
-            html.Div: The complete dataset table component
+            dict: Download specification with keys:
+                - content: ZIP file bytes
+                - filename: Suggested filename (e.g., "dataset.zip")
+                - type: MIME type ("application/zip")
         """
-        table = DatasetTable(self.datasets)
-        return table.create()
-
-    def register_callbacks(self):
-        """Register all Dash callbacks for the application.
-
-        Callbacks are organized into modules by feature area:
-        - dataset_callbacks: Dataset CRUD operations
-        - ui_callbacks: UI collapse/expand interactions
-        - plot_control_callbacks: Plot settings (scale, range, error bars)
-        - live_data_callbacks: Live data toggle and updates
-        - export_callbacks: Plot export and interactive zoom/pan
-        """
-        register_all_callbacks(self)
-
-    def _generate_both_plots(
-        self,
-        show_error_bars_upstream=True,
-        show_error_bars_downstream=True,
-        show_valve_times_upstream=False,
-        show_valve_times_downstream=False,
-        **kwargs,
-    ):
-        """Helper method to generate both upstream and downstream plots
-        with common parameters"""
-        return [
-            self._generate_upstream_plot(
-                show_error_bars=show_error_bars_upstream,
-                show_valve_times=show_valve_times_upstream,
-                **kwargs,
-            ),
-            self._generate_downstream_plot(
-                show_error_bars=show_error_bars_downstream,
-                show_valve_times=show_valve_times_downstream,
-                **kwargs,
-            ),
-            self._generate_temperature_plot(),
-        ]
-
-    def _generate_upstream_plot(
-        self,
-        show_error_bars=True,
-        show_valve_times=False,
-        x_scale=None,
-        y_scale=None,
-        x_min=None,
-        x_max=None,
-        y_min=None,
-        y_max=None,
-    ):
-        """Generate the upstream pressure plot"""
-        # Use FigureResampler with parameters to hide resampling annotations
-        fig = FigureResampler(
-            go.Figure(),
-            show_dash_kwargs={"mode": "disabled"},
-            show_mean_aggregation_size=False,
-            verbose=False,
-        )
-
-        # Store the FigureResampler instance
-        self.figure_resamplers["upstream-plot"] = fig
-
-        # Iterate through datasets and obtain the upstream data
-        for i, dataset in enumerate(self.datasets):
-            time_data = np.ascontiguousarray(dataset.time_data)
-            pressure_data = np.ascontiguousarray(dataset.upstream_pressure)
-            pressure_error = np.ascontiguousarray(dataset.upstream_error)
-            colour = dataset.colour
-
-            # Debug: Check array lengths
-            if len(time_data) != len(pressure_data):
-                print(
-                    f"WARNING: Dataset {dataset.name}: time_data length={len(time_data)}, pressure_data length={len(pressure_data)}"
-                )
-                print("  Trimming to minimum length")
-                min_len = min(len(time_data), len(pressure_data))
-                time_data = time_data[:min_len]
-                pressure_data = pressure_data[:min_len]
-                pressure_error = (
-                    pressure_error[:min_len]
-                    if len(pressure_error) > min_len
-                    else pressure_error
-                )
-
-            # Create scatter trace
-            scatter_kwargs = {
-                "mode": "lines+markers",
-                "name": dataset.name,
-                "line": dict(color=colour, width=1.5),
-                "marker": dict(size=3),
-            }
-
-            # Add error bars if enabled
-            if show_error_bars:
-                scatter_kwargs["error_y"] = dict(
-                    type="data",
-                    array=pressure_error,
-                    visible=True,
-                    color=colour,
-                    thickness=1.5,
-                    width=3,
-                )
-                # Add trace without downsampling to preserve error bars
-                scatter_kwargs["x"] = time_data
-                scatter_kwargs["y"] = pressure_data
-                fig.add_trace(go.Scatter(**scatter_kwargs))
-            else:
-                # Use plotly-resampler for automatic downsampling
-                fig.add_trace(
-                    go.Scatter(**scatter_kwargs),
-                    hf_x=time_data,
-                    hf_y=pressure_data,
-                )
-
-            # Add valve time vertical lines
-            if show_valve_times:
-                valve_times = dataset.valve_times
-                for valve_event, valve_time in valve_times.items():
-                    fig.add_vline(
-                        x=valve_time,
-                        line_dash="dash",
-                        line_color=colour,
-                        line_width=1,
-                        annotation_text=valve_event.replace("_", " ").title(),
-                        annotation_position="top",
-                        annotation_textangle=0,
-                        annotation_font_size=8,
-                    )
-
-        # Configure the layout
-        fig.update_layout(
-            height=500,
-            xaxis_title="Time (s)",
-            yaxis_title="Pressure (Torr)",
-            template="plotly_white",
-            margin=dict(l=60, r=30, t=40, b=60),
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
-            ),
-        )
-
-        # Apply axis scaling
-        x_axis_type = x_scale if x_scale else "linear"
-        y_axis_type = y_scale if y_scale else "linear"
-
-        fig.update_xaxes(type=x_axis_type)
-        fig.update_yaxes(type=y_axis_type)
-
-        # Determine x-axis range from data (or use provided bounds when valid)
-        if x_axis_type == "log":
-            if (
-                x_min is not None
-                and x_max is not None
-                and x_min > 0
-                and x_max > 0
-                and x_min < x_max
-            ):
-                xmin_lin, xmax_lin = float(x_min), float(x_max)
-            else:
-                pos_vals = []
-                for ds in self.datasets:
-                    try:
-                        vals = np.asarray(ds.upstream_time, dtype=float)
-                        vals = vals[vals > 0]
-                        if vals.size:
-                            pos_vals.extend(vals.tolist())
-                    except Exception:
-                        continue
-                if pos_vals:
-                    xmin_lin = float(min(pos_vals))
-                    xmax_lin = float(max(pos_vals))
-                    if xmin_lin >= xmax_lin:
-                        xmax_lin = xmin_lin * 10.0
-                else:
-                    xmin_lin, xmax_lin = 1e-12, 1e-6
-
-            fig.update_xaxes(range=[math.log10(xmin_lin), math.log10(xmax_lin)])
-        else:
-            if x_min is not None and x_max is not None and x_min < x_max:
-                fig.update_xaxes(range=[x_min, x_max])
-            else:
-                # derive from data
-                vals = []
-                for ds in self.datasets:
-                    try:
-                        v = ds.time_data
-                        vals.extend([float(x) for x in v])
-                    except Exception:
-                        continue
-                if vals:
-                    fig.update_xaxes(range=[min(vals), max(vals)])
-
-        # Determine y-axis range from upstream data (or use provided bounds when valid)
-        if y_axis_type == "log":
-            if (
-                y_min is not None
-                and y_max is not None
-                and y_min > 0
-                and y_max > 0
-                and y_min < y_max
-            ):
-                ymin_lin, ymax_lin = float(y_min), float(y_max)
-            else:
-                pos_vals = []
-                for ds in self.datasets:
-                    try:
-                        vals = np.asarray(ds.upstream_pressure, dtype=float)
-                        vals = vals[vals > 0]
-                        if vals.size:
-                            pos_vals.extend(vals.tolist())
-                    except Exception:
-                        continue
-                if pos_vals:
-                    ymin_lin = float(min(pos_vals))
-                    ymax_lin = float(max(pos_vals))
-                    if ymin_lin >= ymax_lin:
-                        ymax_lin = ymin_lin * 10.0
-                else:
-                    ymin_lin, ymax_lin = 1e-12, 1e-6
-
-            fig.update_yaxes(range=[math.log10(ymin_lin), math.log10(ymax_lin)])
-        else:
-            if y_min is not None and y_max is not None and y_min < y_max:
-                fig.update_yaxes(range=[y_min, y_max])
-            else:
-                vals = []
-                for ds in self.datasets:
-                    try:
-                        v = ds.upstream_pressure
-                        vals.extend([float(x) for x in v])
-                    except Exception:
-                        continue
-                if vals:
-                    fig.update_yaxes(range=[min(vals), max(vals)])
-
-        # Clean up trace names to remove [R] annotations
-        for trace in fig.data:
-            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
-                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
-
-        return fig
-
-    def _generate_downstream_plot(
-        self,
-        show_error_bars=True,
-        show_valve_times=False,
-        x_scale=None,
-        y_scale=None,
-        x_min=None,
-        x_max=None,
-        y_min=None,
-        y_max=None,
-    ):
-        """Generate the downstream pressure plot"""
-        # Use FigureResampler with parameters to hide resampling annotations
-        fig = FigureResampler(
-            go.Figure(),
-            show_dash_kwargs={"mode": "disabled"},
-            show_mean_aggregation_size=False,
-            verbose=False,
-        )
-
-        # Store the FigureResampler instance
-        self.figure_resamplers["downstream-plot"] = fig
-
-        # Iterate through datasets and obtain the downstream data
-        for i, dataset in enumerate(self.datasets):
-            time_data = np.ascontiguousarray(dataset.time_data)
-            pressure_data = np.ascontiguousarray(dataset.downstream_pressure)
-            pressure_error = np.ascontiguousarray(dataset.downstream_error)
-            colour = dataset.colour
-
-            # Debug: Check array lengths
-            if len(time_data) != len(pressure_data):
-                print(
-                    f"WARNING: Dataset {dataset.name}: "
-                    f"time_data length={len(time_data)}, "
-                    f"pressure_data length={len(pressure_data)}"
-                )
-                print("  Trimming to minimum length")
-                min_len = min(len(time_data), len(pressure_data))
-                time_data = time_data[:min_len]
-                pressure_data = pressure_data[:min_len]
-                if len(pressure_error) > min_len:
-                    pressure_error = pressure_error[:min_len]
-
-            # Create scatter trace
-            scatter_kwargs = {
-                "mode": "lines+markers",
-                "name": dataset.name,
-                "line": dict(color=colour, width=1.5),
-                "marker": dict(size=3),
-            }
-
-            # Add error bars if enabled
-            if show_error_bars:
-                scatter_kwargs["error_y"] = dict(
-                    type="data",
-                    array=pressure_error,
-                    visible=True,
-                    color=colour,
-                    thickness=1.5,
-                    width=3,
-                )
-                # Add trace without downsampling to preserve error bars
-                scatter_kwargs["x"] = time_data
-                scatter_kwargs["y"] = pressure_data
-                fig.add_trace(go.Scatter(**scatter_kwargs))
-            else:
-                # Use plotly-resampler for automatic downsampling
-                fig.add_trace(
-                    go.Scatter(**scatter_kwargs),
-                    hf_x=time_data,
-                    hf_y=pressure_data,
-                )
-
-            # Add valve time vertical lines
-            if show_valve_times:
-                valve_times = dataset.valve_times
-                for valve_event, valve_time in valve_times.items():
-                    fig.add_vline(
-                        x=valve_time,
-                        line_dash="dash",
-                        line_color=colour,
-                        line_width=1,
-                        annotation_text=valve_event.replace("_", " ").title(),
-                        annotation_position="top",
-                        annotation_textangle=0,
-                        annotation_font_size=8,
-                    )
-
-        # Configure the layout
-        fig.update_layout(
-            height=500,
-            xaxis_title="Time (s)",
-            yaxis_title="Pressure (Torr)",
-            template="plotly_white",
-            margin=dict(l=60, r=30, t=40, b=60),
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
-            ),
-        )
-        # Apply axis scaling
-        x_axis_type = x_scale if x_scale else "linear"
-        y_axis_type = y_scale if y_scale else "linear"
-
-        fig.update_xaxes(type=x_axis_type)
-        fig.update_yaxes(type=y_axis_type)
-
-        # Apply axis ranges if specified
-        if x_min is not None and x_max is not None:
-            if x_axis_type == "log":
-
-                def _safe_x_log_range_ds(xmin_val, xmax_val):
-                    try:
-                        if xmin_val is not None and xmax_val is not None:
-                            if xmin_val > 0 and xmax_val > 0 and xmin_val < xmax_val:
-                                return math.log10(xmin_val), math.log10(xmax_val)
-                    except Exception:
-                        pass
-
-                    pos_vals = []
-                    for dataset in self.datasets:
-                        try:
-                            vals = dataset.time_data
-                            for v in vals:
-                                if v is not None and v > 0:
-                                    pos_vals.append(float(v))
-                        except Exception:
-                            continue
-
-                    if pos_vals:
-                        xmin_p = min(pos_vals)
-                        xmax_p = max(pos_vals)
-                        if xmin_p <= 0:
-                            xmin_p = min(x for x in pos_vals if x > 0)
-                        if xmin_p >= xmax_p:
-                            xmax_p = xmin_p * 10.0
-                        return math.log10(xmin_p), math.log10(xmax_p)
-
-                    return -12.0, -6.0
-
-                x_min_log, x_max_log = _safe_x_log_range_ds(x_min, x_max)
-                fig.update_xaxes(range=[x_min_log, x_max_log])
-            else:
-                fig.update_xaxes(range=[x_min, x_max])
-
-        if y_min is not None and y_max is not None:
-            if y_axis_type == "log":
-                # For log scale, ensure positive bounds; if provided bounds are
-                # non-positive, derive a safe range from the data.
-
-                def _safe_log_range_ds(
-                    downstream_or_upstream: str, y_min_val, y_max_val
-                ):
-                    try:
-                        if y_min_val is not None and y_max_val is not None:
-                            if (
-                                y_min_val > 0
-                                and y_max_val > 0
-                                and y_min_val < y_max_val
-                            ):
-                                return y_min_val, y_max_val
-                    except Exception:
-                        pass
-
-                    pos_vals = []
-                    for dataset in self.datasets:
-                        try:
-                            if downstream_or_upstream == "downstream_data":
-                                vals = dataset.downstream_pressure
-                            else:
-                                vals = dataset.upstream_pressure
-                            for v in vals:
-                                if v is not None and v > 0:
-                                    pos_vals.append(float(v))
-                        except Exception:
-                            continue
-
-                    if pos_vals:
-                        ymin_p = min(pos_vals)
-                        ymax_p = max(pos_vals)
-                        if ymin_p <= 0:
-                            ymin_p = min(x for x in pos_vals if x > 0)
-                        if ymin_p >= ymax_p:
-                            ymax_p = ymin_p * 10.0
-                        return ymin_p, ymax_p
-
-                    return 1e-12, 1e-6
-
-                y_min_use, y_max_use = _safe_log_range_ds(
-                    "downstream_data", y_min, y_max
-                )
-                fig.update_yaxes(range=[math.log10(y_min_use), math.log10(y_max_use)])
-            else:
-                fig.update_yaxes(range=[y_min, y_max])
-
-        # Clean up trace names to remove [R] annotations
-        for trace in fig.data:
-            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
-                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
-
-        return fig
-
-    def _generate_temperature_plot(self):
-        """Generate the temperature plot for datasets with thermocouple data.
-
-        Shows temperature traces for datasets with data, and displays a message
-        for datasets without temperature data in the bottom right corner.
-        """
-        # Use FigureResampler with parameters to hide resampling annotations
-        fig = FigureResampler(
-            go.Figure(),
-            show_dash_kwargs={"mode": "disabled"},
-            show_mean_aggregation_size=False,
-            verbose=False,
-        )
-
-        # Store the FigureResampler instance
-        self.figure_resamplers["temperature-plot"] = fig
-
-        # Track which datasets have/don't have temperature data
-        datasets_with_temp = []
-        datasets_without_temp = []
-
-        for dataset in self.datasets:
-            if dataset.thermocouple_data is None:
-                datasets_without_temp.append(dataset.name)
-            else:
-                datasets_with_temp.append(dataset)
-
-        # Plot temperature data for datasets that have it
-        for dataset in datasets_with_temp:
-            time_data = np.ascontiguousarray(dataset.time_data)
-            local_temp = np.ascontiguousarray(dataset.local_temperature_data)
-            thermocouple_temp = np.ascontiguousarray(dataset.thermocouple_data)
-            colour = dataset.colour
-            thermocouple_name = dataset.thermocouple_name or "Thermocouple"
-
-            # Add local temperature trace
-            fig.add_trace(
-                go.Scatter(
-                    mode="lines",
-                    name=f"{dataset.name} - Furnace setpoint (C)",
-                    line=dict(color=colour, width=1.5, dash="dash"),
-                ),
-                hf_x=time_data,
-                hf_y=local_temp,
-            )
-
-            # Add thermocouple temperature trace
-            fig.add_trace(
-                go.Scatter(
-                    mode="lines",
-                    name=f"{dataset.name} - {thermocouple_name} (C)",
-                    line=dict(color=colour, width=2),
-                ),
-                hf_x=time_data,
-                hf_y=thermocouple_temp,
-            )
-
-        # Configure the layout
-        fig.update_layout(
-            height=400,
-            xaxis_title="Time (s)",
-            yaxis_title="Temperature (°C)",
-            template="plotly_white",
-            margin=dict(l=60, r=30, t=40, b=60),
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
-            ),
-        )
-
-        # Add annotation for datasets without temperature data
-        if datasets_without_temp:
-            if len(datasets_with_temp) == 0:
-                # No temperature data at all - show centered message
-                annotation_text = "No temperature data available"
-                x_pos, y_pos = 0.5, 0.5
-                font_size = 16
-            else:
-                # Some datasets have data, show smaller message in corner
-                if len(datasets_without_temp) == 1:
-                    annotation_text = (
-                        f"No temperature data for: {datasets_without_temp[0]}"
-                    )
-                else:
-                    annotation_text = (
-                        f"No temperature data for: {', '.join(datasets_without_temp)}"
-                    )
-                x_pos, y_pos = 0.98, 0.02
-                font_size = 10
-
-            fig.add_annotation(
-                text=annotation_text,
-                xref="paper",
-                yref="paper",
-                x=x_pos,
-                y=y_pos,
-                xanchor="right" if x_pos > 0.5 else "center",
-                yanchor="bottom" if y_pos < 0.5 else "middle",
-                showarrow=False,
-                font=dict(size=font_size, color="gray"),
-                bgcolor="rgba(255, 255, 255, 0.8)",
-                bordercolor="gray",
-                borderwidth=1,
-                borderpad=4,
-            )
-
-        # Clean up trace names to remove [R] annotations
-        for trace in fig.data:
-            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
-                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
-
-        return fig
-
-    def _generate_permeability_plot(self):
-        """Generate permeability plot with HTM reference and measured data."""
-        fig = FigureResampler(
-            go.Figure(),
-            show_dash_kwargs={"mode": "disabled"},
-            show_mean_aggregation_size=False,
-            verbose=False,
-        )
-        self.figure_resamplers["permeability-plot"] = fig
-
-        # Add HTM reference data
-        htm_x, htm_y, htm_labels = import_htm_data("316l_steel")
-        for x, y, label in zip(htm_x, htm_y, htm_labels):
-            fig.add_trace(go.Scatter(x=1000 / x, y=y, name=label))
-
-        # Calculate and plot permeability for each dataset
-        temps, perms, x_error, y_error, error_lower, error_upper = (
-            evaluate_permeability_values(self.datasets)
-        )
-
-        # Add error bars (no visible markers, just the bars)
-        fig.add_trace(
-            go.Scatter(
-                x=x_error,
-                y=y_error,
-                mode="markers",
-                name="Error Range",
-                marker=dict(size=0.1, color="black", opacity=0),
-                error_y=dict(
-                    type="data",
-                    symmetric=False,
-                    array=error_upper,
-                    arrayminus=error_lower,
-                    color="black",
-                    thickness=2,
-                    width=6,
-                ),
-                showlegend=False,
-            )
-        )
-
-        # Add individual data points on top (no legend)
-        # Extract nominal values from ufloat objects
-        perm_values = np.array([p.n if hasattr(p, "n") else p for p in perms])
-        fig.add_trace(
-            go.Scatter(
-                x=1000 / np.array(temps),
-                y=perm_values,
-                mode="markers",
-                marker=dict(size=6, color="black"),
-                showlegend=False,
-            )
-        )
-
-        # Fit a line through all data points (in log space for permeability)
-        fit_x, fit_y = fit_permeability_data(temps, perms)
-
-        fig.add_trace(
-            go.Scatter(
-                x=fit_x,
-                y=fit_y,
-                mode="lines",
-                name="SHIELD data",
-                line=dict(color="black", width=2, dash="solid"),
-                showlegend=True,
-            )
-        )
-
-        # Configure layout
-        fig.update_layout(
-            xaxis_title="1000/T (K-1)",
-            yaxis_title="Permeability (m-1 s-1 Pa-0.5)",
-            yaxis_type="log",
-            hovermode="closest",
-            template="plotly_white",
-            legend=dict(
-                orientation="v", yanchor="top", y=0.99, xanchor="right", x=0.99
-            ),
-        )
-
-        # Configure y-axis to show exponent at top (matplotlib style)
-        fig.update_yaxes(exponentformat="e", showexponent="all")
-
-        # Clean up resampler annotations
-        for trace in fig.data:
-            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
-                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
-
-        return fig
-
-    def _create_dataset_download(self, dataset_path: str):
-        """Package original dataset files for download based on metadata version.
-
-        For version '0.0' zip all CSV files in the folder and return as bytes.
-        For version '1.0' return the single CSV file named in run_info.data_filename
-
-        Returns a dict suitable for dcc.send_bytes or dcc.send_file style use.
-        """
-
-        # Zip the entire dataset folder (all files and subfolders), preserving
-        # the relative directory structure inside the archive.
+        # Create in-memory ZIP archive preserving directory structure
         mem_zip = io.BytesIO()
         with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            # Walk through all files and subdirectories
             for root, _dirs, files in os.walk(dataset_path):
                 for fname in files:
                     file_path = os.path.join(root, fname)
                     try:
+                        # Store relative path to maintain structure in archive
                         arcname = os.path.relpath(file_path, dataset_path)
                         zf.write(file_path, arcname)
                     except Exception:
-                        # Skip files we fail to read/write into the archive
+                        # Skip files we cannot read (permissions, etc.)
                         continue
+
+        # Rewind buffer for reading
         mem_zip.seek(0)
-        # Use a normalized basename in case dataset_path ends with a slash
+
+        # Use folder name as ZIP filename
         base = os.path.basename(os.path.normpath(dataset_path))
         return dict(
             content=mem_zip.getvalue(),
@@ -895,35 +351,222 @@ class DataPlotter:
             type="application/zip",
         )
 
-    def start(self):
-        """Process data and start the Dash web server"""
+    def _initialize_figure_generators(self) -> None:
+        """Initialize plot generator instances with loaded datasets.
 
-        # Process data
+        Creates instances of PressurePlot, TemperaturePlot, and PermeabilityPlot,
+        passing the loaded datasets to each. These generators are used to create
+        the initial plots and regenerate them when settings change.
+        """
+        # Create upstream pressure plot generator
+        self.upstream_plot = PressurePlot(
+            datasets=self.datasets, plot_id="upstream-plot", plot_type="upstream"
+        )
+        # Create downstream pressure plot generator
+        self.downstream_plot = PressurePlot(
+            datasets=self.datasets, plot_id="downstream-plot", plot_type="downstream"
+        )
+        # Create temperature plot generator
+        self.temperature_plot = TemperaturePlot(
+            datasets=self.datasets, plot_id="temperature-plot"
+        )
+        # Create permeability (Arrhenius) plot generator
+        self.permeability_plot = PermeabilityPlot(
+            datasets=self.datasets, plot_id="permeability-plot"
+        )
+
+    def _generate_plot(
+        self,
+        plot_type: str,
+        show_error_bars: bool = False,
+        show_valve_times: bool = False,
+        x_scale: str = "linear",
+        y_scale: str = "log",
+        x_min: float | None = None,
+        x_max: float | None = None,
+        y_min: float | None = None,
+        y_max: float | None = None,
+    ) -> Any:
+        """Generic plot generation method for all plot types.
+
+        This method provides a unified interface for generating any plot type.
+        It sets the appropriate plot parameters, generates the plot, and stores
+        the FigureResampler instance for interactive callbacks.
+
+        Args:
+            plot_type: Type of plot to generate. Must be one of:
+                - 'upstream': Upstream pressure vs time
+                - 'downstream': Downstream pressure vs time
+                - 'temperature': Temperature vs time
+                - 'permeability': Permeability vs inverse temperature (Arrhenius)
+            show_error_bars: Whether to display error bars on data points
+            show_valve_times: Whether to display valve event markers.
+                Only applies to pressure plots (upstream/downstream).
+            x_scale: X-axis scale type ('linear' or 'log')
+            y_scale: Y-axis scale type ('linear' or 'log')
+            x_min: Minimum x-axis value (None for auto-scaling)
+            x_max: Maximum x-axis value (None for auto-scaling)
+            y_min: Minimum y-axis value (None for auto-scaling)
+            y_max: Maximum y-axis value (None for auto-scaling)
+
+        Returns:
+            Plotly Figure object (FigureResampler) for the specified plot type
+
+        Raises:
+            ValueError: If plot_type is not recognized
+        """
+        # Map plot type to corresponding plot generator and callback key
+        plot_config: dict[str, tuple[Any, str]] = {
+            "upstream": (self.upstream_plot, "upstream-plot"),
+            "downstream": (self.downstream_plot, "downstream-plot"),
+            "temperature": (self.temperature_plot, "temperature-plot"),
+            "permeability": (self.permeability_plot, "permeability-plot"),
+        }
+
+        # Validate plot type
+        if plot_type not in plot_config:
+            raise ValueError(f"Unknown plot type: {plot_type}")
+
+        # Get plot generator and resampler key
+        plot_obj, resampler_key = plot_config[plot_type]
+
+        # Determine if valve times should be shown (only for pressure plots)
+        use_valve_times = (
+            show_valve_times if plot_type in ["upstream", "downstream"] else False
+        )
+
+        plot_obj.plot_parameters = {
+            "show_error_bars": show_error_bars,
+            "show_valve_times": use_valve_times,
+            "x_scale": x_scale,
+            "y_scale": y_scale,
+            "x_min": x_min,
+            "x_max": x_max,
+            "y_min": y_min,
+            "y_max": y_max,
+        }
+
+        # Generate the plot
+        fig = plot_obj.generate()
+
+        # Store the FigureResampler instance for callback registration
+        self.figure_resamplers[resampler_key] = plot_obj.figure_resampler
+
+        return fig
+
+    def _generate_upstream_plot(self, **kwargs) -> Any:
+        """Generate upstream pressure vs time plot.
+
+        This is a convenience wrapper around _generate_plot that automatically
+        sets the plot type to 'upstream'.
+
+        Args:
+            **kwargs: All keyword arguments are passed to _generate_plot.
+                See _generate_plot() for available parameters.
+
+        Returns:
+            Plotly Figure object (FigureResampler) for upstream pressure plot
+        """
+        return self._generate_plot("upstream", **kwargs)
+
+    def _generate_downstream_plot(self, **kwargs) -> Any:
+        """Generate downstream pressure vs time plot.
+
+        This is a convenience wrapper around _generate_plot that automatically
+        sets the plot type to 'downstream'.
+
+        Args:
+            **kwargs: All keyword arguments are passed to _generate_plot.
+                See _generate_plot() for available parameters.
+
+        Returns:
+            Plotly Figure object (FigureResampler) for downstream pressure plot
+        """
+        return self._generate_plot("downstream", **kwargs)
+
+    def _generate_temperature_plot(self, **kwargs) -> Any:
+        """Generate temperature vs time plot.
+
+        This is a convenience wrapper around _generate_plot that automatically
+        sets the plot type to 'temperature'.
+
+        Args:
+            **kwargs: All keyword arguments are passed to _generate_plot.
+                See _generate_plot() for available parameters.
+
+        Returns:
+            Plotly Figure object (FigureResampler) for temperature plot
+        """
+        return self._generate_plot("temperature", **kwargs)
+
+    def _generate_permeability_plot(self, **kwargs) -> Any:
+        """Generate permeability (Arrhenius) plot.
+
+        This is a convenience wrapper around _generate_plot that automatically
+        sets the plot type to 'permeability'. The permeability plot shows
+        permeability vs inverse temperature with reference HTM data.
+
+        Args:
+            **kwargs: All keyword arguments are passed to _generate_plot.
+                See _generate_plot() for available parameters.
+
+        Returns:
+            Plotly Figure object (FigureResampler) for permeability plot
+        """
+        return self._generate_plot("permeability", **kwargs)
+
+    def start(self) -> None:
+        """Initialize the dashboard and start the Dash web server.
+
+        This method orchestrates the complete dashboard startup process:
+        1. Loads all dataset data from configured paths
+        2. Initializes plot generators with loaded data
+        3. Creates the Dash application layout
+        4. Registers all callbacks for interactivity
+        5. Opens the dashboard in the default web browser
+        6. Starts the Flask development server (blocking)
+
+        The server runs on localhost:{self.port} and automatically opens
+        in a browser after a short delay to ensure the server is ready.
+
+        Note:
+            This method blocks until the server is shut down (Ctrl+C).
+            It should be the last call in your application startup code.
+
+        Raises:
+            Various exceptions from data loading, layout creation, or
+            server startup may be raised if issues occur.
+        """
+        # Load and process all dataset files
         for dataset_path, dataset_name in zip(self.dataset_paths, self.dataset_names):
             self.load_data(dataset_path, dataset_name)
 
-        # Setup the app layout
+        # Initialize all plot generators after datasets are loaded
+        self._initialize_figure_generators()
+
+        # Create the Dash application layout
         self.app.layout = self.create_layout()
 
-        # Add custom CSS for hover effects
+        # Apply custom CSS for hover effects and styling
         self.app.index_string = hover_css
 
+        # Add custom favicon (SHIELD logo)
         custom_favicon_link = (
             '<link rel="icon" href="/assets/shield.svg" type="image/svg+xml">'
         )
         self.app.index_string = hover_css.replace("{%favicon%}", custom_favicon_link)
 
-        # Register callbacks
-        self.register_callbacks()
+        # Register all interactive callbacks
+        register_all_callbacks(self)
 
         print(f"Starting dashboard on http://localhost:{self.port}")
 
-        # Open web browser after a short delay
+        # Open default web browser after short delay to ensure server is ready
         threading.Timer(
             0.1, lambda: webbrowser.open(f"http://127.0.0.1:{self.port}")
         ).start()
 
-        # Run the server directly (blocking)
+        # Start the Flask development server (blocking call)
         self.app.run(debug=False, host="127.0.0.1", port=self.port)
 
 

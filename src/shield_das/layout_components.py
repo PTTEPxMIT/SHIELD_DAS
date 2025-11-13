@@ -7,7 +7,6 @@ for different sections of the plotter UI layout.
 import dash_bootstrap_components as dbc
 from dash import dcc, html
 
-
 # Common styles used across components
 COLLAPSE_BUTTON_STYLE = {
     "border": "1px solid #dee2e6",
@@ -224,6 +223,8 @@ def create_hidden_stores():
         # Hidden stores for plot settings
         dcc.Store(id="upstream-settings-store", data={}),
         dcc.Store(id="downstream-settings-store", data={}),
+        dcc.Store(id="temperature-settings-store", data={}),
+        dcc.Store(id="permeability-settings-store", data={}),
         # Status message for upload feedback (floating)
         html.Div(
             id="upload-status",
@@ -286,6 +287,237 @@ def create_pressure_plots_row(upstream_figure, downstream_figure):
                     ),
                 ],
                 width=6,
+            ),
+        ]
+    )
+
+
+def create_simple_plot_controls_card(
+    plot_name: str,
+    card_title: str,
+    collapse_button_id: str,
+    collapse_id: str,
+    x_scale_id: str,
+    x_min_id: str,
+    x_max_id: str,
+    y_scale_id: str,
+    y_min_id: str,
+    y_max_id: str,
+    show_error_bars_id: str,
+    export_button_id: str,
+):
+    """Create a simplified plot controls card (without valve times option).
+
+    Args:
+        plot_name: Name of the plot (e.g., "Temperature", "Permeability")
+        card_title: Title for the card header
+        collapse_button_id: ID for collapse toggle button
+        collapse_id: ID for collapse component
+        x_scale_id: ID for x-axis scale radio buttons
+        x_min_id: ID for x-axis min input
+        x_max_id: ID for x-axis max input
+        y_scale_id: ID for y-axis scale radio buttons
+        y_min_id: ID for y-axis min input
+        y_max_id: ID for y-axis max input
+        show_error_bars_id: ID for error bars checkbox
+        export_button_id: ID for export button
+
+    Returns:
+        dbc.Card: Bootstrap card containing plot controls
+    """
+    return dbc.Card(
+        [
+            dbc.CardHeader(
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            card_title,
+                            className="d-flex align-items-center",
+                        ),
+                        dbc.Col(
+                            dbc.Button(
+                                html.I(className="fas fa-chevron-up"),
+                                id=collapse_button_id,
+                                color="light",
+                                size="sm",
+                                className="ms-auto",
+                                style=COLLAPSE_BUTTON_STYLE,
+                            ),
+                            width="auto",
+                            className="d-flex justify-content-end",
+                        ),
+                    ],
+                    className="g-0 align-items-center",
+                )
+            ),
+            dbc.Collapse(
+                dbc.CardBody(
+                    [
+                        dbc.Row(
+                            [
+                                # X-axis controls
+                                dbc.Col(
+                                    [
+                                        html.H6("X-Axis", className="mb-2"),
+                                        dbc.Row(
+                                            [
+                                                dbc.Col(
+                                                    [
+                                                        dbc.Label("Scale:"),
+                                                        dbc.RadioItems(
+                                                            id=x_scale_id,
+                                                            options=[
+                                                                {
+                                                                    "label": "Linear",
+                                                                    "value": "linear",
+                                                                },
+                                                                {
+                                                                    "label": "Log",
+                                                                    "value": "log",
+                                                                },
+                                                            ],
+                                                            value="linear",
+                                                            inline=True,
+                                                        ),
+                                                    ],
+                                                    width=12,
+                                                ),
+                                            ],
+                                            className="mb-2",
+                                        ),
+                                        dbc.Row(
+                                            [
+                                                dbc.Col(
+                                                    [
+                                                        dbc.Label("Min:"),
+                                                        dbc.Input(
+                                                            id=x_min_id,
+                                                            type="number",
+                                                            placeholder="Auto",
+                                                            value=0,
+                                                            size="sm",
+                                                        ),
+                                                    ],
+                                                    width=6,
+                                                ),
+                                                dbc.Col(
+                                                    [
+                                                        dbc.Label("Max:"),
+                                                        dbc.Input(
+                                                            id=x_max_id,
+                                                            type="number",
+                                                            placeholder="Auto",
+                                                            size="sm",
+                                                        ),
+                                                    ],
+                                                    width=6,
+                                                ),
+                                            ]
+                                        ),
+                                    ],
+                                    width=6,
+                                ),
+                                # Y-axis controls
+                                dbc.Col(
+                                    [
+                                        html.H6("Y-Axis", className="mb-2"),
+                                        dbc.Row(
+                                            [
+                                                dbc.Col(
+                                                    [
+                                                        dbc.Label("Scale:"),
+                                                        dbc.RadioItems(
+                                                            id=y_scale_id,
+                                                            options=[
+                                                                {
+                                                                    "label": "Linear",
+                                                                    "value": "linear",
+                                                                },
+                                                                {
+                                                                    "label": "Log",
+                                                                    "value": "log",
+                                                                },
+                                                            ],
+                                                            value="linear",
+                                                            inline=True,
+                                                        ),
+                                                    ],
+                                                    width=12,
+                                                ),
+                                            ],
+                                            className="mb-2",
+                                        ),
+                                        dbc.Row(
+                                            [
+                                                dbc.Col(
+                                                    [
+                                                        dbc.Label("Min:"),
+                                                        dbc.Input(
+                                                            id=y_min_id,
+                                                            type="number",
+                                                            placeholder="Auto",
+                                                            value=0,
+                                                            size="sm",
+                                                        ),
+                                                    ],
+                                                    width=6,
+                                                ),
+                                                dbc.Col(
+                                                    [
+                                                        dbc.Label("Max:"),
+                                                        dbc.Input(
+                                                            id=y_max_id,
+                                                            type="number",
+                                                            placeholder="Auto",
+                                                            size="sm",
+                                                        ),
+                                                    ],
+                                                    width=6,
+                                                ),
+                                            ]
+                                        ),
+                                    ],
+                                    width=6,
+                                ),
+                            ]
+                        ),
+                        # Options Row (without valve times checkbox)
+                        dbc.Row(
+                            [
+                                dbc.Col(
+                                    [
+                                        html.H6(
+                                            "Options",
+                                            className="mb-2 mt-3",
+                                        ),
+                                        dbc.Checkbox(
+                                            id=show_error_bars_id,
+                                            label="Show error bars",
+                                            value=True,
+                                            className="mb-2",
+                                        ),
+                                        html.Hr(className="my-2"),
+                                        dbc.Button(
+                                            [
+                                                html.I(
+                                                    className="fas fa-download me-2"
+                                                ),
+                                                f"Export {plot_name} Plot",
+                                            ],
+                                            id=export_button_id,
+                                            color="outline-secondary",
+                                            size="sm",
+                                            className="w-100",
+                                        ),
+                                    ],
+                                    width=12,
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+                id=collapse_id,
+                is_open=False,
             ),
         ]
     )
@@ -576,6 +808,50 @@ def create_downstream_controls_card():
     )
 
 
+def create_temperature_controls_card():
+    """Create the temperature plot controls card.
+
+    Returns:
+        dbc.Card: Bootstrap card with temperature plot controls
+    """
+    return create_simple_plot_controls_card(
+        plot_name="Temperature",
+        card_title="Temperature Plot Controls",
+        collapse_button_id="collapse-temperature-controls-button",
+        collapse_id="collapse-temperature-controls",
+        x_scale_id="temperature-x-scale",
+        x_min_id="temperature-x-min",
+        x_max_id="temperature-x-max",
+        y_scale_id="temperature-y-scale",
+        y_min_id="temperature-y-min",
+        y_max_id="temperature-y-max",
+        show_error_bars_id="show-error-bars-temperature",
+        export_button_id="export-temperature-plot",
+    )
+
+
+def create_permeability_controls_card():
+    """Create the permeability plot controls card.
+
+    Returns:
+        dbc.Card: Bootstrap card with permeability plot controls
+    """
+    return create_simple_plot_controls_card(
+        plot_name="Permeability",
+        card_title="Permeability Plot Controls",
+        collapse_button_id="collapse-permeability-controls-button",
+        collapse_id="collapse-permeability-controls",
+        x_scale_id="permeability-x-scale",
+        x_min_id="permeability-x-min",
+        x_max_id="permeability-x-max",
+        y_scale_id="permeability-y-scale",
+        y_min_id="permeability-y-min",
+        y_max_id="permeability-y-max",
+        show_error_bars_id="show-error-bars-permeability",
+        export_button_id="export-permeability-plot",
+    )
+
+
 def create_plot_controls_row():
     """Create the row containing both upstream and downstream control cards.
 
@@ -592,71 +868,101 @@ def create_plot_controls_row():
 
 
 def create_temperature_plot_card(temperature_figure):
-    """Create the temperature plot card.
+    """Create the temperature plot card with controls below.
 
     Args:
         temperature_figure: Plotly figure for temperature plot
 
     Returns:
-        dbc.Row: Bootstrap row containing temperature plot card
+        dbc.Container: Container with temperature plot and controls
     """
-    return dbc.Row(
+    return dbc.Container(
         [
-            dbc.Col(
+            dbc.Row(
                 [
-                    dbc.Card(
+                    dbc.Col(
                         [
-                            dbc.CardHeader("Temperature Data"),
-                            dbc.CardBody(
+                            dbc.Card(
                                 [
-                                    dcc.Graph(
-                                        id="temperature-plot",
-                                        figure=temperature_figure,
-                                    )
+                                    dbc.CardHeader("Temperature Data"),
+                                    dbc.CardBody(
+                                        [
+                                            dcc.Graph(
+                                                id="temperature-plot",
+                                                figure=temperature_figure,
+                                            )
+                                        ]
+                                    ),
                                 ]
                             ),
-                        ]
+                        ],
+                        width=12,
                     ),
                 ],
-                width=12,
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [create_temperature_controls_card()],
+                        width=12,
+                    ),
+                ],
+                className="mt-2",
             ),
         ],
+        fluid=True,
         className="mt-3",
     )
 
 
 def create_permeability_plot_card(permeability_figure):
-    """Create the permeability plot card.
+    """Create the permeability plot card with controls below.
 
     Args:
         permeability_figure: Plotly figure for permeability plot
 
     Returns:
-        dbc.Row: Bootstrap row containing permeability plot card
+        dbc.Container: Container with permeability plot and controls
     """
-    return dbc.Row(
+    return dbc.Container(
         [
-            dbc.Col(width=3),  # Left spacing
-            dbc.Col(
+            dbc.Row(
                 [
-                    dbc.Card(
+                    dbc.Col(width=2),  # Left spacing
+                    dbc.Col(
                         [
-                            dbc.CardHeader("Measured Permeability"),
-                            dbc.CardBody(
+                            dbc.Card(
                                 [
-                                    dcc.Graph(
-                                        id="permeability-plot",
-                                        figure=permeability_figure,
-                                    )
+                                    dbc.CardHeader("Measured Permeability"),
+                                    dbc.CardBody(
+                                        [
+                                            dcc.Graph(
+                                                id="permeability-plot",
+                                                figure=permeability_figure,
+                                            )
+                                        ]
+                                    ),
                                 ]
                             ),
-                        ]
+                        ],
+                        width=8,
                     ),
+                    dbc.Col(width=2),  # Right spacing
                 ],
-                width=6,
             ),
-            dbc.Col(width=3),  # Right spacing
+            dbc.Row(
+                [
+                    dbc.Col(width=2),  # Left spacing
+                    dbc.Col(
+                        [create_permeability_controls_card()],
+                        width=8,
+                    ),
+                    dbc.Col(width=2),  # Right spacing
+                ],
+                className="mt-2",
+            ),
         ],
+        fluid=True,
         className="mt-3",
     )
 

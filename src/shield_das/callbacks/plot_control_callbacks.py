@@ -262,3 +262,137 @@ def register_plot_control_callbacks(plotter):
     def update_downstream_y_min(y_scale):
         """Auto-set downstream Y min: 0 for linear, None for log."""
         return _create_min_value_callback("y")(y_scale)
+
+    # === Temperature Plot Callbacks ===
+
+    @plotter.app.callback(
+        [
+            Output("temperature-plot", "figure", allow_duplicate=True),
+            Output("temperature-settings-store", "data"),
+        ],
+        [
+            Input("temperature-x-scale", "value"),
+            Input("temperature-y-scale", "value"),
+            Input("temperature-x-min", "value"),
+            Input("temperature-x-max", "value"),
+            Input("temperature-y-min", "value"),
+            Input("temperature-y-max", "value"),
+            Input("show-error-bars-temperature", "value"),
+        ],
+        [
+            State("temperature-plot", "figure"),
+            State("temperature-settings-store", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def update_temperature_plot_settings(
+        x_scale,
+        y_scale,
+        x_min,
+        x_max,
+        y_min,
+        y_max,
+        show_error_bars,
+        current_fig,
+        store_data,
+    ):
+        """Apply all temperature plot display settings."""
+        x_min, x_max, y_min, y_max = _normalize_range_values(x_min, x_max, y_min, y_max)
+        new_store = {"y_scale": y_scale}
+
+        updated_fig = plotter._generate_temperature_plot(
+            show_error_bars=bool(show_error_bars),
+            x_scale=x_scale,
+            y_scale=y_scale,
+            x_min=x_min,
+            x_max=x_max,
+            y_min=y_min,
+            y_max=y_max,
+        )
+
+        return [updated_fig, new_store]
+
+    @plotter.app.callback(
+        [Output("temperature-x-min", "value")],
+        [Input("temperature-x-scale", "value")],
+        prevent_initial_call=True,
+    )
+    def update_temperature_x_min(x_scale):
+        """Auto-set temperature X min: 0 for linear, None for log."""
+        return _create_min_value_callback("x")(x_scale)
+
+    @plotter.app.callback(
+        [Output("temperature-y-min", "value")],
+        [Input("temperature-y-scale", "value")],
+        prevent_initial_call=True,
+    )
+    def update_temperature_y_min(y_scale):
+        """Auto-set temperature Y min: 0 for linear, None for log."""
+        return _create_min_value_callback("y")(y_scale)
+
+    # === Permeability Plot Callbacks ===
+
+    @plotter.app.callback(
+        [
+            Output("permeability-plot", "figure", allow_duplicate=True),
+            Output("permeability-settings-store", "data"),
+        ],
+        [
+            Input("permeability-x-scale", "value"),
+            Input("permeability-y-scale", "value"),
+            Input("permeability-x-min", "value"),
+            Input("permeability-x-max", "value"),
+            Input("permeability-y-min", "value"),
+            Input("permeability-y-max", "value"),
+            Input("show-error-bars-permeability", "value"),
+        ],
+        [
+            State("permeability-plot", "figure"),
+            State("permeability-settings-store", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def update_permeability_plot_settings(
+        x_scale,
+        y_scale,
+        x_min,
+        x_max,
+        y_min,
+        y_max,
+        show_error_bars,
+        current_fig,
+        store_data,
+    ):
+        """Apply all permeability plot display settings."""
+        x_min, x_max, y_min, y_max = _normalize_range_values(x_min, x_max, y_min, y_max)
+        new_store = {"y_scale": y_scale}
+
+        updated_fig = plotter._generate_permeability_plot(
+            show_error_bars=bool(show_error_bars),
+            x_scale=x_scale,
+            y_scale=y_scale,
+            x_min=x_min,
+            x_max=x_max,
+            y_min=y_min,
+            y_max=y_max,
+        )
+
+        return [updated_fig, new_store]
+
+    @plotter.app.callback(
+        [Output("permeability-x-min", "value")],
+        [Input("permeability-x-scale", "value")],
+        prevent_initial_call=True,
+    )
+    def update_permeability_x_min(x_scale):
+        """Auto-set permeability X min: 0 for linear, None for log."""
+        return _create_min_value_callback("x")(x_scale)
+
+    @plotter.app.callback(
+        [Output("permeability-y-min", "value")],
+        [Input("permeability-y-scale", "value")],
+        prevent_initial_call=True,
+    )
+    def update_permeability_y_min(y_scale):
+        """Auto-set permeability Y min: 0 for linear, None for log."""
+        return _create_min_value_callback("y")(y_scale)

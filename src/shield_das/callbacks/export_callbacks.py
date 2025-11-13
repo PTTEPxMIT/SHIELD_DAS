@@ -127,6 +127,30 @@ def register_export_callbacks(plotter):
         fig = plotter._generate_downstream_plot_full_data(False)
         return _export_figure_to_html(fig, "downstream_plot_full_data.html")
 
+    @plotter.app.callback(
+        Output("download-temperature-plot", "data", allow_duplicate=True),
+        [Input("export-temperature-plot", "n_clicks")],
+        [State("temperature-plot", "figure")],
+        prevent_initial_call=True,
+    )
+    def export_temperature_plot(n_clicks, current_fig):
+        """Export current temperature plot view to HTML file."""
+        if not n_clicks or not current_fig:
+            raise PreventUpdate
+        return _export_figure_to_html(current_fig, "temperature_plot.html")
+
+    @plotter.app.callback(
+        Output("download-permeability-plot", "data", allow_duplicate=True),
+        [Input("export-permeability-plot", "n_clicks")],
+        [State("permeability-plot", "figure")],
+        prevent_initial_call=True,
+    )
+    def export_permeability_plot(n_clicks, current_fig):
+        """Export current permeability plot view to HTML file."""
+        if not n_clicks or not current_fig:
+            raise PreventUpdate
+        return _export_figure_to_html(current_fig, "permeability_plot.html")
+
     # === FigureResampler Interactive Callbacks ===
 
     @plotter.app.callback(
