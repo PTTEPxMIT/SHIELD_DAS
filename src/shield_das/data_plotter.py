@@ -14,7 +14,6 @@ from typing import Any
 
 import dash
 import dash_bootstrap_components as dbc
-from dash import html
 
 from . import layout_components as lc
 from .callbacks import register_all_callbacks
