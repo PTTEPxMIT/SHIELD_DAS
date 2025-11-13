@@ -8,15 +8,14 @@ from unittest.mock import MagicMock, patch
 
 import dash_bootstrap_components as dbc
 import pytest
-
 from dash.exceptions import PreventUpdate
+
 from shield_das.callbacks.dataset_callbacks import (
     _create_alert,
     _get_triggered_index,
     _validate_dataset_path,
     register_dataset_callbacks,
 )
-
 
 # =============================================================================
 # Tests for _get_triggered_index
