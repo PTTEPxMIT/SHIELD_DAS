@@ -242,13 +242,8 @@ class Baratron626D_Gauge(PressureGauge):
 
     @full_scale_Torr.setter
     def full_scale_Torr(self, value):
-        try:
-            val = float(value)
-        except (TypeError, ValueError):
-            raise ValueError(
-                "full_scale_Torr must be a number (1 or 1000) for Baratron626D_Gauge"
-            )
-        if val not in (1.0, 1000.0):
+        val = float(value)
+        if val not in [1.0, 1000.0]:
             raise ValueError(
                 "full_scale_Torr must be either 1 or 1000 for Baratron626D_Gauge"
             )
