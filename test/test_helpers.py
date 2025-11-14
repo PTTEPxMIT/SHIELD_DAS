@@ -129,3 +129,13 @@ class TestImportHtmData:
         for label in labels:
             # First character should be uppercase
             assert label[0].isupper()
+
+    def test_exception_handling_for_invalid_material(self):
+        """Test that function handles invalid material gracefully"""
+        try:
+            x_values, y_values, labels = import_htm_data("invalid_material_name")
+            success = True
+        except Exception:
+            success = False
+
+        assert success  # Should not raise exception, just return empty lists
