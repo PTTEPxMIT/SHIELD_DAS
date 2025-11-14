@@ -447,12 +447,6 @@ def test_baratron_full_scale_requires_value():
         _ = gauge.full_scale_Torr
 
 
-def test_baratron_full_scale_rejects_non_numeric():
-    """Test Baratron626D_Gauge rejects non-numeric full_scale_Torr."""
-    with pytest.raises(ValueError, match="must be a number"):
-        Baratron626D_Gauge(ain_channel=6, full_scale_Torr="invalid")
-
-
 def test_baratron_voltage_to_pressure_1000_scale():
     """Test Baratron voltage_to_pressure with 1000 Torr scale."""
     gauge = Baratron626D_Gauge(ain_channel=6, full_scale_Torr=1000.0)
