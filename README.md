@@ -68,7 +68,7 @@ my_recorder.run()
 
 ```
 
-## Example data visulisation script
+## Example data visualisation script
 
 ```python
 
@@ -86,3 +86,68 @@ my_plotter = DataPlotter(
 my_plotter.start()
 
 ```
+
+## Standalone Analysis Functions
+
+SHIELD_DAS provides **analysis functions** that can be used independently without running the full plotter application. This is useful when you want to:
+- Convert raw voltage data to pressure/temperature values
+- Perform custom analysis on experimental data
+- Use the conversion functions in your own scripts
+- Create your own plots with the converted data
+
+### Quick Examples
+
+**Convert voltage to pressure:**
+```python
+from shield_das import voltage_to_pressure
+import numpy as np
+
+voltage = np.array([5.0, 7.5, 10.0])  # 0-10V gauge readings
+pressure = voltage_to_pressure(voltage, full_scale_torr=1000)
+print(pressure)  # [500.0, 750.0, 1000.0] torr
+```
+
+**Convert thermocouple voltage to temperature:**
+```python
+from shield_das import voltage_to_temperature
+import numpy as np
+
+tc_voltage_mv = np.array([10.0, 20.0, 30.0])  # millivolts
+local_temp_c = np.array([25.0, 25.0, 25.0])   # cold junction temp
+
+temperature = voltage_to_temperature(local_temp_c, tc_voltage_mv)
+print(temperature)  # [270.7, 508.3, 744.9] °C
+```
+
+**Calculate flux and permeability:**
+```python
+from shield_das import calculate_flux_from_sample, calculate_error_on_pressure_reading
+import numpy as np
+
+# Your experimental data
+time = np.linspace(0, 1000, 5000)
+pressure = 0.1 + 0.001 * time  # Downstream pressure rise
+
+# Calculate hydrogen flux
+flux = calculate_flux_from_sample(time, pressure)
+print(f"Flux: {flux:.6e} torr/s")
+
+# Calculate measurement uncertainties
+pressure_error = calculate_error_on_pressure_reading(pressure)
+```
+
+### Available Functions
+
+**Data Conversion:**
+- `voltage_to_pressure(voltage, full_scale_torr)` - Convert gauge voltage to pressure
+- `voltage_to_temperature(local_temp_c, voltage_mv)` - Convert thermocouple voltage
+- `calculate_error_on_pressure_reading(pressure)` - Calculate measurement uncertainties
+
+**Analysis:**
+- `calculate_flux_from_sample(time, pressure)` - Calculate hydrogen flux
+- `calculate_permeability_from_flux(...)` - Calculate permeability using Takaishi-Sensui method
+- `fit_permeability_data(temps, perms)` - Fit Arrhenius equation
+- `average_pressure_after_increase(time, pressure)` - Detect stable pressure after transient
+- `evaluate_permeability_values(datasets)` - Extract permeability from multiple datasets
+
+For complete documentation and examples, see **[examples_standalone_analysis.py](examples_standalone_analysis.py)**
