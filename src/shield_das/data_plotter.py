@@ -1,37 +1,32 @@
+"""Data plotter module for SHIELD Data Acquisition System.
+
+This module provides the main DataPlotter class which creates an interactive
+Dash web application for visualizing pressure, temperature, and permeability
+data from multiple experimental datasets.
+"""
+
 import io
-import json
-import math
 import os
 import threading
 import webbrowser
 import zipfile
-from datetime import datetime
+from typing import Any
 
 import dash
 import dash_bootstrap_components as dbc
-import numpy as np
-import numpy.typing as npt
-import plotly.graph_objects as go
-from dash import ALL, dcc, html
-from dash.dependencies import Input, Output, State
-from dash.exceptions import PreventUpdate
-from plotly_resampler import FigureResampler
 
-from .analysis import (
-    calculate_error_on_pressure_reading,
-    evaluate_permeability_values,
-    fit_permeability_data,
-    voltage_to_pressure,
-    voltage_to_temperature,
-)
-from .helpers import import_htm_data
+from . import layout_components as lc
+from .callbacks import register_all_callbacks
+from .dataset import Dataset
+from .dataset_table import DatasetTable
+from .figures import PermeabilityPlot, PressurePlot, TemperaturePlot
 
 
 class DataPlotter:
     """Plotter UI for pressure gauge datasets using Dash.
 
     Provides a Dash app that displays upstream and downstream pressure
-    plots for multiple datasets. Datasets are stored in `self.datasets`.
+    plots for multiple datasets. Datasets are stored in `self.datasets` as a list.
 
     Args:
         dataset_paths: List of folder paths containing datasets to load on
@@ -43,17 +38,9 @@ class DataPlotter:
         dataset_names: List of names corresponding to each dataset path
         port: Port number for Dash app (default: 8050)
         app: Dash app instance
-        datasets: Dictionary of loaded datasets for plotting
+        datasets: List of Dataset instances for plotting
         figure_resamplers: Dictionary of FigureResampler instances for each plot
     """
-
-    # Helper constants for repeated callback state patterns
-    PLOT_CONTROL_STATES = [
-        State("show-error-bars-upstream", "value"),
-        State("show-error-bars-downstream", "value"),
-        State("show-valve-times-upstream", "value"),
-        State("show-valve-times-downstream", "value"),
-    ]
 
     # Type hints / attributes
     dataset_paths: list[str]
@@ -61,16 +48,31 @@ class DataPlotter:
     port: int
 
     app: dash.Dash
-    datasets = dict
+    datasets: list[Dataset]
     upstream_datasets: list[dict]
     downstream_datasets: list[dict]
 
-    def __init__(self, dataset_paths=None, dataset_names=None, port=8050):
+    def __init__(
+        self,
+        dataset_paths: list[str] | None = None,
+        dataset_names: list[str] | None = None,
+        port: int = 8050,
+    ):
+        """Initialize the DataPlotter with datasets and configuration.
+
+        Args:
+            dataset_paths: List of folder paths containing datasets to load.
+                Each path should contain run_metadata.json and data files.
+            dataset_names: List of display names for each dataset.
+                Must match length of dataset_paths if provided.
+            port: Port number for the Dash web server (default: 8050).
+        """
+        # Initialize dataset configuration
         self.dataset_paths = dataset_paths or []
         self.dataset_names = dataset_names or []
         self.port = port
 
-        # Initialize Dash app
+        # Initialize Dash app with Bootstrap theme and Font Awesome icons
         self.app = dash.Dash(
             __name__,
             external_stylesheets=[
@@ -78,37 +80,64 @@ class DataPlotter:
                 "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
             ],
         )
-        # set the browser tab title
+        # Set the browser tab title
         self.app.title = "SHIELD Data Visualisation"
 
-        # Store datasets
-        self.datasets = {}
+        # Initialize empty datasets list (populated via load_data())
+        self.datasets: list[Dataset] = []
 
-        # Store FigureResampler instances for callback registration
-        self.figure_resamplers = {}
+        # Store FigureResampler instances for interactive zoom/pan callbacks
+        self.figure_resamplers: dict[str, Any] = {}
+
+        # Initialize plot generators (created after datasets are loaded)
+        self.upstream_plot: PressurePlot | None = None
+        self.downstream_plot: PressurePlot | None = None
+        self.temperature_plot: TemperaturePlot | None = None
+        self.permeability_plot: PermeabilityPlot | None = None
 
     @property
     def dataset_paths(self) -> list[str]:
+        """Get the list of dataset folder paths.
+
+        Returns:
+            list[str]: List of absolute paths to dataset folders
+        """
         return self._dataset_paths
 
     @dataset_paths.setter
-    def dataset_paths(self, value: list[str]):
-        # if value not a list of strings raise ValueError
+    def dataset_paths(self, value: list[str]) -> None:
+        """Set and validate dataset folder paths.
+
+        Validates that:
+        - Value is a list of strings
+        - All paths exist on filesystem
+        - All paths are unique
+        - Each path contains CSV data files
+        - Each path contains run_metadata.json
+
+        Args:
+            value: List of folder paths to validate
+
+        Raises:
+            ValueError: If validation fails
+            FileNotFoundError: If required files are missing
+        """
+        # Validate input type
         if not isinstance(value, list) or not all(
             isinstance(item, str) for item in value
         ):
             raise ValueError("dataset_paths must be a list of strings")
 
-        # Check if all dataset paths exist
+        # Validate all paths exist
         for dataset_path in value:
             if not os.path.exists(dataset_path):
                 raise ValueError(f"Dataset path does not exist: {dataset_path}")
 
-        # check all dataset paths are unique
+        # Ensure all paths are unique
         if len(value) != len(set(value)):
             raise ValueError("dataset_paths must contain unique paths")
 
-        # check csv files exist in each dataset path
+        # Verify CSV files exist in each path
         for dataset_path in value:
             csv_files = [
                 f for f in os.listdir(dataset_path) if f.lower().endswith(".csv")
@@ -118,7 +147,7 @@ class DataPlotter:
                     f"No data CSV files found in dataset path: {dataset_path}"
                 )
 
-        # check that run_metadata.json exists in each dataset path
+        # Verify metadata file exists in each path
         for dataset_path in value:
             metadata_file = os.path.join(dataset_path, "run_metadata.json")
             if not os.path.exists(metadata_file):
@@ -130,468 +159,87 @@ class DataPlotter:
 
     @property
     def dataset_names(self) -> list[str]:
+        """Get the list of dataset display names.
+
+        Returns:
+            list[str]: List of names for each dataset
+        """
         return self._dataset_names
 
     @dataset_names.setter
-    def dataset_names(self, value: list[str]):
-        # if value not a list of strings raise ValueError
+    def dataset_names(self, value: list[str]) -> None:
+        """Set and validate dataset display names.
+
+        Validates that:
+        - Value is a list of strings
+        - Length matches dataset_paths length
+        - All names are unique
+
+        Args:
+            value: List of display names for datasets
+
+        Raises:
+            ValueError: If validation fails
+        """
+        # Validate input type
         if not isinstance(value, list) or not all(
             isinstance(item, str) for item in value
         ):
             raise ValueError("dataset_names must be a list of strings")
 
-        # Check if dataset_names length matches dataset_paths length
+        # Ensure length matches paths
         if len(value) != len(self.dataset_paths):
             raise ValueError(
                 f"dataset_names length ({len(value)}) must match dataset_paths "
                 f"length ({len(self.dataset_paths)})"
             )
 
-        # Check if all dataset names are unique
+        # Ensure all names are unique
         if len(value) != len(set(value)):
             raise ValueError("dataset_names must contain unique names")
 
         self._dataset_names = value
 
-    def load_data(self, dataset_path: str, dataset_name: str):
-        """
-        Load and process data from all specified data path.
-        """
+    def load_data(self, dataset_path: str, dataset_name: str) -> None:
+        """Load and process data from a dataset folder.
 
-        # Read metadata file
-        metadata_path = os.path.join(dataset_path, "run_metadata.json")
-        with open(metadata_path) as f:
-            metadata = json.load(f)
+        Creates a Dataset instance, assigns a color, processes the data files,
+        and adds it to the internal datasets list.
 
-        # Process CSV data based on version
-        if metadata.get("version") < "1.2":
-            time_data, upstream_data, downstream_data = self.process_csv_data(
-                metadata, dataset_path
-            )
-            self.create_dataset(
-                dataset_path, dataset_name, time_data, upstream_data, downstream_data
-            )
-        else:
-            (
-                time_data,
-                upstream_data,
-                downstream_data,
-                local_temperature_data,
-                thermocouple_data,
-                thermocouple_name,
-            ) = self.process_csv_data(metadata, dataset_path)
-            self.create_dataset_v1_2(
-                dataset_path,
-                dataset_name,
-                time_data,
-                upstream_data,
-                downstream_data,
-                local_temperature_data,
-                thermocouple_data,
-                thermocouple_name,
-            )
-
-    def process_csv_data(
-        self, metadata: dict, data_folder: str
-    ) -> tuple[npt.NDArray, dict, dict]:
-        """
-        Process CSV data based on metadata version.
+        Only supports metadata version 1.3. Will raise ValueError for other versions.
 
         Args:
-            metadata: Parsed JSON metadata dictionary
-            data_folder: Path to folder containing CSV data files
-            gauge_instances: List of gauge instances to populate with data
+            dataset_path: Absolute path to folder containing run_metadata.json
+                and data CSV files
+            dataset_name: Display name to assign to this dataset
+
+        Raises:
+            ValueError: If metadata version is not 1.3
+            FileNotFoundError: If metadata file or required data files are missing
         """
+        # Create Dataset instance with path and name
+        dataset = Dataset(path=dataset_path, name=dataset_name)
 
-        version = metadata.get("version")
+        # Assign color based on dataset index for consistent visualization
+        dataset.colour = self.get_next_color(len(self.datasets))
 
-        if version == "0.0":
-            time_data, upstream_data, downstream_data = self.process_csv_v0_0(
-                metadata, data_folder
-            )
-            return time_data, upstream_data, downstream_data
+        # Load and process data from CSV files
+        dataset.process_data()
 
-        elif version in ["1.0", "1.1"]:
-            time_data, upstream_data, downstream_data = self.process_csv_v1_0(
-                metadata, data_folder
-            )
-            return time_data, upstream_data, downstream_data
-        elif version in ["1.2"]:
-            (
-                time_data,
-                upstream_data,
-                downstream_data,
-                local_temperature_data,
-                thermocouple_data,
-                thermocouple_name,
-            ) = self.process_csv_v1_2(metadata, data_folder)
-            return (
-                time_data,
-                upstream_data,
-                downstream_data,
-                local_temperature_data,
-                thermocouple_data,
-                thermocouple_name,
-            )
-        else:
-            raise NotImplementedError(
-                f"Unsupported metadata version: {version}. "
-                f"Only versions '0.0' and '1.0' are supported."
-            )
-
-    def process_csv_v0_0(
-        self, metadata: dict, data_folder: str
-    ) -> tuple[npt.NDArray, dict, dict]:
-        """
-        Process CSV data for metadata version 0.0 (multiple CSV files).
-
-        Args:
-            metadata: Parsed JSON metadata dictionary
-            data_folder: Path to folder containing CSV data files
-        """
-        # just use first gauge for time data
-        csv_path = os.path.join(data_folder, metadata["gauges"][0]["filename"])
-        data = np.genfromtxt(csv_path, delimiter=",", names=True)
-        time_data = data["RelativeTime"]
-
-        # Load upstream and downstream data for each gauge
-        for gauge in metadata["gauges"]:
-            if gauge["type"] == "Baratron626D_Gauge":
-                if gauge["gauge_location"] == "upstream":
-                    csv_path = os.path.join(data_folder, gauge["filename"])
-                    data = np.genfromtxt(csv_path, delimiter=",", names=True)
-                    upstream_pressure_data = data["Pressure_Torr"]
-                if gauge["gauge_location"] == "downstream":
-                    csv_path = os.path.join(data_folder, gauge["filename"])
-                    data = np.genfromtxt(csv_path, delimiter=",", names=True)
-                    downstream_pressure_data = data["Pressure_Torr"]
-
-        upstream_error = calculate_error_on_pressure_reading(upstream_pressure_data)
-        downstream_error = calculate_error_on_pressure_reading(downstream_pressure_data)
-
-        upstream_data = {
-            "pressure_data": upstream_pressure_data,
-            "error_data": upstream_error,
-        }
-        downstream_data = {
-            "pressure_data": downstream_pressure_data,
-            "error_data": downstream_error,
-        }
-
-        return time_data, upstream_data, downstream_data
-
-    def process_csv_v1_0(
-        self, metadata: dict, data_folder: str
-    ) -> tuple[npt.NDArray, dict, dict]:
-        """
-        Process CSV data for metadata version 1.0 (single CSV file).
-
-        Args:
-            metadata: Parsed JSON metadata dictionary
-            data_folder: Path to folder containing CSV data file
-        """
-
-        # Expect a single CSV file specified in metadata->run_info->data_filename
-        data_filename = metadata.get("run_info", {}).get("data_filename")
-        if not data_filename:
-            raise ValueError("Missing data_filename in run_info for v1.0 metadata")
-
-        csv_path = os.path.join(data_folder, data_filename)
-        if not os.path.exists(csv_path):
-            raise FileNotFoundError(f"CSV file not found: {csv_path}")
-
-        # Read structured CSV; allow text fields for timestamps
-        data = np.genfromtxt(
-            csv_path, delimiter=",", names=True, dtype=None, encoding="utf-8"
-        )
-
-        # Convert RealTimestamp strings to relative time floats
-        if "RealTimestamp" not in data.dtype.names:
-            raise ValueError("RealTimestamp column not found in v1.0 CSV")
-
-        dt_objects = [
-            datetime.strptime(t, "%Y-%m-%d %H:%M:%S.%f") for t in data["RealTimestamp"]
-        ]
-        time_data = np.array(
-            [(dt - dt_objects[0]).total_seconds() for dt in dt_objects]
-        )
-
-        upstream_pressure_data = None
-        downstream_pressure_data = None
-
-        # Iterate gauges and extract Baratron voltage columns where present
-        for gauge in metadata.get("gauges", []):
-            gname = gauge.get("name")
-            gtype = gauge.get("type")
-            loc = gauge.get("gauge_location")
-
-            # We only handle Baratron gauges (voltage -> pressure) here
-            if gtype == "Baratron626D_Gauge":
-                col_name = f"{gname}_Voltage_V"
-
-                volt_vals = np.array(data[col_name], dtype=float)
-
-                #  Convert voltage to pressure using helper
-                pressure_vals = voltage_to_pressure(
-                    volt_vals, full_scale_torr=float(gauge["full_scale_torr"])
-                )
-
-                if loc == "upstream":
-                    upstream_pressure_data = pressure_vals
-                else:
-                    downstream_pressure_data = pressure_vals
-
-        upstream_error = calculate_error_on_pressure_reading(upstream_pressure_data)
-        downstream_error = calculate_error_on_pressure_reading(downstream_pressure_data)
-
-        upstream_data = {
-            "pressure_data": upstream_pressure_data,
-            "error_data": upstream_error,
-        }
-        downstream_data = {
-            "pressure_data": downstream_pressure_data,
-            "error_data": downstream_error,
-        }
-
-        return time_data, upstream_data, downstream_data
-
-    def process_csv_v1_2(
-        self, metadata: dict, data_folder: str
-    ) -> tuple[npt.NDArray, dict, dict]:
-        """
-        Process CSV data for metadata version 1.2 (single CSV file).
-
-        Args:
-            metadata: Parsed JSON metadata dictionary
-            data_folder: Path to folder containing CSV data files
-        """
-
-        data_filename = metadata.get("run_info", {}).get("data_filename")
-        if not data_filename:
-            raise ValueError("Missing data_filename in run_info for v1.2 metadata")
-
-        csv_path = os.path.join(data_folder, data_filename)
-        if not os.path.exists(csv_path):
-            raise FileNotFoundError(f"CSV file not found: {csv_path}")
-
-        # Read structured CSV; allow text fields for timestamps
-        data = np.genfromtxt(
-            csv_path, delimiter=",", names=True, dtype=None, encoding="utf-8"
-        )
-
-        # Convert RealTimestamp strings to relative time floats
-        if "RealTimestamp" not in data.dtype.names:
-            raise ValueError("RealTimestamp column not found in v1.0 CSV")
-
-        dt_objects = [
-            datetime.strptime(t, "%Y-%m-%d %H:%M:%S.%f") for t in data["RealTimestamp"]
-        ]
-        time_data = np.array(
-            [(dt - dt_objects[0]).total_seconds() for dt in dt_objects]
-        )
-
-        upstream_pressure_data = None
-        downstream_pressure_data = None
-
-        # Iterate gauges and extract Baratron voltage columns where present
-        for gauge in metadata.get("gauges", []):
-            gname = gauge.get("name")
-            gtype = gauge.get("type")
-            loc = gauge.get("gauge_location")
-
-            # We only handle Baratron gauges (voltage -> pressure) here
-            if gtype == "Baratron626D_Gauge":
-                col_name = f"{gname}_Voltage_V"
-
-                volt_vals = np.array(data[col_name], dtype=float)
-
-                #  Convert voltage to pressure using helper
-                pressure_vals = voltage_to_pressure(
-                    volt_vals, full_scale_torr=float(gauge["full_scale_torr"])
-                )
-
-                if loc == "upstream":
-                    upstream_pressure_data = pressure_vals
-                else:
-                    downstream_pressure_data = pressure_vals
-
-        upstream_error = calculate_error_on_pressure_reading(upstream_pressure_data)
-        downstream_error = calculate_error_on_pressure_reading(downstream_pressure_data)
-
-        upstream_data = {
-            "pressure_data": upstream_pressure_data,
-            "error_data": upstream_error,
-        }
-        downstream_data = {
-            "pressure_data": downstream_pressure_data,
-            "error_data": downstream_error,
-        }
-
-        if len(metadata.get("thermocouples", [])) == 0:
-            local_temperature_data = None
-            thermocouple_data = None
-            thermocouple_name = None
-        else:
-            local_temperature_data = np.array(data["Local_temperature_C"], dtype=float)
-
-            if len(metadata.get("thermocouples", [])) < 1:
-                raise ValueError("Can only process data from 1 thermocouple in v1.2")
-
-            tname = metadata["thermocouples"][0]["name"]
-            thermocouple_name = tname
-            col_name = f"{tname}_Voltage_mV"
-            volt_vals = np.array(data[col_name], dtype=float)
-            thermocouple_data = voltage_to_temperature(
-                local_temperature=local_temperature_data, voltage=volt_vals
-            )
-
-        return (
-            time_data,
-            upstream_data,
-            downstream_data,
-            local_temperature_data,
-            thermocouple_data,
-            thermocouple_name,
-        )
-
-    def create_dataset(
-        self,
-        dataset_path: str,
-        dataset_name: str,
-        time_data: npt.NDArray,
-        upstream_data: dict,
-        downstream_data: dict,
-    ):
-        """
-        Create dataset dictionaries from gauge instances for plotting.
-
-        Args:
-            upstream_gauges: List of gauge instances with upstream location
-            downstream_gauges: List of gauge instances with downstream location
-            data_folder: Path to folder containing the data
-        """
-
-        dataset_color = self.get_next_color(len(self.datasets))
-
-        # Extract valve times from metadata
-        valve_times = {}
-        with open(os.path.join(dataset_path, "run_metadata.json")) as f:
-            metadata = json.load(f)
-        run_info = metadata.get("run_info", {})
-
-        # get furnace set_point temperature
-        furnace_set_point_C = run_info["furnace_setpoint"]
-        furnace_set_point_K = furnace_set_point_C + 273.15
-
-        # Get start time for relative calculation
-        start_time_str = run_info.get("start_time")
-        if start_time_str:
-            start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
-
-            for key, value in run_info.items():
-                if "_time" in key and key.startswith("v"):
-                    valve_dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
-                    valve_times[key] = (valve_dt - start_time).total_seconds()
-
-        # get sample material and thickness
-        sample_material = run_info.get("sample_material", "Unknown")
-        sample_thickness = run_info.get("sample_thickness", 0.00088)
-
-        dataset = {
-            "name": dataset_name,
-            "colour": dataset_color,
-            "dataset_path": dataset_path,
-            "live_data": False,
-            "time_data": time_data,
-            "upstream_data": upstream_data,
-            "downstream_data": downstream_data,
-            "valve_times": valve_times,
-            "temperature": furnace_set_point_K,
-            "sample_material": sample_material,
-            "sample_thickness": sample_thickness,
-        }
-
-        # Add the folder dataset to our list
-        i = len(self.datasets) + 1
-        self.datasets[f"dataset_{i}"] = dataset
-
-    def create_dataset_v1_2(
-        self,
-        dataset_path: str,
-        dataset_name: str,
-        time_data: npt.NDArray,
-        upstream_data: dict,
-        downstream_data: dict,
-        local_temperature_data: npt.NDArray,
-        thermocouple_data: npt.NDArray,
-        thermocouple_name: str,
-    ):
-        """
-        Create dataset dictionaries from gauge instances for plotting.
-
-        Args:
-            upstream_gauges: List of gauge instances with upstream location
-            downstream_gauges: List of gauge instances with downstream location
-            data_folder: Path to folder containing the data
-        """
-
-        dataset_color = self.get_next_color(len(self.datasets))
-
-        # Extract valve times from metadata
-        valve_times = {}
-        try:
-            with open(os.path.join(dataset_path, "run_metadata.json")) as f:
-                metadata = json.load(f)
-            run_info = metadata.get("run_info", {})
-
-            # Get start time for relative calculation
-            start_time_str = run_info.get("start_time")
-            if start_time_str:
-                try:
-                    # Try with seconds first, then without
-                    start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    start_time = datetime.strptime(
-                        start_time_str, "%Y-%m-%d %H:%M:%S.%f"
-                    )
-
-                for key, value in run_info.items():
-                    if "_time" in key and key.startswith("v"):
-                        try:
-                            valve_dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
-                            valve_times[key] = (valve_dt - start_time).total_seconds()
-                        except (ValueError, TypeError):
-                            pass
-        except Exception:
-            pass
-
-        dataset = {
-            "name": dataset_name,
-            "colour": dataset_color,
-            "dataset_path": dataset_path,
-            "live_data": False,
-            "time_data": time_data,
-            "upstream_data": upstream_data,
-            "downstream_data": downstream_data,
-            "valve_times": valve_times,
-            "local_temperature_data": local_temperature_data,
-            "thermocouple_data": thermocouple_data,
-            "thermocouple_name": thermocouple_name,
-        }
-
-        # Add the folder dataset to our list
-        i = len(self.datasets) + 1
-        self.datasets[f"dataset_{i}"] = dataset
+        # Add to internal datasets list
+        self.datasets.append(dataset)
 
     def get_next_color(self, index: int) -> str:
-        """
-        Get a color for the dataset based on its index.
+        """Get a color for a dataset based on its index.
+
+        Cycles through a predefined color palette to ensure visual distinction
+        between datasets in plots.
 
         Args:
-            index: Index of the dataset
+            index: Zero-based index of the dataset in the datasets list
 
         Returns:
-            str: Color hex code
+            str: Hex color code (e.g., "#000000" for black)
         """
         colors = [
             "#000000",  # Black
@@ -605,2607 +253,96 @@ class DataPlotter:
         ]
         return colors[index % len(colors)]
 
-    def create_layout(self):
+    def create_layout(self) -> dbc.Container:
+        """Create the main Dash application layout.
+
+        Builds the complete web interface layout by assembling all UI components
+        including header, dataset management, plots, controls, and hidden data stores.
+        Uses layout component builders from layout_components module.
+
+        Returns:
+            dbc.Container: Bootstrap container with all dashboard components arranged
+                in fluid layout for responsive design
+
+        Layout Structure:
+            1. Header with SHIELD logo and title
+            2. Dataset management card with table and controls
+            3. Hidden data stores for plot settings
+            4. Pressure plots (upstream/downstream) in row
+            5. Pressure plot controls
+            6. Temperature plot with controls
+            7. Permeability plot with controls
+            8. Bottom spacing
+            9. Download components
+            10. Live data update interval component
+        """
+        from .layout_components import create_download_components, create_hidden_stores
+
+        dataset_table = DatasetTable(self.datasets)
+
         return dbc.Container(
             [
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            html.H1(
-                                "SHIELD Data Visualisation",
-                                className="text-center",
-                                style={
-                                    "fontSize": "3.5rem",
-                                    "fontWeight": "standard",
-                                    "marginTop": "2rem",
-                                    "marginBottom": "2rem",
-                                    "color": "#2c3e50",
-                                },
-                            ),
-                            width=12,
-                        ),
-                    ],
-                    className="mb-4",
-                ),
-                # Dataset Management Card at the top
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            [
-                                dbc.Card(
-                                    [
-                                        dbc.CardHeader(
-                                            dbc.Row(
-                                                [
-                                                    dbc.Col(
-                                                        "Dataset Management",
-                                                        className="d-flex align-items-center",
-                                                    ),
-                                                    dbc.Col(
-                                                        dbc.Button(
-                                                            html.I(
-                                                                className="fas fa-chevron-up"
-                                                            ),
-                                                            id="collapse-dataset-button",
-                                                            color="light",
-                                                            size="sm",
-                                                            className="ms-auto",
-                                                            style={
-                                                                "border": "1px solid #dee2e6",
-                                                                "background-color": "#f8f9fa",
-                                                                "box-shadow": "0 1px 3px rgba(0,0,0,0.1)",
-                                                                "width": "30px",
-                                                                "height": "30px",
-                                                                "padding": "0",
-                                                                "display": "flex",
-                                                                "align-items": "center",
-                                                                "justify-content": "center",
-                                                            },
-                                                        ),
-                                                        width="auto",
-                                                        className="d-flex justify-content-end",
-                                                    ),
-                                                ],
-                                                className="g-0 align-items-center",
-                                            )
-                                        ),
-                                        dbc.Collapse(
-                                            dbc.CardBody(
-                                                [
-                                                    # Dataset table
-                                                    html.Div(
-                                                        id="dataset-table-container",
-                                                        children=self.create_dataset_table(),
-                                                    ),
-                                                    # Collapsible Add Dataset Section
-                                                    html.Div(
-                                                        [
-                                                            # Separator with centered plus button
-                                                            html.Div(
-                                                                [
-                                                                    html.Hr(
-                                                                        style={
-                                                                            "flex": "1",
-                                                                            "margin": "0",
-                                                                            "border-top": (
-                                                                                "1px solid "
-                                                                                "#dee2e6"
-                                                                            ),
-                                                                        }
-                                                                    ),
-                                                                    dbc.Button(
-                                                                        html.I(
-                                                                            id="add-dataset-icon",
-                                                                            className=(
-                                                                                "fas fa-plus"
-                                                                            ),
-                                                                        ),
-                                                                        id="toggle-add-dataset",
-                                                                        color="light",
-                                                                        size="sm",
-                                                                        style={
-                                                                            "margin": (
-                                                                                "0 10px"
-                                                                            ),
-                                                                            "border-radius": (
-                                                                                "50%"
-                                                                            ),
-                                                                            "width": "32px",
-                                                                            "height": "32px",
-                                                                            "padding": "0",
-                                                                            "border": (
-                                                                                "1px solid "
-                                                                                "#dee2e6"
-                                                                            ),
-                                                                        },
-                                                                        title=(
-                                                                            "Add new dataset"
-                                                                        ),
-                                                                    ),
-                                                                    html.Hr(
-                                                                        style={
-                                                                            "flex": "1",
-                                                                            "margin": "0",
-                                                                            "border-top": (
-                                                                                "1px solid "
-                                                                                "#dee2e6"
-                                                                            ),
-                                                                        }
-                                                                    ),
-                                                                ],
-                                                                style={
-                                                                    "display": "flex",
-                                                                    "align-items": (
-                                                                        "center"
-                                                                    ),
-                                                                    "margin": (
-                                                                        "20px 0 15px 0"
-                                                                    ),
-                                                                },
-                                                            ),
-                                                            # Collapsible add dataset form
-                                                            dbc.Collapse(
-                                                                [
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Input(
-                                                                                        id="new-dataset-path",
-                                                                                        type="text",
-                                                                                        placeholder=(
-                                                                                            "Enter dataset "
-                                                                                            "folder path..."
-                                                                                        ),
-                                                                                        style={
-                                                                                            "margin-bottom": (
-                                                                                                "10px"
-                                                                                            )
-                                                                                        },
-                                                                                    ),
-                                                                                ],
-                                                                                width=9,
-                                                                            ),
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Button(
-                                                                                        [
-                                                                                            html.I(
-                                                                                                className=(
-                                                                                                    "fas fa-plus me-2"
-                                                                                                )
-                                                                                            ),
-                                                                                            (
-                                                                                                "Add Dataset"
-                                                                                            ),
-                                                                                        ],
-                                                                                        id="add-dataset-button",
-                                                                                        color="primary",
-                                                                                        style={
-                                                                                            "width": (
-                                                                                                "100%"
-                                                                                            )
-                                                                                        },
-                                                                                    ),
-                                                                                ],
-                                                                                width=3,
-                                                                            ),
-                                                                        ],
-                                                                        className="g-2",
-                                                                    ),
-                                                                    # Status message for add dataset
-                                                                    html.Div(
-                                                                        id="add-dataset-status",
-                                                                        style={
-                                                                            "margin-top": (
-                                                                                "10px"
-                                                                            )
-                                                                        },
-                                                                    ),
-                                                                ],
-                                                                id="collapse-add-dataset",
-                                                                is_open=False,
-                                                            ),
-                                                        ]
-                                                    ),
-                                                ]
-                                            ),
-                                            id="collapse-dataset",
-                                            is_open=True,
-                                        ),
-                                    ]
-                                ),
-                            ],
-                            width=12,
-                        ),
-                    ],
-                    className="mb-3",
-                ),
-                # Hidden store to trigger plot updates
-                dcc.Store(id="datasets-store"),
-                # Hidden stores for plot settings
-                dcc.Store(id="upstream-settings-store", data={}),
-                dcc.Store(id="downstream-settings-store", data={}),
-                # Status message for upload feedback (floating)
-                html.Div(
-                    id="upload-status",
-                    style={
-                        "position": "fixed",
-                        "top": "20px",
-                        "right": "20px",
-                        "zIndex": "9999",
-                        "maxWidth": "400px",
-                        "minWidth": "300px",
-                    },
-                ),
-                # Dual plots for upstream and downstream pressure
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            [
-                                dbc.Card(
-                                    [
-                                        dbc.CardHeader("Upstream Pressure"),
-                                        dbc.CardBody(
-                                            [
-                                                dcc.Graph(
-                                                    id="upstream-plot",
-                                                    figure=self._generate_upstream_plot(),
-                                                )
-                                            ]
-                                        ),
-                                    ]
-                                ),
-                            ],
-                            width=6,
-                        ),
-                        dbc.Col(
-                            [
-                                dbc.Card(
-                                    [
-                                        dbc.CardHeader("Downstream Pressure"),
-                                        dbc.CardBody(
-                                            [
-                                                dcc.Graph(
-                                                    id="downstream-plot",
-                                                    figure=self._generate_downstream_plot(),
-                                                )
-                                            ]
-                                        ),
-                                    ]
-                                ),
-                            ],
-                            width=6,
-                        ),
-                    ]
-                ),
-                # Plot controls section - Dual controls for upstream and downstream
-                dbc.Row(
-                    [
-                        # Upstream Plot Controls
-                        dbc.Col(
-                            [
-                                dbc.Card(
-                                    [
-                                        dbc.CardHeader(
-                                            dbc.Row(
-                                                [
-                                                    dbc.Col(
-                                                        "Upstream Plot Controls",
-                                                        className="d-flex align-items-center",
-                                                    ),
-                                                    dbc.Col(
-                                                        dbc.Button(
-                                                            html.I(
-                                                                className="fas fa-chevron-up"
-                                                            ),
-                                                            id="collapse-upstream-controls-button",
-                                                            color="light",
-                                                            size="sm",
-                                                            className="ms-auto",
-                                                            style={
-                                                                "border": "1px solid #dee2e6",
-                                                                "background-color": "#f8f9fa",
-                                                                "box-shadow": "0 1px 3px rgba(0,0,0,0.1)",
-                                                                "width": "30px",
-                                                                "height": "30px",
-                                                                "padding": "0",
-                                                                "display": "flex",
-                                                                "align-items": "center",
-                                                                "justify-content": "center",
-                                                            },
-                                                        ),
-                                                        width="auto",
-                                                        className="d-flex justify-content-end",
-                                                    ),
-                                                ],
-                                                className="g-0 align-items-center",
-                                            )
-                                        ),
-                                        dbc.Collapse(
-                                            dbc.CardBody(
-                                                [
-                                                    dbc.Row(
-                                                        [
-                                                            # X-axis controls
-                                                            dbc.Col(
-                                                                [
-                                                                    html.H6(
-                                                                        "X-Axis",
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Scale:"
-                                                                                    ),
-                                                                                    dbc.RadioItems(
-                                                                                        id="upstream-x-scale",
-                                                                                        options=[
-                                                                                            {
-                                                                                                "label": "Linear",
-                                                                                                "value": "linear",
-                                                                                            },
-                                                                                            {
-                                                                                                "label": "Log",
-                                                                                                "value": "log",
-                                                                                            },
-                                                                                        ],
-                                                                                        value="linear",
-                                                                                        inline=True,
-                                                                                    ),
-                                                                                ],
-                                                                                width=12,
-                                                                            ),
-                                                                        ],
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Min:"
-                                                                                    ),
-                                                                                    dbc.Input(
-                                                                                        id="upstream-x-min",
-                                                                                        type="number",
-                                                                                        placeholder="Auto",
-                                                                                        value=0,
-                                                                                        size="sm",
-                                                                                    ),
-                                                                                ],
-                                                                                width=6,
-                                                                            ),
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Max:"
-                                                                                    ),
-                                                                                    dbc.Input(
-                                                                                        id="upstream-x-max",
-                                                                                        type="number",
-                                                                                        placeholder="Auto",
-                                                                                        size="sm",
-                                                                                    ),
-                                                                                ],
-                                                                                width=6,
-                                                                            ),
-                                                                        ]
-                                                                    ),
-                                                                ],
-                                                                width=6,
-                                                            ),
-                                                            # Y-axis controls
-                                                            dbc.Col(
-                                                                [
-                                                                    html.H6(
-                                                                        "Y-Axis",
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Scale:"
-                                                                                    ),
-                                                                                    dbc.RadioItems(
-                                                                                        id="upstream-y-scale",
-                                                                                        options=[
-                                                                                            {
-                                                                                                "label": "Linear",
-                                                                                                "value": "linear",
-                                                                                            },
-                                                                                            {
-                                                                                                "label": "Log",
-                                                                                                "value": "log",
-                                                                                            },
-                                                                                        ],
-                                                                                        value="linear",
-                                                                                        inline=True,
-                                                                                    ),
-                                                                                ],
-                                                                                width=12,
-                                                                            ),
-                                                                        ],
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Min:"
-                                                                                    ),
-                                                                                    dbc.Input(
-                                                                                        id="upstream-y-min",
-                                                                                        type="number",
-                                                                                        placeholder="Auto",
-                                                                                        value=0,
-                                                                                        size="sm",
-                                                                                    ),
-                                                                                ],
-                                                                                width=6,
-                                                                            ),
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Max:"
-                                                                                    ),
-                                                                                    dbc.Input(
-                                                                                        id="upstream-y-max",
-                                                                                        type="number",
-                                                                                        placeholder="Auto",
-                                                                                        size="sm",
-                                                                                    ),
-                                                                                ],
-                                                                                width=6,
-                                                                            ),
-                                                                        ]
-                                                                    ),
-                                                                ],
-                                                                width=6,
-                                                            ),
-                                                        ]
-                                                    ),
-                                                    # Options Row for Upstream
-                                                    dbc.Row(
-                                                        [
-                                                            dbc.Col(
-                                                                [
-                                                                    html.H6(
-                                                                        "Options",
-                                                                        className="mb-2 mt-3",
-                                                                    ),
-                                                                    # removed: show gauge names option
-                                                                    dbc.Checkbox(
-                                                                        id="show-error-bars-upstream",
-                                                                        label="Show error bars",
-                                                                        value=True,
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Checkbox(
-                                                                        id="show-valve-times-upstream",
-                                                                        label="Show valve operation times",
-                                                                        value=False,
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    html.Hr(
-                                                                        className="my-2"
-                                                                    ),
-                                                                    dbc.Button(
-                                                                        [
-                                                                            html.I(
-                                                                                className="fas fa-download me-2"
-                                                                            ),
-                                                                            "Export Upstream Plot",
-                                                                        ],
-                                                                        id="export-upstream-plot",
-                                                                        color="outline-secondary",
-                                                                        size="sm",
-                                                                        className="w-100",
-                                                                    ),
-                                                                ],
-                                                                width=12,
-                                                            ),
-                                                        ]
-                                                    ),
-                                                ]
-                                            ),
-                                            id="collapse-upstream-controls",
-                                            is_open=False,
-                                        ),
-                                    ]
-                                ),
-                            ],
-                            width=6,
-                        ),
-                        # Downstream Plot Controls
-                        dbc.Col(
-                            [
-                                dbc.Card(
-                                    [
-                                        dbc.CardHeader(
-                                            dbc.Row(
-                                                [
-                                                    dbc.Col(
-                                                        "Downstream Plot Controls",
-                                                        className="d-flex align-items-center",
-                                                    ),
-                                                    dbc.Col(
-                                                        dbc.Button(
-                                                            html.I(
-                                                                className="fas fa-chevron-up"
-                                                            ),
-                                                            id="collapse-downstream-controls-button",
-                                                            color="light",
-                                                            size="sm",
-                                                            className="ms-auto",
-                                                            style={
-                                                                "border": "1px solid #dee2e6",
-                                                                "background-color": "#f8f9fa",
-                                                                "box-shadow": "0 1px 3px rgba(0,0,0,0.1)",
-                                                                "width": "30px",
-                                                                "height": "30px",
-                                                                "padding": "0",
-                                                                "display": "flex",
-                                                                "align-items": "center",
-                                                                "justify-content": "center",
-                                                            },
-                                                        ),
-                                                        width="auto",
-                                                        className="d-flex justify-content-end",
-                                                    ),
-                                                ],
-                                                className="g-0 align-items-center",
-                                            )
-                                        ),
-                                        dbc.Collapse(
-                                            dbc.CardBody(
-                                                [
-                                                    dbc.Row(
-                                                        [
-                                                            # X-axis controls
-                                                            dbc.Col(
-                                                                [
-                                                                    html.H6(
-                                                                        "X-Axis",
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Scale:"
-                                                                                    ),
-                                                                                    dbc.RadioItems(
-                                                                                        id="downstream-x-scale",
-                                                                                        options=[
-                                                                                            {
-                                                                                                "label": "Linear",
-                                                                                                "value": "linear",
-                                                                                            },
-                                                                                            {
-                                                                                                "label": "Log",
-                                                                                                "value": "log",
-                                                                                            },
-                                                                                        ],
-                                                                                        value="linear",
-                                                                                        inline=True,
-                                                                                    ),
-                                                                                ],
-                                                                                width=12,
-                                                                            ),
-                                                                        ],
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Min:"
-                                                                                    ),
-                                                                                    dbc.Input(
-                                                                                        id="downstream-x-min",
-                                                                                        type="number",
-                                                                                        placeholder="Auto",
-                                                                                        value=0,
-                                                                                        size="sm",
-                                                                                    ),
-                                                                                ],
-                                                                                width=6,
-                                                                            ),
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Max:"
-                                                                                    ),
-                                                                                    dbc.Input(
-                                                                                        id="downstream-x-max",
-                                                                                        type="number",
-                                                                                        placeholder="Auto",
-                                                                                        size="sm",
-                                                                                    ),
-                                                                                ],
-                                                                                width=6,
-                                                                            ),
-                                                                        ]
-                                                                    ),
-                                                                ],
-                                                                width=6,
-                                                            ),
-                                                            # Y-axis controls
-                                                            dbc.Col(
-                                                                [
-                                                                    html.H6(
-                                                                        "Y-Axis",
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Scale:"
-                                                                                    ),
-                                                                                    dbc.RadioItems(
-                                                                                        id="downstream-y-scale",
-                                                                                        options=[
-                                                                                            {
-                                                                                                "label": "Linear",
-                                                                                                "value": "linear",
-                                                                                            },
-                                                                                            {
-                                                                                                "label": "Log",
-                                                                                                "value": "log",
-                                                                                            },
-                                                                                        ],
-                                                                                        value="linear",
-                                                                                        inline=True,
-                                                                                    ),
-                                                                                ],
-                                                                                width=12,
-                                                                            ),
-                                                                        ],
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Min:"
-                                                                                    ),
-                                                                                    dbc.Input(
-                                                                                        id="downstream-y-min",
-                                                                                        type="number",
-                                                                                        placeholder="Auto",
-                                                                                        value=0,
-                                                                                        size="sm",
-                                                                                    ),
-                                                                                ],
-                                                                                width=6,
-                                                                            ),
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    dbc.Label(
-                                                                                        "Max:"
-                                                                                    ),
-                                                                                    dbc.Input(
-                                                                                        id="downstream-y-max",
-                                                                                        type="number",
-                                                                                        placeholder="Auto",
-                                                                                        size="sm",
-                                                                                    ),
-                                                                                ],
-                                                                                width=6,
-                                                                            ),
-                                                                        ]
-                                                                    ),
-                                                                ],
-                                                                width=6,
-                                                            ),
-                                                        ]
-                                                    ),
-                                                    # Options Row for Downstream
-                                                    dbc.Row(
-                                                        [
-                                                            dbc.Col(
-                                                                [
-                                                                    html.H6(
-                                                                        "Options",
-                                                                        className="mb-2 mt-3",
-                                                                    ),
-                                                                    # removed: show gauge names option
-                                                                    dbc.Checkbox(
-                                                                        id="show-error-bars-downstream",
-                                                                        label="Show error bars",
-                                                                        value=True,
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    dbc.Checkbox(
-                                                                        id="show-valve-times-downstream",
-                                                                        label="Show valve operation times",
-                                                                        value=False,
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    html.Hr(
-                                                                        className="my-2"
-                                                                    ),
-                                                                    dbc.Button(
-                                                                        [
-                                                                            html.I(
-                                                                                className="fas fa-download me-2"
-                                                                            ),
-                                                                            "Export Downstream Plot",
-                                                                        ],
-                                                                        id="export-downstream-plot",
-                                                                        color="outline-secondary",
-                                                                        size="sm",
-                                                                        className="w-100",
-                                                                    ),
-                                                                ],
-                                                                width=12,
-                                                            ),
-                                                        ]
-                                                    ),
-                                                ]
-                                            ),
-                                            id="collapse-downstream-controls",
-                                            is_open=False,
-                                        ),
-                                    ]
-                                ),
-                            ],
-                            width=6,
-                        ),
-                    ],
-                    className="mt-3",
-                ),
-                # Temperature plot section
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            [
-                                dbc.Card(
-                                    [
-                                        dbc.CardHeader("Temperature Data"),
-                                        dbc.CardBody(
-                                            [
-                                                dcc.Graph(
-                                                    id="temperature-plot",
-                                                    figure=self._generate_temperature_plot(),
-                                                )
-                                            ]
-                                        ),
-                                    ]
-                                ),
-                            ],
-                            width=12,
-                        ),
-                    ],
-                    className="mt-3",
-                ),
-                # Permeability plot section
-                dbc.Row(
-                    [
-                        dbc.Col(width=3),  # Left spacing
-                        dbc.Col(
-                            [
-                                dbc.Card(
-                                    [
-                                        dbc.CardHeader("Measured Permeability"),
-                                        dbc.CardBody(
-                                            [
-                                                dcc.Graph(
-                                                    id="permeability-plot",
-                                                    figure=self._generate_permeability_plot(),
-                                                )
-                                            ]
-                                        ),
-                                    ]
-                                ),
-                            ],
-                            width=6,
-                        ),
-                        dbc.Col(width=3),  # Right spacing
-                    ],
-                    className="mt-3",
-                ),
-                # Add whitespace at the bottom of the page
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            html.Div(style={"height": "100px"}),
-                            width=12,
-                        ),
-                    ],
-                ),
-                # Download component for dataset downloads
-                dcc.Download(id="download-dataset-output"),
-                # Download components for plot exports
-                dcc.Download(id="download-upstream-plot"),
-                dcc.Download(id="download-downstream-plot"),
-                dcc.Download(id="download-temperature-plot"),
-                dcc.Download(id="download-permeability-plot"),
-                # Interval component for live data updates
-                dcc.Interval(
-                    id="live-data-interval",
-                    interval=1000,  # Update every 1 second
-                    n_intervals=0,
-                    disabled=True,  # Start disabled, enable when needed
-                ),
-            ],
-            fluid=True,
-        )
-
-    def create_dataset_table(self):
-        """Create a table showing folder-level datasets with editable name and color"""
-        # Create table rows
-        rows = []
-
-        # Header row
-        header_row = html.Tr(
-            [
-                html.Th(
-                    "Dataset Name",
-                    style={
-                        "text-align": "left",
-                        "width": "43.75%",
-                        "padding": "2px",
-                        "font-weight": "normal",
-                    },
-                ),
-                html.Th(
-                    "Dataset Path",
-                    style={
-                        "text-align": "left",
-                        "width": "43.75%",
-                        "padding": "2px",
-                        "font-weight": "normal",
-                    },
-                ),
-                html.Th(
-                    "Live",
-                    style={
-                        "text-align": "center",
-                        "width": "2.5%",
-                        "padding": "2px",
-                        "font-weight": "normal",
-                    },
-                ),
-                html.Th(
-                    "Colour",
-                    style={
-                        "text-align": "center",
-                        "width": "5%",
-                        "padding": "2px",
-                        "font-weight": "normal",
-                    },
-                ),
-                html.Th(
-                    "",
-                    style={
-                        "text-align": "center",
-                        "width": "2.5%",
-                        "padding": "2px",
-                        "font-weight": "normal",
-                    },
-                ),
-                html.Th(
-                    "",
-                    style={
-                        "text-align": "center",
-                        "width": "2.5%",
-                        "padding": "2px",
-                        "font-weight": "normal",
-                    },
-                ),
-            ]
-        )
-        rows.append(header_row)
-
-        # Add dataset rows
-        for i, dataset in enumerate(self.datasets.keys()):
-            row = html.Tr(
-                [
-                    html.Td(
-                        [
-                            dcc.Input(
-                                id={"type": "dataset-name", "index": i},
-                                value=self.datasets[f"{dataset}"]["name"],
-                                style={
-                                    "width": "95%",
-                                    "border": "1px solid #ccc",
-                                    "padding": "4px",
-                                    "border-radius": "4px",
-                                    "transition": "all 0.2s ease",
-                                },
-                                className="dataset-name-input",
-                            )
-                        ],
-                        style={"padding": "2px", "border": "none"},
-                    ),
-                    html.Td(
-                        [
-                            html.Div(
-                                [
-                                    html.Span(
-                                        self.datasets[f"{dataset}"]["dataset_path"],
-                                        style={
-                                            "font-family": "monospace",
-                                            "font-size": "0.9em",
-                                            "color": "#666",
-                                            "word-break": "break-all",
-                                        },
-                                        title=self.datasets[f"{dataset}"][
-                                            "dataset_path"
-                                        ],  # Full path on hover
-                                    )
-                                ],
-                                style={
-                                    "width": "100%",
-                                    "padding": "4px",
-                                    "min-height": "1.5em",  # Match input field height
-                                    "display": "flex",
-                                    "align-items": "center",
-                                },
-                            )
-                        ],
-                        style={"padding": "4px", "border": "none"},
-                    ),
-                    html.Td(
-                        [
-                            html.Div(
-                                [
-                                    dbc.Checkbox(
-                                        id={"type": "dataset-live-data", "index": i},
-                                        value=self.datasets[f"{dataset}"].get(
-                                            "live_data", False
-                                        ),
-                                        style={
-                                            "transform": "scale(1.2)",
-                                            "display": "inline-block",
-                                        },
-                                    ),
-                                ],
-                                style={
-                                    "margin-left": "15px",
-                                },
-                            )
-                        ],
-                        style={
-                            "padding": "4px",
-                            "text-align": "center",
-                            "border": "none",
-                        },
-                    ),
-                    html.Td(
-                        [
-                            dcc.Input(
-                                id={"type": "dataset-color", "index": i},
-                                type="color",
-                                value=self.datasets[f"{dataset}"]["colour"],
-                                style={
-                                    "width": "32px",
-                                    "height": "32px",
-                                    "border": "2px solid transparent",
-                                    "border-radius": "4px",
-                                    "cursor": "pointer",
-                                    "transition": "all 0.2s ease",
-                                    "padding": "0",
-                                    "outline": "none",
-                                },
-                                className="color-picker-input",
-                            ),
-                        ],
-                        style={
-                            "text-align": "center",
-                            "padding": "4px",
-                            "border": "none",
-                        },
-                    ),
-                    html.Td(
-                        [
-                            html.Div(
-                                [
-                                    html.Button(
-                                        html.Img(
-                                            src="/assets/download.svg",
-                                            style={
-                                                "width": "16px",
-                                                "height": "16px",
-                                            },
-                                        ),
-                                        id={"type": "download-dataset", "index": i},
-                                        className="btn btn-outline-primary btn-sm",
-                                        style={
-                                            "width": "32px",
-                                            "height": "32px",
-                                            "padding": "0",
-                                            "border-radius": "4px",
-                                            "font-size": "14px",
-                                            "line-height": "1",
-                                            "display": "flex",
-                                            "align-items": "center",
-                                            "justify-content": "center",
-                                        },
-                                        title=f"Download {self.datasets[f'{dataset}']['name']}",
-                                    ),
-                                ],
-                                style={
-                                    "margin-left": "15px",  # Add left margin
-                                },
-                            )
-                        ],
-                        style={
-                            "text-align": "center",
-                            "padding": "4px",
-                            "vertical-align": "middle",
-                            "border": "none",
-                        },
-                    ),
-                    html.Td(
-                        [
-                            html.Div(
-                                [
-                                    html.Button(
-                                        html.Img(
-                                            src="/assets/delete.svg",
-                                            style={
-                                                "width": "16px",
-                                                "height": "16px",
-                                            },
-                                        ),
-                                        id={"type": "delete-dataset", "index": i},
-                                        className="btn btn-outline-danger btn-sm",
-                                        style={
-                                            "width": "32px",
-                                            "height": "32px",
-                                            "padding": "0",
-                                            "border-radius": "4px",
-                                            "font-size": "14px",
-                                            "line-height": "1",
-                                            "display": "flex",
-                                            "align-items": "center",
-                                            "justify-content": "center",
-                                        },
-                                        title=f"Delete {self.datasets[f'{dataset}']['name']}",
-                                    ),
-                                ],
-                                style={
-                                    "margin-left": "15px",  # Add left margin
-                                },
-                            )
-                        ],
-                        style={
-                            "text-align": "center",
-                            "padding": "4px",
-                            "vertical-align": "middle",
-                            "border": "none",
-                        },
-                    ),
-                ]
-            )
-            rows.append(row)
-
-        # Create the table
-        table = html.Table(
-            rows,
-            className="table table-striped table-hover",
-            style={
-                "margin": "0",
-                "border": "1px solid #dee2e6",
-                "border-radius": "8px",
-                "overflow": "hidden",
-            },
-        )
-
-        return html.Div([table])
-
-    def register_callbacks(self):
-        # Helpers to work with self.datasets (dict) and legacy lists if present
-        def _keys_list():
-            # Return stable ordered list of keys for indexing by position
-            return list(self.datasets.keys())
-
-        def _iter_datasets():
-            return self.datasets.values()
-
-        # Callback for dataset name changes
-        @self.app.callback(
-            [
-                Output("dataset-table-container", "children", allow_duplicate=True),
-                Output("upstream-plot", "figure", allow_duplicate=True),
-                Output("downstream-plot", "figure", allow_duplicate=True),
-            ],
-            [Input({"type": "dataset-name", "index": ALL}, "value")],
-            self.PLOT_CONTROL_STATES,
-            prevent_initial_call=True,
-        )
-        def update_dataset_names(
-            names,
-            show_error_bars_upstream,
-            show_error_bars_downstream,
-            show_valve_times_upstream,
-            show_valve_times_downstream,
-        ):
-            # Map positional indices from the UI to dataset keys
-            keys = _keys_list()
-
-            # Build current names list for comparison to avoid double application
-            current_names = []
-            for i in range(len(keys)):
-                current_names.append(self.datasets[keys[i]].get("name", ""))
-
-            # If nothing changed, skip to avoid duplicate updates
-            if list(names) == current_names:
-                raise PreventUpdate
-
-            # Update only entries that changed
-            for i, name in enumerate(names):
-                if i < len(keys) and name and name != current_names[i]:
-                    key = keys[i]
-                    self.datasets[key]["name"] = name
-
-            # Return updated table and plots
-            plots = self._generate_both_plots(
-                show_error_bars_upstream=show_error_bars_upstream,
-                show_error_bars_downstream=show_error_bars_downstream,
-                show_valve_times_upstream=show_valve_times_upstream,
-                show_valve_times_downstream=show_valve_times_downstream,
-            )
-            return [self.create_dataset_table(), *plots]
-
-        # Callback for dataset color changes
-        @self.app.callback(
-            [
-                Output("dataset-table-container", "children", allow_duplicate=True),
-                Output("upstream-plot", "figure", allow_duplicate=True),
-                Output("downstream-plot", "figure", allow_duplicate=True),
-                Output("temperature-plot", "figure", allow_duplicate=True),
-            ],
-            [Input({"type": "dataset-color", "index": ALL}, "value")],
-            prevent_initial_call=True,
-        )
-        def update_dataset_colors(colors):
-            keys = _keys_list()
-            for i, color in enumerate(colors):
-                if i < len(keys) and color:
-                    key = keys[i]
-                    # new-style datasets use 'colour' key
-                    self.datasets[key]["colour"] = color
-
-            # Return updated table and plots
-            return [
-                self.create_dataset_table(),
-                self._generate_upstream_plot(),
-                self._generate_downstream_plot(),
-                self._generate_temperature_plot(),
-            ]
-
-        # Callback to handle collapse/expand of dataset management
-        @self.app.callback(
-            [
-                Output("collapse-dataset", "is_open"),
-                Output("collapse-dataset-button", "children"),
-            ],
-            [Input("collapse-dataset-button", "n_clicks")],
-            [State("collapse-dataset", "is_open")],
-            prevent_initial_call=True,
-        )
-        def toggle_dataset_collapse(n_clicks, is_open):
-            if n_clicks:
-                new_state = not is_open
-                # Change icon based on state
-                if new_state:
-                    icon = html.I(className="fas fa-chevron-down")
-                else:
-                    icon = html.I(className="fas fa-chevron-up")
-                return new_state, icon
-            return is_open, html.I(className="fas fa-chevron-up")
-
-        # Callbacks to handle collapse/expand of upstream plot controls
-        @self.app.callback(
-            [
-                Output("collapse-upstream-controls", "is_open"),
-                Output("collapse-upstream-controls-button", "children"),
-            ],
-            [Input("collapse-upstream-controls-button", "n_clicks")],
-            [State("collapse-upstream-controls", "is_open")],
-            prevent_initial_call=True,
-        )
-        def toggle_upstream_controls_collapse(n_clicks, is_open):
-            if n_clicks:
-                new_state = not is_open
-                # Change icon based on state
-                if new_state:
-                    icon = html.I(className="fas fa-chevron-down")
-                else:
-                    icon = html.I(className="fas fa-chevron-up")
-                return new_state, icon
-            return is_open, html.I(className="fas fa-chevron-up")
-
-        # Callbacks to handle collapse/expand of downstream plot controls
-        @self.app.callback(
-            [
-                Output("collapse-downstream-controls", "is_open"),
-                Output("collapse-downstream-controls-button", "children"),
-            ],
-            [Input("collapse-downstream-controls-button", "n_clicks")],
-            [State("collapse-downstream-controls", "is_open")],
-            prevent_initial_call=True,
-        )
-        def toggle_downstream_controls_collapse(n_clicks, is_open):
-            if n_clicks:
-                new_state = not is_open
-                # Change icon based on state
-                if new_state:
-                    icon = html.I(className="fas fa-chevron-down")
-                else:
-                    icon = html.I(className="fas fa-chevron-up")
-                return new_state, icon
-            return is_open, html.I(className="fas fa-chevron-up")
-
-        # Callback for upstream plot settings changes
-        @self.app.callback(
-            [
-                Output("upstream-plot", "figure", allow_duplicate=True),
-                Output("upstream-settings-store", "data"),
-            ],
-            [
-                Input("upstream-x-scale", "value"),
-                Input("upstream-y-scale", "value"),
-                Input("upstream-x-min", "value"),
-                Input("upstream-x-max", "value"),
-                Input("upstream-y-min", "value"),
-                Input("upstream-y-max", "value"),
-                Input("show-error-bars-upstream", "value"),
-                Input("show-valve-times-upstream", "value"),
-            ],
-            [
-                State("upstream-plot", "figure"),
-                State("upstream-settings-store", "data"),
-            ],
-            prevent_initial_call=True,
-        )
-        def update_upstream_plot_settings(
-            x_scale,
-            y_scale,
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-            show_error_bars_upstream,
-            show_valve_times_upstream,
-            current_fig,
-            store_data,
-        ):
-            # Helper to extract axis ranges from an existing figure
-            def _extract_axis_range(fig, axis_name):
-                if not fig:
-                    return None, None
-                layout = fig.get("layout", {})
-                # common axis keys
-                for key in (axis_name, f"{axis_name}1"):
-                    ax = layout.get(key)
-                    if isinstance(ax, dict):
-                        r = ax.get("range")
-                        if r and len(r) == 2:
-                            return r[0], r[1]
-                return None, None
-
-            # Simpler behavior: always reset the figure when scale or error-bar
-            # options change. Do not preserve current zoom. If inputs are None
-            # pass None so the generator autosizes.
-            x_min_use = x_min if x_min is not None else None
-            x_max_use = x_max if x_max is not None else None
-            y_min_use = y_min if y_min is not None else None
-            y_max_use = y_max if y_max is not None else None
-
-            # Generate updated upstream plot with new settings (use keywords)
-            # Update store data with current scale settings
-            new_store = {"y_scale": y_scale}
-
-            return [
-                self._generate_upstream_plot(
-                    show_error_bars=bool(show_error_bars_upstream),
-                    show_valve_times=bool(show_valve_times_upstream),
-                    x_scale=x_scale,
-                    y_scale=y_scale,
-                    x_min=x_min_use,
-                    x_max=x_max_use,
-                    y_min=y_min_use,
-                    y_max=y_max_use,
-                ),
-                new_store,
-            ]
-
-        # Callback for downstream plot settings changes
-        @self.app.callback(
-            [
-                Output("downstream-plot", "figure", allow_duplicate=True),
-                Output("downstream-settings-store", "data"),
-            ],
-            [
-                Input("downstream-x-scale", "value"),
-                Input("downstream-y-scale", "value"),
-                Input("downstream-x-min", "value"),
-                Input("downstream-x-max", "value"),
-                Input("downstream-y-min", "value"),
-                Input("downstream-y-max", "value"),
-                Input("show-error-bars-downstream", "value"),
-                Input("show-valve-times-downstream", "value"),
-            ],
-            [
-                State("downstream-plot", "figure"),
-                State("downstream-settings-store", "data"),
-            ],
-            prevent_initial_call=True,
-        )
-        def update_downstream_plot_settings(
-            x_scale,
-            y_scale,
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-            show_error_bars_downstream,
-            show_valve_times_downstream,
-            current_fig,
-            store_data,
-        ):
-            # Helper to extract axis ranges from an existing figure
-            def _extract_axis_range(fig, axis_name):
-                if not fig:
-                    return None, None
-                layout = fig.get("layout", {})
-                for key in (axis_name, f"{axis_name}1"):
-                    ax = layout.get(key)
-                    if isinstance(ax, dict):
-                        r = ax.get("range")
-                        if r and len(r) == 2:
-                            return r[0], r[1]
-                return None, None
-
-            # Simpler behavior: always reset the figure when scale or error-bar
-            # options change. Do not preserve current zoom. If inputs are None
-            # pass None so the generator autosizes.
-            x_min_use = x_min if x_min is not None else None
-            x_max_use = x_max if x_max is not None else None
-            y_min_use = y_min if y_min is not None else None
-            y_max_use = y_max if y_max is not None else None
-
-            new_store = {"y_scale": y_scale}
-
-            # Generate updated downstream plot with new settings (use keywords)
-            return [
-                self._generate_downstream_plot(
-                    show_error_bars=bool(show_error_bars_downstream),
-                    show_valve_times=bool(show_valve_times_downstream),
-                    x_scale=x_scale,
-                    y_scale=y_scale,
-                    x_min=x_min_use,
-                    x_max=x_max_use,
-                    y_min=y_min_use,
-                    y_max=y_max_use,
-                ),
-                new_store,
-            ]
-
-        # Callbacks to update min values based on scale mode
-        @self.app.callback(
-            [Output("upstream-x-min", "value")],
-            [Input("upstream-x-scale", "value")],
-            prevent_initial_call=True,
-        )
-        def update_upstream_x_min(x_scale):
-            return [0 if x_scale == "linear" else None]
-
-        @self.app.callback(
-            [Output("upstream-y-min", "value")],
-            [Input("upstream-y-scale", "value")],
-            prevent_initial_call=True,
-        )
-        def update_upstream_y_min(y_scale):
-            return [0 if y_scale == "linear" else None]
-
-        @self.app.callback(
-            [Output("downstream-x-min", "value")],
-            [Input("downstream-x-scale", "value")],
-            prevent_initial_call=True,
-        )
-        def update_downstream_x_min(x_scale):
-            return [0 if x_scale == "linear" else None]
-
-        @self.app.callback(
-            [Output("downstream-y-min", "value")],
-            [Input("downstream-y-scale", "value")],
-            prevent_initial_call=True,
-        )
-        def update_downstream_y_min(y_scale):
-            return [0 if y_scale == "linear" else None]
-
-        # Callback for adding new dataset
-        @self.app.callback(
-            [
-                Output("dataset-table-container", "children", allow_duplicate=True),
-                Output("upstream-plot", "figure", allow_duplicate=True),
-                Output("downstream-plot", "figure", allow_duplicate=True),
-                Output("new-dataset-path", "value"),
-                Output("add-dataset-status", "children"),
-            ],
-            [Input("add-dataset-button", "n_clicks")],
-            [State("new-dataset-path", "value")],
-            prevent_initial_call=True,
-        )
-        def add_new_dataset(n_clicks, new_path):
-            if not n_clicks or not new_path:
-                return [
-                    self.create_dataset_table(),
+                # Dashboard header with title and branding
+                lc.create_header(),
+                # Dataset management: table with add/edit/delete controls
+                lc.create_dataset_management_card(dataset_table.create()),
+                # Hidden stores for plot settings (upstream, downstream, temp, perm)
+                *create_hidden_stores(),
+                # Pressure plots side-by-side in a row
+                lc.create_pressure_plots_row(
                     self._generate_upstream_plot(),
                     self._generate_downstream_plot(),
-                    new_path or "",
-                    "",
-                ]
-
-            # Check if path exists and contains valid data
-            if not os.path.exists(new_path):
-                return [
-                    self.create_dataset_table(),
-                    self._generate_upstream_plot(),
-                    self._generate_downstream_plot(),
-                    new_path,
-                    dbc.Alert(
-                        "Path does not exist.",
-                        color="danger",
-                        dismissable=True,
-                        duration=3000,
-                    ),
-                ]
-
-            # Validate metadata exists before attempting load
-            metadata_path = os.path.join(new_path, "run_metadata.json")
-            if not os.path.exists(metadata_path):
-                return [
-                    self.create_dataset_table(),
-                    self._generate_upstream_plot(),
-                    self._generate_downstream_plot(),
-                    new_path,
-                    dbc.Alert(
-                        "run_metadata.json not found in dataset folder.",
-                        color="danger",
-                        dismissable=True,
-                        duration=5000,
-                    ),
-                ]
-
-            # Determine a sensible dataset name (basename of folder)
-            dataset_name = (
-                os.path.basename(new_path) or f"dataset_{len(self.datasets) + 1}"
-            )
-
-            # Attempt to load dataset; report any error to the UI instead of
-            # letting the callback raise and appear to 'do nothing'.
-            try:
-                self.load_data(new_path, dataset_name)
-            except Exception as e:
-                # Report the error to the user
-                msg = str(e) or "Unknown error while loading dataset"
-                print(f"Error adding dataset from {new_path}: {msg}")
-                return [
-                    self.create_dataset_table(),
-                    self._generate_upstream_plot(),
-                    self._generate_downstream_plot(),
-                    new_path,
-                    dbc.Alert(
-                        f"Failed to add dataset: {msg}",
-                        color="danger",
-                        dismissable=True,
-                        duration=7000,
-                    ),
-                ]
-
-            return [
-                self.create_dataset_table(),
-                self._generate_upstream_plot(),
-                self._generate_downstream_plot(),
-                "",  # Clear the input field
-                dbc.Alert(
-                    f"Dataset added successfully from {new_path}",
-                    color="success",
-                    dismissable=True,
-                    duration=3000,
                 ),
-            ]
-
-        # Callback for deleting datasets
-        @self.app.callback(
-            [
-                Output("dataset-table-container", "children"),
-                Output("upstream-plot", "figure"),
-                Output("downstream-plot", "figure"),
-                Output("temperature-plot", "figure"),
+                # Pressure plot controls (apply to both upstream and downstream)
+                lc.create_plot_controls_row(),
+                # Temperature plot with dedicated controls below
+                lc.create_temperature_plot_card(self._generate_temperature_plot()),
+                # Permeability (Arrhenius) plot with dedicated controls below
+                lc.create_permeability_plot_card(self._generate_permeability_plot()),
+                # Spacing at bottom for better layout
+                lc.create_bottom_spacing(),
+                # Download modals for dataset and plot exports
+                *create_download_components(),
+                # Interval component for live data refresh
+                lc.create_live_data_interval(),
             ],
-            [Input({"type": "delete-dataset", "index": ALL}, "n_clicks")],
-            prevent_initial_call=True,
-        )
-        def delete_dataset(n_clicks_list):
-            # Check if any delete button was clicked
-            if not n_clicks_list or not any(n_clicks_list):
-                raise PreventUpdate
-
-            # Find which button was clicked
-            ctx = dash.callback_context
-            if not ctx.triggered:
-                raise PreventUpdate
-
-            # Extract the index from the triggered button
-            button_id = ctx.triggered[0]["prop_id"]
-
-            try:
-                button_data = json.loads(button_id.split(".")[0])
-                delete_index = int(button_data["index"])
-            except (json.JSONDecodeError, KeyError, IndexError, ValueError):
-                raise PreventUpdate
-
-            # Map positional index to dataset key and remove
-            keys = _keys_list()
-            if 0 <= delete_index < len(keys):
-                key = keys[delete_index]
-                deleted = self.datasets.pop(key, None)
-                if deleted:
-                    print(f"Deleted dataset: {deleted.get('name')}")
-
-            # Return updated components
-            return [
-                self.create_dataset_table(),
-                self._generate_upstream_plot(),
-                self._generate_downstream_plot(),
-                self._generate_temperature_plot(),
-            ]
-
-        # Callback for downloading datasets
-        @self.app.callback(
-            Output("download-dataset-output", "data", allow_duplicate=True),
-            [Input({"type": "download-dataset", "index": ALL}, "n_clicks")],
-            prevent_initial_call=True,
-        )
-        def download_dataset(n_clicks_list):
-            # Check if any download button was clicked
-            if not n_clicks_list or not any(n_clicks_list):
-                raise PreventUpdate
-
-            # Find which button was clicked
-            ctx = dash.callback_context
-            if not ctx.triggered:
-                raise PreventUpdate
-
-            # Extract the index from the triggered button
-            button_id = ctx.triggered[0]["prop_id"]
-            try:
-                button_data = json.loads(button_id.split(".")[0])
-                download_index = int(button_data["index"])
-            except (json.JSONDecodeError, KeyError, IndexError, ValueError):
-                raise PreventUpdate
-
-            # Map positional index to dataset key
-            keys = _keys_list()
-            dataset = None
-            if 0 <= download_index < len(keys):
-                key = keys[download_index]
-                dataset = self.datasets.get(key)
-
-            if dataset:
-                # Prefer explicit dataset folder path
-                dataset_path = dataset.get("dataset_path") or dataset.get("folder")
-                if dataset_path and os.path.exists(dataset_path):
-                    packaged = self._create_dataset_download(dataset_path)
-                    if packaged is not None:
-                        # If packaged content is binary (zip or bytes), use dcc.send_bytes
-                        content = packaged.get("content")
-                        filename = packaged.get("filename")
-                        if isinstance(content, (bytes, bytearray)):
-                            return dcc.send_bytes(
-                                lambda f, data=content: f.write(data), filename
-                            )
-                        # If content is text (string), return as dict like before
-                        return dict(
-                            content=content,
-                            filename=filename,
-                            type=packaged.get("type", "text/csv"),
-                        )
-
-            raise PreventUpdate
-
-        # Callback for exporting upstream plot
-        @self.app.callback(
-            Output("download-upstream-plot", "data", allow_duplicate=True),
-            [Input("export-upstream-plot", "n_clicks")],
-            [State("upstream-plot", "figure")],
-            prevent_initial_call=True,
-        )
-        def export_upstream_plot(n_clicks, current_fig):
-            if not n_clicks:
-                raise PreventUpdate
-
-            # Use the current rendered figure (as dict) and convert to HTML
-            if not current_fig:
-                raise PreventUpdate
-
-            # Convert dict->plotly Figure then to HTML
-            try:
-                fig = go.Figure(current_fig)
-                html_str = fig.to_html(include_plotlyjs="inline")
-            except Exception:
-                raise PreventUpdate
-
-            return dict(
-                content=html_str,
-                filename="upstream_plot.html",
-                type="text/html",
-            )
-
-        # Callback for exporting downstream plot
-        @self.app.callback(
-            Output("download-downstream-plot", "data", allow_duplicate=True),
-            [Input("export-downstream-plot", "n_clicks")],
-            prevent_initial_call=True,
-        )
-        def export_downstream_plot(n_clicks):
-            if not n_clicks:
-                raise PreventUpdate
-
-            # Generate the downstream plot with FULL DATA (no resampling)
-            fig = self._generate_downstream_plot_full_data(False)
-
-            # Convert to HTML
-            html_str = fig.to_html(include_plotlyjs="inline")
-
-            return dict(
-                content=html_str,
-                filename="downstream_plot_full_data.html",
-                type="text/html",
-            )
-
-        # Callback for toggling add dataset section
-        @self.app.callback(
-            [
-                Output("collapse-add-dataset", "is_open"),
-                Output("add-dataset-icon", "className"),
-            ],
-            [Input("toggle-add-dataset", "n_clicks")],
-            [State("collapse-add-dataset", "is_open")],
-            prevent_initial_call=True,
-        )
-        def toggle_add_dataset_section(n_clicks, is_open):
-            # Only handle actual clicks
-            if n_clicks is None:
-                raise PreventUpdate
-
-            # Toggle the collapse state
-            new_is_open = not bool(is_open)
-            new_icon_class = "fas fa-minus" if new_is_open else "fas fa-plus"
-            print(
-                f"toggle_add_dataset_section: clicked={n_clicks}, "
-                f"is_open={is_open} -> {new_is_open}, icon={new_icon_class}"
-            )
-            return new_is_open, new_icon_class
-
-        # Callback for handling live data checkbox changes
-        @self.app.callback(
-            [
-                Output("upstream-plot", "figure", allow_duplicate=True),
-                Output("downstream-plot", "figure", allow_duplicate=True),
-                Output("temperature-plot", "figure", allow_duplicate=True),
-                Output("live-data-interval", "disabled"),
-            ],
-            [Input({"type": "dataset-live-data", "index": ALL}, "value")],
-            self.PLOT_CONTROL_STATES,
-            prevent_initial_call=True,
-        )
-        def handle_live_data_toggle(
-            live_data_values,
-            show_error_bars_upstream,
-            show_error_bars_downstream,
-            show_valve_times_upstream,
-            show_valve_times_downstream,
-        ):
-            # Update the live_data flag for each dataset using keys mapping
-            keys = _keys_list()
-            for i, is_live in enumerate(live_data_values):
-                if i < len(keys):
-                    key = keys[i]
-                    self.datasets[key]["live_data"] = bool(is_live)
-
-            # Check if any dataset has live data enabled
-            any_live_data = any(live_data_values) if live_data_values else False
-
-            # Regenerate plots with updated data
-            plots = self._generate_both_plots(
-                show_error_bars_upstream=show_error_bars_upstream,
-                show_error_bars_downstream=show_error_bars_downstream,
-                show_valve_times_upstream=show_valve_times_upstream,
-                show_valve_times_downstream=show_valve_times_downstream,
-            )
-            return [*plots, not any_live_data]  # Disable interval if no live data
-
-        # Callback for periodic live data updates
-        @self.app.callback(
-            [
-                Output("upstream-plot", "figure", allow_duplicate=True),
-                Output("downstream-plot", "figure", allow_duplicate=True),
-                Output("temperature-plot", "figure", allow_duplicate=True),
-            ],
-            [Input("live-data-interval", "n_intervals")],
-            self.PLOT_CONTROL_STATES,
-            prevent_initial_call=True,
-        )
-        def update_live_data(
-            n_intervals,
-            show_error_bars_upstream,
-            show_error_bars_downstream,
-            show_valve_times_upstream,
-            show_valve_times_downstream,
-        ):
-            # Check if any dataset has live data enabled
-            datasets_iter = list(_iter_datasets())
-            has_live_data = any(
-                dataset.get("live_data", False) for dataset in datasets_iter
-            )
-
-            if not has_live_data:
-                raise PreventUpdate
-
-            # Reload data for live datasets by updating existing datasets in place
-            for key in list(self.datasets.keys()):
-                dataset = self.datasets[key]
-                if dataset.get("live_data", False):
-                    # Get dataset info
-                    dataset_path = dataset.get("dataset_path") or dataset.get("folder")
-                    dataset_name = dataset.get("name")
-
-                    if dataset_path and dataset_name:
-                        # Read metadata file
-                        metadata_path = os.path.join(dataset_path, "run_metadata.json")
-                        with open(metadata_path) as f:
-                            metadata = json.load(f)
-
-                        # Process CSV data based on version
-                        csv_result = self.process_csv_data(metadata, dataset_path)
-
-                        # Handle different return values based on version
-                        if len(csv_result) == 3:
-                            # v0.0 or v1.0/v1.1 (no temperature data)
-                            time_data, upstream_data, downstream_data = csv_result
-                            local_temperature_data = None
-                            thermocouple_data = None
-                            thermocouple_name = None
-                        elif len(csv_result) == 5:
-                            # v1.2 (with temperature data but no thermocouple name)
-                            (
-                                time_data,
-                                upstream_data,
-                                downstream_data,
-                                local_temperature_data,
-                                thermocouple_data,
-                            ) = csv_result
-                            thermocouple_name = None
-                        elif len(csv_result) == 6:
-                            # v1.2 (with temperature data and thermocouple name)
-                            (
-                                time_data,
-                                upstream_data,
-                                downstream_data,
-                                local_temperature_data,
-                                thermocouple_data,
-                                thermocouple_name,
-                            ) = csv_result
-                        else:
-                            raise ValueError(
-                                f"Unexpected number of return values from process_csv_data: {len(csv_result)}"
-                            )
-
-                        # Update valve times for live data
-                        valve_times = {}
-                        run_info = metadata.get("run_info", {})
-                        start_time_str = run_info.get("start_time")
-                        if start_time_str:
-                            try:
-                                start_time = datetime.strptime(
-                                    start_time_str, "%Y-%m-%d %H:%M:%S"
-                                )
-                            except ValueError:
-                                start_time = datetime.strptime(
-                                    start_time_str, "%Y-%m-%d %H:%M:%S.%f"
-                                )
-
-                            for k, v in run_info.items():
-                                if "_time" in k and k.startswith("v"):
-                                    try:
-                                        valve_dt = datetime.strptime(
-                                            v, "%Y-%m-%d %H:%M:%S.%f"
-                                        )
-                                        valve_times[k] = (
-                                            valve_dt - start_time
-                                        ).total_seconds()
-                                    except (ValueError, TypeError):
-                                        pass
-
-                        # Update existing dataset in place
-                        # (preserve name, colour, live_data)
-                        update_dict = {
-                            "time_data": time_data,
-                            "upstream_data": upstream_data,
-                            "downstream_data": downstream_data,
-                            "valve_times": valve_times,
-                        }
-
-                        # Add temperature data if available (v1.2+)
-                        if local_temperature_data is not None:
-                            update_dict["local_temperature_data"] = (
-                                local_temperature_data
-                            )
-                        if thermocouple_data is not None:
-                            update_dict["thermocouple_data"] = thermocouple_data
-                        if thermocouple_name is not None:
-                            update_dict["thermocouple_name"] = thermocouple_name
-
-                        dataset.update(update_dict)
-
-            # Regenerate plots with updated data;
-            return self._generate_both_plots(
-                show_error_bars_upstream=show_error_bars_upstream,
-                show_error_bars_downstream=show_error_bars_downstream,
-                show_valve_times_upstream=show_valve_times_upstream,
-                show_valve_times_downstream=show_valve_times_downstream,
-            )
-
-        # FigureResampler callbacks for interactive zooming/panning
-        @self.app.callback(
-            Output("upstream-plot", "figure", allow_duplicate=True),
-            Input("upstream-plot", "relayoutData"),
-            prevent_initial_call=True,
-        )
-        def update_upstream_plot_on_relayout(relayoutData):
-            if "upstream-plot" in self.figure_resamplers and relayoutData:
-                fig_resampler = self.figure_resamplers["upstream-plot"]
-
-                # Check if this is an autoscale/reset zoom event (double-click)
-                if (
-                    "autosize" in relayoutData
-                    or "xaxis.autorange" in relayoutData
-                    or "yaxis.autorange" in relayoutData
-                    or relayoutData.get("xaxis.autorange") is True
-                    or relayoutData.get("yaxis.autorange") is True
-                ):
-                    # Regenerate the full plot for autoscale
-                    return self._generate_upstream_plot()
-                else:
-                    # Normal zoom/pan - use resampling
-                    return fig_resampler.construct_update_data_patch(relayoutData)
-            return dash.no_update
-
-        @self.app.callback(
-            Output("downstream-plot", "figure", allow_duplicate=True),
-            Input("downstream-plot", "relayoutData"),
-            prevent_initial_call=True,
-        )
-        def update_downstream_plot_on_relayout(relayoutData):
-            if "downstream-plot" in self.figure_resamplers and relayoutData:
-                fig_resampler = self.figure_resamplers["downstream-plot"]
-
-                # Check if this is an autoscale/reset zoom event (double-click)
-                if (
-                    "autosize" in relayoutData
-                    or "xaxis.autorange" in relayoutData
-                    or "yaxis.autorange" in relayoutData
-                    or relayoutData.get("xaxis.autorange") is True
-                    or relayoutData.get("yaxis.autorange") is True
-                ):
-                    # Regenerate the full plot for autoscale
-                    return self._generate_downstream_plot()
-                else:
-                    # Normal zoom/pan - use resampling
-                    return fig_resampler.construct_update_data_patch(relayoutData)
-            return dash.no_update
-
-        @self.app.callback(
-            Output("temperature-plot", "figure", allow_duplicate=True),
-            Input("temperature-plot", "relayoutData"),
-            prevent_initial_call=True,
-        )
-        def update_temperature_plot_on_relayout(relayoutData):
-            if "temperature-plot" in self.figure_resamplers and relayoutData:
-                fig_resampler = self.figure_resamplers["temperature-plot"]
-
-                # Check if this is an autoscale/reset zoom event (double-click)
-                if (
-                    "autosize" in relayoutData
-                    or "xaxis.autorange" in relayoutData
-                    or "yaxis.autorange" in relayoutData
-                    or relayoutData.get("xaxis.autorange") is True
-                    or relayoutData.get("yaxis.autorange") is True
-                ):
-                    # Regenerate the full plot for autoscale
-                    return self._generate_temperature_plot()
-                else:
-                    # Normal zoom/pan - use resampling
-                    return fig_resampler.construct_update_data_patch(relayoutData)
-            return dash.no_update
-
-        @self.app.callback(
-            Output("permeability-plot", "figure", allow_duplicate=True),
-            Input("permeability-plot", "relayoutData"),
-            prevent_initial_call=True,
-        )
-        def update_permeability_plot_on_relayout(relayoutData):
-            if "permeability-plot" in self.figure_resamplers and relayoutData:
-                fig_resampler = self.figure_resamplers["permeability-plot"]
-
-                # Check if this is an autoscale/reset zoom event (double-click)
-                if (
-                    "autosize" in relayoutData
-                    or "xaxis.autorange" in relayoutData
-                    or "yaxis.autorange" in relayoutData
-                    or relayoutData.get("xaxis.autorange") is True
-                    or relayoutData.get("yaxis.autorange") is True
-                ):
-                    # Regenerate the full plot for autoscale
-                    return self._generate_permeability_plot()
-                else:
-                    # Normal zoom/pan - use resampling
-                    return fig_resampler.construct_update_data_patch(relayoutData)
-            return dash.no_update
-
-    def _generate_both_plots(
-        self,
-        show_error_bars_upstream=True,
-        show_error_bars_downstream=True,
-        show_valve_times_upstream=False,
-        show_valve_times_downstream=False,
-        **kwargs,
-    ):
-        """Helper method to generate both upstream and downstream plots
-        with common parameters"""
-        return [
-            self._generate_upstream_plot(
-                show_error_bars=show_error_bars_upstream,
-                show_valve_times=show_valve_times_upstream,
-                **kwargs,
-            ),
-            self._generate_downstream_plot(
-                show_error_bars=show_error_bars_downstream,
-                show_valve_times=show_valve_times_downstream,
-                **kwargs,
-            ),
-            self._generate_temperature_plot(),
-        ]
-
-    def _generate_upstream_plot(
-        self,
-        show_error_bars=True,
-        show_valve_times=False,
-        x_scale=None,
-        y_scale=None,
-        x_min=None,
-        x_max=None,
-        y_min=None,
-        y_max=None,
-    ):
-        """Generate the upstream pressure plot"""
-        # Use FigureResampler with parameters to hide resampling annotations
-        fig = FigureResampler(
-            go.Figure(),
-            show_dash_kwargs={"mode": "disabled"},
-            show_mean_aggregation_size=False,
-            verbose=False,
+            fluid=True,  # Use full width for responsive design
         )
 
-        # Store the FigureResampler instance
-        self.figure_resamplers["upstream-plot"] = fig
-
-        # Iterate through datasets and obtain the upstream data
-        for dataset_name in self.datasets.keys():
-            dataset = self.datasets[f"{dataset_name}"]
-            time_data = np.ascontiguousarray(dataset["time_data"])
-            upstream_data = dataset["upstream_data"]
-            pressure_data = np.ascontiguousarray(upstream_data["pressure_data"])
-            pressure_error = np.ascontiguousarray(upstream_data["error_data"])
-            colour = dataset["colour"]
-
-            # Debug: Check array lengths
-            if len(time_data) != len(pressure_data):
-                print(
-                    f"WARNING: Dataset {dataset_name}: time_data length={len(time_data)}, pressure_data length={len(pressure_data)}"
-                )
-                print(f"  Trimming to minimum length")
-                min_len = min(len(time_data), len(pressure_data))
-                time_data = time_data[:min_len]
-                pressure_data = pressure_data[:min_len]
-                pressure_error = (
-                    pressure_error[:min_len]
-                    if len(pressure_error) > min_len
-                    else pressure_error
-                )
-
-            # Create scatter trace
-            scatter_kwargs = {
-                "mode": "lines+markers",
-                "name": dataset["name"],
-                "line": dict(color=colour, width=1.5),
-                "marker": dict(size=3),
-            }
-
-            # Add error bars if enabled
-            if show_error_bars:
-                scatter_kwargs["error_y"] = dict(
-                    type="data",
-                    array=pressure_error,
-                    visible=True,
-                    color=colour,
-                    thickness=1.5,
-                    width=3,
-                )
-
-            # Use plotly-resampler for automatic downsampling
-            fig.add_trace(
-                go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
-            )
-
-            # Add valve time vertical lines
-            if show_valve_times:
-                valve_times = self.datasets[f"{dataset_name}"].get("valve_times", {})
-                for valve_event, valve_time in valve_times.items():
-                    fig.add_vline(
-                        x=valve_time,
-                        line_dash="dash",
-                        line_color=colour,
-                        line_width=1,
-                        annotation_text=valve_event.replace("_", " ").title(),
-                        annotation_position="top",
-                        annotation_textangle=0,
-                        annotation_font_size=8,
-                    )
-
-        # Configure the layout
-        fig.update_layout(
-            height=500,
-            xaxis_title="Time (s)",
-            yaxis_title="Pressure (Torr)",
-            template="plotly_white",
-            margin=dict(l=60, r=30, t=40, b=60),
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
-            ),
-        )
-
-        # Apply axis scaling
-        x_axis_type = x_scale if x_scale else "linear"
-        y_axis_type = y_scale if y_scale else "linear"
-
-        fig.update_xaxes(type=x_axis_type)
-        fig.update_yaxes(type=y_axis_type)
-
-        # Determine x-axis range from data (or use provided bounds when valid)
-        if x_axis_type == "log":
-            if (
-                x_min is not None
-                and x_max is not None
-                and x_min > 0
-                and x_max > 0
-                and x_min < x_max
-            ):
-                xmin_lin, xmax_lin = float(x_min), float(x_max)
-            else:
-                pos_vals = []
-                for ds in self.datasets.values():
-                    try:
-                        vals = np.asarray(ds.get("time_data", []), dtype=float)
-                        vals = vals[vals > 0]
-                        if vals.size:
-                            pos_vals.extend(vals.tolist())
-                    except Exception:
-                        continue
-                if pos_vals:
-                    xmin_lin = float(min(pos_vals))
-                    xmax_lin = float(max(pos_vals))
-                    if xmin_lin >= xmax_lin:
-                        xmax_lin = xmin_lin * 10.0
-                else:
-                    xmin_lin, xmax_lin = 1e-12, 1e-6
-
-            fig.update_xaxes(range=[math.log10(xmin_lin), math.log10(xmax_lin)])
-        else:
-            if x_min is not None and x_max is not None and x_min < x_max:
-                fig.update_xaxes(range=[x_min, x_max])
-            else:
-                # derive from data
-                vals = []
-                for ds in self.datasets.values():
-                    try:
-                        v = ds.get("time_data", [])
-                        vals.extend([float(x) for x in v])
-                    except Exception:
-                        continue
-                if vals:
-                    fig.update_xaxes(range=[min(vals), max(vals)])
-
-        # Determine y-axis range from upstream data (or use provided bounds when valid)
-        if y_axis_type == "log":
-            if (
-                y_min is not None
-                and y_max is not None
-                and y_min > 0
-                and y_max > 0
-                and y_min < y_max
-            ):
-                ymin_lin, ymax_lin = float(y_min), float(y_max)
-            else:
-                pos_vals = []
-                for ds in self.datasets.values():
-                    try:
-                        vals = np.asarray(
-                            ds.get("upstream_data", {}).get("pressure_data", []),
-                            dtype=float,
-                        )
-                        vals = vals[vals > 0]
-                        if vals.size:
-                            pos_vals.extend(vals.tolist())
-                    except Exception:
-                        continue
-                if pos_vals:
-                    ymin_lin = float(min(pos_vals))
-                    ymax_lin = float(max(pos_vals))
-                    if ymin_lin >= ymax_lin:
-                        ymax_lin = ymin_lin * 10.0
-                else:
-                    ymin_lin, ymax_lin = 1e-12, 1e-6
-
-            fig.update_yaxes(range=[math.log10(ymin_lin), math.log10(ymax_lin)])
-        else:
-            if y_min is not None and y_max is not None and y_min < y_max:
-                fig.update_yaxes(range=[y_min, y_max])
-            else:
-                vals = []
-                for ds in self.datasets.values():
-                    try:
-                        v = ds.get("upstream_data", {}).get("pressure_data", [])
-                        vals.extend([float(x) for x in v])
-                    except Exception:
-                        continue
-                if vals:
-                    fig.update_yaxes(range=[min(vals), max(vals)])
-
-        # Clean up trace names to remove [R] annotations
-        for trace in fig.data:
-            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
-                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
-
-        return fig
-
-    def _generate_downstream_plot(
-        self,
-        show_error_bars=True,
-        show_valve_times=False,
-        x_scale=None,
-        y_scale=None,
-        x_min=None,
-        x_max=None,
-        y_min=None,
-        y_max=None,
-    ):
-        """Generate the downstream pressure plot"""
-        # Use FigureResampler with parameters to hide resampling annotations
-        fig = FigureResampler(
-            go.Figure(),
-            show_dash_kwargs={"mode": "disabled"},
-            show_mean_aggregation_size=False,
-            verbose=False,
-        )
-
-        # Store the FigureResampler instance
-        self.figure_resamplers["downstream-plot"] = fig
-
-        # Iterate through datasets and obtain the upstream data
-        for dataset_name in self.datasets.keys():
-            time_data = self.datasets[f"{dataset_name}"]["time_data"]
-            time_data = np.ascontiguousarray(time_data)
-            pressure_data = self.datasets[f"{dataset_name}"]["downstream_data"][
-                "pressure_data"
-            ]
-            pressure_data = np.ascontiguousarray(pressure_data)
-            pressure_error = self.datasets[f"{dataset_name}"]["downstream_data"][
-                "error_data"
-            ]
-            pressure_error = np.ascontiguousarray(pressure_error)
-
-            colour = self.datasets[f"{dataset_name}"]["colour"]
-
-            # Debug: Check array lengths
-            if len(time_data) != len(pressure_data):
-                print(
-                    f"WARNING: Dataset {dataset_name}: "
-                    f"time_data length={len(time_data)}, "
-                    f"pressure_data length={len(pressure_data)}"
-                )
-                print("  Trimming to minimum length")
-                min_len = min(len(time_data), len(pressure_data))
-                time_data = time_data[:min_len]
-                pressure_data = pressure_data[:min_len]
-                if len(pressure_error) > min_len:
-                    pressure_error = pressure_error[:min_len]
-
-            # Create scatter trace
-            scatter_kwargs = {
-                "mode": "lines+markers",
-                "name": self.datasets[f"{dataset_name}"]["name"],
-                "line": dict(color=colour, width=1.5),
-                "marker": dict(size=3),
-            }
-
-            # Add error bars if enabled
-            if show_error_bars:
-                scatter_kwargs["error_y"] = dict(
-                    type="data",
-                    array=pressure_error,
-                    visible=True,
-                    color=colour,
-                    thickness=1.5,
-                    width=3,
-                )
-
-            # Use plotly-resampler for automatic downsampling
-            fig.add_trace(
-                go.Scatter(**scatter_kwargs), hf_x=time_data, hf_y=pressure_data
-            )
-
-            # Add valve time vertical lines
-            if show_valve_times:
-                valve_times = self.datasets[f"{dataset_name}"].get("valve_times", {})
-                for valve_event, valve_time in valve_times.items():
-                    fig.add_vline(
-                        x=valve_time,
-                        line_dash="dash",
-                        line_color=colour,
-                        line_width=1,
-                        annotation_text=valve_event.replace("_", " ").title(),
-                        annotation_position="top",
-                        annotation_textangle=0,
-                        annotation_font_size=8,
-                    )
-
-        # Configure the layout
-        fig.update_layout(
-            height=500,
-            xaxis_title="Time (s)",
-            yaxis_title="Pressure (Torr)",
-            template="plotly_white",
-            margin=dict(l=60, r=30, t=40, b=60),
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
-            ),
-        )
-        # Apply axis scaling
-        x_axis_type = x_scale if x_scale else "linear"
-        y_axis_type = y_scale if y_scale else "linear"
-
-        fig.update_xaxes(type=x_axis_type)
-        fig.update_yaxes(type=y_axis_type)
-
-        # Apply axis ranges if specified
-        if x_min is not None and x_max is not None:
-            if x_axis_type == "log":
-
-                def _safe_x_log_range_ds(xmin_val, xmax_val):
-                    try:
-                        if xmin_val is not None and xmax_val is not None:
-                            if xmin_val > 0 and xmax_val > 0 and xmin_val < xmax_val:
-                                return math.log10(xmin_val), math.log10(xmax_val)
-                    except Exception:
-                        pass
-
-                    pos_vals = []
-                    for dataset_name in self.datasets.keys():
-                        try:
-                            vals = self.datasets[f"{dataset_name}"]["time_data"]
-                            for v in vals:
-                                if v is not None and v > 0:
-                                    pos_vals.append(float(v))
-                        except Exception:
-                            continue
-
-                    if pos_vals:
-                        xmin_p = min(pos_vals)
-                        xmax_p = max(pos_vals)
-                        if xmin_p <= 0:
-                            xmin_p = min(x for x in pos_vals if x > 0)
-                        if xmin_p >= xmax_p:
-                            xmax_p = xmin_p * 10.0
-                        return math.log10(xmin_p), math.log10(xmax_p)
-
-                    return -12.0, -6.0
-
-                x_min_log, x_max_log = _safe_x_log_range_ds(x_min, x_max)
-                fig.update_xaxes(range=[x_min_log, x_max_log])
-            else:
-                fig.update_xaxes(range=[x_min, x_max])
-
-        if y_min is not None and y_max is not None:
-            if y_axis_type == "log":
-                # For log scale, ensure positive bounds; if provided bounds are
-                # non-positive, derive a safe range from the data.
-
-                def _safe_log_range_ds(
-                    downstream_or_upstream: str, y_min_val, y_max_val
-                ):
-                    try:
-                        if y_min_val is not None and y_max_val is not None:
-                            if (
-                                y_min_val > 0
-                                and y_max_val > 0
-                                and y_min_val < y_max_val
-                            ):
-                                return y_min_val, y_max_val
-                    except Exception:
-                        pass
-
-                    pos_vals = []
-                    for dataset_name in self.datasets.keys():
-                        try:
-                            vals = self.datasets[f"{dataset_name}"][
-                                downstream_or_upstream
-                            ]["pressure_data"]
-                            for v in vals:
-                                if v is not None and v > 0:
-                                    pos_vals.append(float(v))
-                        except Exception:
-                            continue
-
-                    if pos_vals:
-                        ymin_p = min(pos_vals)
-                        ymax_p = max(pos_vals)
-                        if ymin_p <= 0:
-                            ymin_p = min(x for x in pos_vals if x > 0)
-                        if ymin_p >= ymax_p:
-                            ymax_p = ymin_p * 10.0
-                        return ymin_p, ymax_p
-
-                    return 1e-12, 1e-6
-
-                y_min_use, y_max_use = _safe_log_range_ds(
-                    "downstream_data", y_min, y_max
-                )
-                fig.update_yaxes(range=[math.log10(y_min_use), math.log10(y_max_use)])
-            else:
-                fig.update_yaxes(range=[y_min, y_max])
-
-        # Clean up trace names to remove [R] annotations
-        for trace in fig.data:
-            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
-                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
-
-        return fig
-
-    def _generate_temperature_plot(self):
-        """Generate the temperature plot for v1.2 datasets"""
-        # Use FigureResampler with parameters to hide resampling annotations
-        fig = FigureResampler(
-            go.Figure(),
-            show_dash_kwargs={"mode": "disabled"},
-            show_mean_aggregation_size=False,
-            verbose=False,
-        )
-
-        # Store the FigureResampler instance
-        self.figure_resamplers["temperature-plot"] = fig
-
-        # Iterate through datasets and check for v1.2 datasets with temperature data
-        has_temperature_data = False
-        for dataset_name in self.datasets.keys():
-            dataset = self.datasets[f"{dataset_name}"]
-
-            # Check if dataset has temperature data (v1.2 or later)
-            if (
-                "local_temperature_data" not in dataset
-                or "thermocouple_data" not in dataset
-            ):
-                continue
-
-            # Skip if temperature data is None
-            if (
-                dataset["local_temperature_data"] is None
-                or dataset["thermocouple_data"] is None
-            ):
-                continue
-
-            has_temperature_data = True
-
-            time_data = np.ascontiguousarray(dataset["time_data"])
-            local_temp = np.ascontiguousarray(dataset["local_temperature_data"])
-            thermocouple_temp = np.ascontiguousarray(dataset["thermocouple_data"])
-            colour = dataset["colour"]
-            thermocouple_name = dataset.get("thermocouple_name", "Thermocouple")
-
-            # Add local temperature trace
-            fig.add_trace(
-                go.Scatter(
-                    mode="lines",
-                    name="Local temperature (C)",
-                    line=dict(color=colour, width=1.5, dash="dash"),
-                ),
-                hf_x=time_data,
-                hf_y=local_temp,
-            )
-
-            # Add thermocouple temperature trace
-            fig.add_trace(
-                go.Scatter(
-                    mode="lines",
-                    name=f"{thermocouple_name} (C)",
-                    line=dict(color=colour, width=2),
-                ),
-                hf_x=time_data,
-                hf_y=thermocouple_temp,
-            )
-
-        # Configure the layout
-        if has_temperature_data:
-            fig.update_layout(
-                height=400,
-                xaxis_title="Time (s)",
-                yaxis_title="Temperature (°C)",
-                template="plotly_white",
-                margin=dict(l=60, r=30, t=40, b=60),
-                legend=dict(
-                    orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
-                ),
-            )
-        else:
-            # No temperature data available, show message
-            fig.add_annotation(
-                text="No temperature data available (requires v1.2 datasets)",
-                xref="paper",
-                yref="paper",
-                x=0.5,
-                y=0.5,
-                showarrow=False,
-                font=dict(size=16, color="gray"),
-            )
-            fig.update_layout(
-                height=400,
-                xaxis_title="Time (s)",
-                yaxis_title="Temperature (°C)",
-                template="plotly_white",
-                margin=dict(l=60, r=30, t=40, b=60),
-            )
-
-        # Clean up trace names to remove [R] annotations
-        for trace in fig.data:
-            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
-                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
-
-        return fig
-
-    def _generate_permeability_plot(self):
-        """Generate permeability plot with HTM reference and measured data."""
-        fig = FigureResampler(
-            go.Figure(),
-            show_dash_kwargs={"mode": "disabled"},
-            show_mean_aggregation_size=False,
-            verbose=False,
-        )
-        self.figure_resamplers["permeability-plot"] = fig
-
-        # Add HTM reference data
-        htm_x, htm_y, htm_labels = import_htm_data("316l_steel")
-        for x, y, label in zip(htm_x, htm_y, htm_labels):
-            fig.add_trace(go.Scatter(x=1000 / x, y=y, name=label))
-
-        # Calculate and plot permeability for each dataset
-        temps, perms, x_error, y_error, error_lower, error_upper = (
-            evaluate_permeability_values(self.datasets)
-        )
-
-        # Add error bars (no visible markers, just the bars)
-        fig.add_trace(
-            go.Scatter(
-                x=x_error,
-                y=y_error,
-                mode="markers",
-                name="Error Range",
-                marker=dict(size=0.1, color="black", opacity=0),
-                error_y=dict(
-                    type="data",
-                    symmetric=False,
-                    array=error_upper,
-                    arrayminus=error_lower,
-                    color="black",
-                    thickness=2,
-                    width=6,
-                ),
-                showlegend=False,
-            )
-        )
-
-        # Add individual data points on top (no legend)
-        # Extract nominal values from ufloat objects
-        perm_values = np.array([p.n if hasattr(p, "n") else p for p in perms])
-        fig.add_trace(
-            go.Scatter(
-                x=1000 / np.array(temps),
-                y=perm_values,
-                mode="markers",
-                marker=dict(size=6, color="black"),
-                showlegend=False,
-            )
-        )
-
-        # Fit a line through all data points (in log space for permeability)
-        fit_x, fit_y = fit_permeability_data(temps, perms)
-
-        fig.add_trace(
-            go.Scatter(
-                x=fit_x,
-                y=fit_y,
-                mode="lines",
-                name="SHIELD data",
-                line=dict(color="black", width=2, dash="solid"),
-                showlegend=True,
-            )
-        )
-
-        # Configure layout
-        fig.update_layout(
-            xaxis_title="1000/T (K-1)",
-            yaxis_title="Permeability (m-1 s-1 Pa-0.5)",
-            yaxis_type="log",
-            hovermode="closest",
-            template="plotly_white",
-            legend=dict(
-                orientation="v", yanchor="top", y=0.99, xanchor="right", x=0.99
-            ),
-        )
-
-        # Configure y-axis to show exponent at top (matplotlib style)
-        fig.update_yaxes(exponentformat="e", showexponent="all")
-
-        # Clean up resampler annotations
-        for trace in fig.data:
-            if hasattr(trace, "name") and trace.name and "[R]" in trace.name:
-                trace.name = trace.name.replace("[R] ", "").replace("[R]", "")
-
-        return fig
-
-    def _create_dataset_download(self, dataset_path: str):
-        """Package original dataset files for download based on metadata version.
-
-        For version '0.0' zip all CSV files in the folder and return as bytes.
-        For version '1.0' return the single CSV file named in run_info.data_filename
-
-        Returns a dict suitable for dcc.send_bytes or dcc.send_file style use.
+    def _create_dataset_download(self, dataset_path: str) -> dict[str, Any]:
+        """Package original dataset files for download as a ZIP archive.
+
+        Creates an in-memory ZIP file containing all files from the dataset
+        folder, preserving the relative directory structure.
+
+        Args:
+            dataset_path: Absolute path to the dataset folder to package
+
+        Returns:
+            dict: Download specification with keys:
+                - content: ZIP file bytes
+                - filename: Suggested filename (e.g., "dataset.zip")
+                - type: MIME type ("application/zip")
         """
-
-        # Zip the entire dataset folder (all files and subfolders), preserving
-        # the relative directory structure inside the archive.
+        # Create in-memory ZIP archive preserving directory structure
         mem_zip = io.BytesIO()
         with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            # Walk through all files and subdirectories
             for root, _dirs, files in os.walk(dataset_path):
                 for fname in files:
                     file_path = os.path.join(root, fname)
                     try:
+                        # Store relative path to maintain structure in archive
                         arcname = os.path.relpath(file_path, dataset_path)
                         zf.write(file_path, arcname)
                     except Exception:
-                        # Skip files we fail to read/write into the archive
+                        # Skip files we cannot read (permissions, etc.)
                         continue
+
+        # Rewind buffer for reading
         mem_zip.seek(0)
-        # Use a normalized basename in case dataset_path ends with a slash
+
+        # Use folder name as ZIP filename
         base = os.path.basename(os.path.normpath(dataset_path))
         return dict(
             content=mem_zip.getvalue(),
@@ -3213,35 +350,222 @@ class DataPlotter:
             type="application/zip",
         )
 
-    def start(self):
-        """Process data and start the Dash web server"""
+    def _initialize_figure_generators(self) -> None:
+        """Initialize plot generator instances with loaded datasets.
 
-        # Process data
+        Creates instances of PressurePlot, TemperaturePlot, and PermeabilityPlot,
+        passing the loaded datasets to each. These generators are used to create
+        the initial plots and regenerate them when settings change.
+        """
+        # Create upstream pressure plot generator
+        self.upstream_plot = PressurePlot(
+            datasets=self.datasets, plot_id="upstream-plot", plot_type="upstream"
+        )
+        # Create downstream pressure plot generator
+        self.downstream_plot = PressurePlot(
+            datasets=self.datasets, plot_id="downstream-plot", plot_type="downstream"
+        )
+        # Create temperature plot generator
+        self.temperature_plot = TemperaturePlot(
+            datasets=self.datasets, plot_id="temperature-plot"
+        )
+        # Create permeability (Arrhenius) plot generator
+        self.permeability_plot = PermeabilityPlot(
+            datasets=self.datasets, plot_id="permeability-plot"
+        )
+
+    def _generate_plot(
+        self,
+        plot_type: str,
+        show_error_bars: bool = False,
+        show_valve_times: bool = False,
+        x_scale: str = "linear",
+        y_scale: str = "log",
+        x_min: float | None = None,
+        x_max: float | None = None,
+        y_min: float | None = None,
+        y_max: float | None = None,
+    ) -> Any:
+        """Generic plot generation method for all plot types.
+
+        This method provides a unified interface for generating any plot type.
+        It sets the appropriate plot parameters, generates the plot, and stores
+        the FigureResampler instance for interactive callbacks.
+
+        Args:
+            plot_type: Type of plot to generate. Must be one of:
+                - 'upstream': Upstream pressure vs time
+                - 'downstream': Downstream pressure vs time
+                - 'temperature': Temperature vs time
+                - 'permeability': Permeability vs inverse temperature (Arrhenius)
+            show_error_bars: Whether to display error bars on data points
+            show_valve_times: Whether to display valve event markers.
+                Only applies to pressure plots (upstream/downstream).
+            x_scale: X-axis scale type ('linear' or 'log')
+            y_scale: Y-axis scale type ('linear' or 'log')
+            x_min: Minimum x-axis value (None for auto-scaling)
+            x_max: Maximum x-axis value (None for auto-scaling)
+            y_min: Minimum y-axis value (None for auto-scaling)
+            y_max: Maximum y-axis value (None for auto-scaling)
+
+        Returns:
+            Plotly Figure object (FigureResampler) for the specified plot type
+
+        Raises:
+            ValueError: If plot_type is not recognized
+        """
+        # Map plot type to corresponding plot generator and callback key
+        plot_config: dict[str, tuple[Any, str]] = {
+            "upstream": (self.upstream_plot, "upstream-plot"),
+            "downstream": (self.downstream_plot, "downstream-plot"),
+            "temperature": (self.temperature_plot, "temperature-plot"),
+            "permeability": (self.permeability_plot, "permeability-plot"),
+        }
+
+        # Validate plot type
+        if plot_type not in plot_config:
+            raise ValueError(f"Unknown plot type: {plot_type}")
+
+        # Get plot generator and resampler key
+        plot_obj, resampler_key = plot_config[plot_type]
+
+        # Determine if valve times should be shown (only for pressure plots)
+        use_valve_times = (
+            show_valve_times if plot_type in ["upstream", "downstream"] else False
+        )
+
+        plot_obj.plot_parameters = {
+            "show_error_bars": show_error_bars,
+            "show_valve_times": use_valve_times,
+            "x_scale": x_scale,
+            "y_scale": y_scale,
+            "x_min": x_min,
+            "x_max": x_max,
+            "y_min": y_min,
+            "y_max": y_max,
+        }
+
+        # Generate the plot
+        fig = plot_obj.generate()
+
+        # Store the FigureResampler instance for callback registration
+        self.figure_resamplers[resampler_key] = plot_obj.figure_resampler
+
+        return fig
+
+    def _generate_upstream_plot(self, **kwargs) -> Any:
+        """Generate upstream pressure vs time plot.
+
+        This is a convenience wrapper around _generate_plot that automatically
+        sets the plot type to 'upstream'.
+
+        Args:
+            **kwargs: All keyword arguments are passed to _generate_plot.
+                See _generate_plot() for available parameters.
+
+        Returns:
+            Plotly Figure object (FigureResampler) for upstream pressure plot
+        """
+        return self._generate_plot("upstream", **kwargs)
+
+    def _generate_downstream_plot(self, **kwargs) -> Any:
+        """Generate downstream pressure vs time plot.
+
+        This is a convenience wrapper around _generate_plot that automatically
+        sets the plot type to 'downstream'.
+
+        Args:
+            **kwargs: All keyword arguments are passed to _generate_plot.
+                See _generate_plot() for available parameters.
+
+        Returns:
+            Plotly Figure object (FigureResampler) for downstream pressure plot
+        """
+        return self._generate_plot("downstream", **kwargs)
+
+    def _generate_temperature_plot(self, **kwargs) -> Any:
+        """Generate temperature vs time plot.
+
+        This is a convenience wrapper around _generate_plot that automatically
+        sets the plot type to 'temperature'.
+
+        Args:
+            **kwargs: All keyword arguments are passed to _generate_plot.
+                See _generate_plot() for available parameters.
+
+        Returns:
+            Plotly Figure object (FigureResampler) for temperature plot
+        """
+        return self._generate_plot("temperature", **kwargs)
+
+    def _generate_permeability_plot(self, **kwargs) -> Any:
+        """Generate permeability (Arrhenius) plot.
+
+        This is a convenience wrapper around _generate_plot that automatically
+        sets the plot type to 'permeability'. The permeability plot shows
+        permeability vs inverse temperature with reference HTM data.
+
+        Args:
+            **kwargs: All keyword arguments are passed to _generate_plot.
+                See _generate_plot() for available parameters.
+
+        Returns:
+            Plotly Figure object (FigureResampler) for permeability plot
+        """
+        return self._generate_plot("permeability", **kwargs)
+
+    def start(self) -> None:
+        """Initialize the dashboard and start the Dash web server.
+
+        This method orchestrates the complete dashboard startup process:
+        1. Loads all dataset data from configured paths
+        2. Initializes plot generators with loaded data
+        3. Creates the Dash application layout
+        4. Registers all callbacks for interactivity
+        5. Opens the dashboard in the default web browser
+        6. Starts the Flask development server (blocking)
+
+        The server runs on localhost:{self.port} and automatically opens
+        in a browser after a short delay to ensure the server is ready.
+
+        Note:
+            This method blocks until the server is shut down (Ctrl+C).
+            It should be the last call in your application startup code.
+
+        Raises:
+            Various exceptions from data loading, layout creation, or
+            server startup may be raised if issues occur.
+        """
+        # Load and process all dataset files
         for dataset_path, dataset_name in zip(self.dataset_paths, self.dataset_names):
             self.load_data(dataset_path, dataset_name)
 
-        # Setup the app layout
+        # Initialize all plot generators after datasets are loaded
+        self._initialize_figure_generators()
+
+        # Create the Dash application layout
         self.app.layout = self.create_layout()
 
-        # Add custom CSS for hover effects
+        # Apply custom CSS for hover effects and styling
         self.app.index_string = hover_css
 
+        # Add custom favicon (SHIELD logo)
         custom_favicon_link = (
             '<link rel="icon" href="/assets/shield.svg" type="image/svg+xml">'
         )
         self.app.index_string = hover_css.replace("{%favicon%}", custom_favicon_link)
 
-        # Register callbacks
-        self.register_callbacks()
+        # Register all interactive callbacks
+        register_all_callbacks(self)
 
         print(f"Starting dashboard on http://localhost:{self.port}")
 
-        # Open web browser after a short delay
+        # Open default web browser after short delay to ensure server is ready
         threading.Timer(
             0.1, lambda: webbrowser.open(f"http://127.0.0.1:{self.port}")
         ).start()
 
-        # Run the server directly (blocking)
+        # Start the Flask development server (blocking call)
         self.app.run(debug=False, host="127.0.0.1", port=self.port)
 
 

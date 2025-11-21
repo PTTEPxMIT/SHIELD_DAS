@@ -85,13 +85,13 @@ class DataRecorder:
         self,
         gauges: list[PressureGauge],
         thermocouples: list[Thermocouple],
-        furnace_setpoint: float | None = None,
+        furnace_setpoint: float,
+        sample_material: str,
+        sample_thickness: float,
         results_dir: str = "results",
         run_type="permeation_exp",
         recording_interval: float = 0.5,
         backup_interval: float = 5.0,
-        sample_material: str | None = None,
-        sample_thickness: float | None = None,
     ):
         self.gauges = gauges
         self.thermocouples = thermocouples

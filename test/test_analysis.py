@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -14,6 +14,48 @@ from shield_das.analysis import (
     voltage_to_pressure,
     voltage_to_temperature,
 )
+
+# =============================================================================
+# Test Helper Functions
+# =============================================================================
+
+
+def create_mock_dataset(
+    temperature=873,
+    time_data=None,
+    upstream_pressure=None,
+    downstream_pressure=None,
+    sample_thickness=0.00088,
+    name="mock_dataset",
+):
+    """Create a mock Dataset object for testing.
+
+    Args:
+        temperature: Furnace setpoint temperature in Kelvin
+        time_data: Time array in seconds
+        upstream_pressure: Upstream pressure array in torr
+        downstream_pressure: Downstream pressure array in torr
+        sample_thickness: Sample thickness in meters
+        name: Dataset name
+
+    Returns:
+        Mock Dataset object with required attributes
+    """
+    dataset = MagicMock()
+    dataset.name = name
+    dataset.furnace_setpoint = temperature
+    dataset.time_data = time_data if time_data is not None else np.linspace(0, 100, 100)
+    dataset.upstream_pressure = (
+        upstream_pressure if upstream_pressure is not None else np.full(100, 100.0)
+    )
+    dataset.downstream_pressure = (
+        downstream_pressure
+        if downstream_pressure is not None
+        else np.linspace(0.1, 1.0, 100)
+    )
+    dataset.sample_thickness = sample_thickness
+    return dataset
+
 
 # =============================================================================
 # Tests for average_pressure_after_increase
@@ -428,15 +470,7 @@ def test_evaluate_returns_six_outputs():
     (temps, perms, x_error, y_error, error_lower, error_upper) when processing
     a single experimental dataset.
     """
-    datasets = {
-        "run1": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-            "sample_thickness": 0.00088,
-        }
-    }
+    datasets = [create_mock_dataset(temperature=873, sample_thickness=0.00088)]
     result = evaluate_permeability_values(datasets)
     assert len(result) == 6
 
@@ -446,20 +480,10 @@ def test_evaluate_temps_list_has_correct_length():
     Test evaluate_permeability_values to verify it correctly processes two
     datasets and returns a temps list with length 2, one entry per dataset.
     """
-    datasets = {
-        "run1": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        },
-        "run2": {
-            "temperature": 973,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        },
-    }
+    datasets = [
+        create_mock_dataset(temperature=873, name="run1"),
+        create_mock_dataset(temperature=973, name="run2"),
+    ]
     temps, perms, x_error, y_error, error_lower, error_upper = (
         evaluate_permeability_values(datasets)
     )
@@ -471,20 +495,10 @@ def test_evaluate_perms_list_has_correct_length():
     Test evaluate_permeability_values to verify it correctly calculates
     permeability values for two datasets and returns a perms list with length 2.
     """
-    datasets = {
-        "run1": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        },
-        "run2": {
-            "temperature": 973,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        },
-    }
+    datasets = [
+        create_mock_dataset(temperature=873, name="run1"),
+        create_mock_dataset(temperature=973, name="run2"),
+    ]
     temps, perms, x_error, y_error, error_lower, error_upper = (
         evaluate_permeability_values(datasets)
     )
@@ -497,14 +511,7 @@ def test_evaluate_perms_are_ufloats():
     as ufloat objects with both nominal values (.n) and uncertainties (.s) for
     proper error propagation.
     """
-    datasets = {
-        "run1": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        }
-    }
+    datasets = [create_mock_dataset(temperature=873)]
     temps, perms, x_error, y_error, error_lower, error_upper = (
         evaluate_permeability_values(datasets)
     )
@@ -517,20 +524,10 @@ def test_evaluate_groups_by_temperature():
     same temperature (873K) and returns a single unique temperature point in the
     error arrays after averaging.
     """
-    datasets = {
-        "run1": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        },
-        "run2": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        },
-    }
+    datasets = [
+        create_mock_dataset(temperature=873, name="run1"),
+        create_mock_dataset(temperature=873, name="run2"),
+    ]
     temps, perms, x_error, y_error, error_lower, error_upper = (
         evaluate_permeability_values(datasets)
     )
@@ -543,14 +540,7 @@ def test_evaluate_x_error_is_inverse_temperature():
     as the inverse temperature (1000/T), expecting approximately 1.145 for a
     dataset at 873 Kelvin.
     """
-    datasets = {
-        "run1": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        }
-    }
+    datasets = [create_mock_dataset(temperature=873)]
     temps, perms, x_error, y_error, error_lower, error_upper = (
         evaluate_permeability_values(datasets)
     )
@@ -562,14 +552,7 @@ def test_evaluate_y_error_is_positive():
     Test evaluate_permeability_values to confirm it returns positive y_error
     values (nominal permeability values) for a standard experimental dataset.
     """
-    datasets = {
-        "run1": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        }
-    }
+    datasets = [create_mock_dataset(temperature=873)]
     temps, perms, x_error, y_error, error_lower, error_upper = (
         evaluate_permeability_values(datasets)
     )
@@ -582,14 +565,7 @@ def test_evaluate_error_bars_are_positive():
     values (error_lower and error_upper) representing measurement uncertainties
     for standard datasets.
     """
-    datasets = {
-        "run1": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        }
-    }
+    datasets = [create_mock_dataset(temperature=873)]
     temps, perms, x_error, y_error, error_lower, error_upper = (
         evaluate_permeability_values(datasets)
     )
@@ -599,17 +575,12 @@ def test_evaluate_error_bars_are_positive():
 def test_evaluate_uses_default_thickness():
     """
     Test evaluate_permeability_values to verify it uses the default sample
-    thickness of 0.00088 meters when the sample_thickness key is not provided
-    in the dataset dictionary.
+    thickness of 0.00088 meters when the sample_thickness attribute is None.
     """
-    datasets = {
-        "run1": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        }
-    }
+    dataset = create_mock_dataset(temperature=873)
+    # Set sample_thickness to None to test default
+    dataset.sample_thickness = None
+    datasets = [dataset]
     temps, perms, x_error, y_error, error_lower, error_upper = (
         evaluate_permeability_values(datasets)
     )
@@ -622,23 +593,9 @@ def test_evaluate_uses_custom_thickness():
     values when provided (0.002m) instead of the default (0.00088m), resulting
     in different calculated permeability values.
     """
-    datasets_default = {
-        "run1": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        }
-    }
-    datasets_custom = {
-        "run1": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-            "sample_thickness": 0.002,
-        }
-    }
+    datasets_default = [create_mock_dataset(temperature=873, sample_thickness=0.00088)]
+    datasets_custom = [create_mock_dataset(temperature=873, sample_thickness=0.002)]
+
     _, perms_default, _, _, _, _ = evaluate_permeability_values(datasets_default)
     _, perms_custom, _, _, _, _ = evaluate_permeability_values(datasets_custom)
     assert perms_default[0].n != pytest.approx(perms_custom[0].n, rel=0.01)
@@ -650,20 +607,18 @@ def test_evaluate_weighted_average_for_multiple_runs():
     when multiple runs are conducted at the same temperature (873K), combining
     measurements and returning positive combined uncertainty.
     """
-    datasets = {
-        "run1": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        },
-        "run2": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.5, 100)},
-        },
-    }
+    datasets = [
+        create_mock_dataset(
+            temperature=873,
+            downstream_pressure=np.linspace(0.1, 1.0, 100),
+            name="run1",
+        ),
+        create_mock_dataset(
+            temperature=873,
+            downstream_pressure=np.linspace(0.1, 1.5, 100),
+            name="run2",
+        ),
+    ]
     temps, perms, x_error, y_error, error_lower, error_upper = (
         evaluate_permeability_values(datasets)
     )
@@ -676,26 +631,11 @@ def test_evaluate_sorts_temperatures():
     in ascending order (773K, 873K, 973K), resulting in x_error values (1000/T)
     in descending order for Arrhenius plotting.
     """
-    datasets = {
-        "run1": {
-            "temperature": 973,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        },
-        "run2": {
-            "temperature": 773,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        },
-        "run3": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        },
-    }
+    datasets = [
+        create_mock_dataset(temperature=973, name="run1"),
+        create_mock_dataset(temperature=773, name="run2"),
+        create_mock_dataset(temperature=873, name="run3"),
+    ]
     temps, perms, x_error, y_error, error_lower, error_upper = (
         evaluate_permeability_values(datasets)
     )
@@ -710,14 +650,7 @@ def test_evaluate_handles_non_ufloat_permeability_lower_error():
     permeability calculation returns a regular float instead of a ufloat object,
     the lower error bar is set to zero when uncertainty propagation is not available.
     """
-    datasets = {
-        "run1": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        }
-    }
+    datasets = [create_mock_dataset(temperature=873)]
 
     # Mock calculate_permeability_from_flux to return a regular float instead of ufloat
     with patch(
@@ -736,14 +669,7 @@ def test_evaluate_handles_non_ufloat_permeability_upper_error():
     permeability calculation returns a regular float instead of a ufloat object,
     the upper error bar is set to zero when uncertainty propagation is not available.
     """
-    datasets = {
-        "run1": {
-            "temperature": 873,
-            "time_data": np.linspace(0, 100, 100),
-            "upstream_data": {"pressure_data": np.full(100, 100.0)},
-            "downstream_data": {"pressure_data": np.linspace(0.1, 1.0, 100)},
-        }
-    }
+    datasets = [create_mock_dataset(temperature=873)]
 
     # Mock calculate_permeability_from_flux to return a regular float instead of ufloat
     with patch(
