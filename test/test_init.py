@@ -218,9 +218,7 @@ def test_version_fallback_to_unknown():
     from unittest.mock import patch
 
     # Mock metadata.version to raise PackageNotFoundError
-    with patch.object(
-        metadata, "version", side_effect=metadata.PackageNotFoundError
-    ):
+    with patch.object(metadata, "version", side_effect=metadata.PackageNotFoundError):
         # Remove the module from cache if it exists
         if "shield_das" in sys.modules:
             del sys.modules["shield_das"]
