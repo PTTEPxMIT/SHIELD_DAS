@@ -2,7 +2,7 @@ from importlib import metadata
 
 try:
     __version__ = metadata.version("shield-das")
-except Exception:
+except metadata.PackageNotFoundError:
     __version__ = "unknown"
 
 # Analysis functions for standalone use
