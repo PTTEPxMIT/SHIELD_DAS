@@ -755,10 +755,10 @@ def test_temperature_voltage_round_trip_within_tolerance(original_temp):
 def test_thermocouple_initializes_with_default_name():
     """
     Test Thermocouple class to verify it initializes with the default name
-    "type K thermocouple" when no custom name is provided.
+    "type_K_thermocouple" when no custom name is provided.
     """
     tc = Thermocouple()
-    assert tc.name == "type K thermocouple"
+    assert tc.name == "type_K_thermocouple"
 
 
 def test_thermocouple_initializes_with_empty_voltage_data():
