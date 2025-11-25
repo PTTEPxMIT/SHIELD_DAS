@@ -169,11 +169,13 @@ def test_handle_live_data_toggle_calls_generate_plots(mock_plotter):
 
     callback["func"]([True], True, False, True, False)
 
-    assert mock_plotter._generate_both_plots.called
+    assert mock_plotter._generate_upstream_plot.called
+    assert mock_plotter._generate_downstream_plot.called
+    assert mock_plotter._generate_temperature_plot.called
 
 
 def test_handle_live_data_toggle_passes_plot_settings(mock_plotter):
-    """Test that plot settings are passed to generate_both_plots."""
+    """Test that plot settings are passed to individual plot generation methods."""
     register_live_data_callbacks(mock_plotter)
 
     mock_dataset1 = MagicMock()
@@ -193,11 +195,15 @@ def test_handle_live_data_toggle_passes_plot_settings(mock_plotter):
         False,  # show_valve_times_downstream
     )
 
-    call_kwargs = mock_plotter._generate_both_plots.call_args[1]
-    assert call_kwargs["show_error_bars_upstream"] is True
-    assert call_kwargs["show_error_bars_downstream"] is False
-    assert call_kwargs["show_valve_times_upstream"] is True
-    assert call_kwargs["show_valve_times_downstream"] is False
+    # Check upstream plot settings
+    upstream_kwargs = mock_plotter._generate_upstream_plot.call_args[1]
+    assert upstream_kwargs["show_error_bars"] is True
+    assert upstream_kwargs["show_valve_times"] is True
+
+    # Check downstream plot settings
+    downstream_kwargs = mock_plotter._generate_downstream_plot.call_args[1]
+    assert downstream_kwargs["show_error_bars"] is False
+    assert downstream_kwargs["show_valve_times"] is False
 
 
 def test_update_live_data_callback_execution(mock_plotter):
