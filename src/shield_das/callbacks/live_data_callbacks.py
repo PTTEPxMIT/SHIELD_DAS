@@ -95,15 +95,21 @@ def register_live_data_callbacks(plotter):
         """
         any_live = _update_dataset_live_flags(plotter.datasets, live_data_values)
 
-        plots = plotter._generate_both_plots(
-            show_error_bars_upstream=show_error_bars_upstream,
-            show_error_bars_downstream=show_error_bars_downstream,
-            show_valve_times_upstream=show_valve_times_upstream,
-            show_valve_times_downstream=show_valve_times_downstream,
+        # Generate both plots separately
+        upstream_plot = plotter._generate_upstream_plot(
+            show_error_bars=show_error_bars_upstream,
+            show_valve_times=show_valve_times_upstream,
         )
 
+        downstream_plot = plotter._generate_downstream_plot(
+            show_error_bars=show_error_bars_downstream,
+            show_valve_times=show_valve_times_downstream,
+        )
+
+        temperature_plot = plotter._generate_temperature_plot()
+
         # Disable interval if no live data, enable if any dataset is live
-        return [*plots, not any_live]
+        return [upstream_plot, downstream_plot, temperature_plot, not any_live]
 
     @plotter.app.callback(
         [
