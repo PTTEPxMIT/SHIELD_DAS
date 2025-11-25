@@ -25,7 +25,7 @@ class Thermocouple:
 
     def __init__(
         self,
-        name: str = "type K thermocouple",
+        name: str = "type_K_thermocouple",
     ):
         self.name = name
 
