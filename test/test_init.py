@@ -193,8 +193,8 @@ def test_expected_export_count():
     """Test that we have the expected number of exports."""
     import shield_das
 
-    # 8 analysis functions + 8 core classes/gauges = 16 total
-    expected_count = 16
+    # 8 analysis functions + 8 core classes/gauges + 5 uploader = 21 total
+    expected_count = 21
     actual_count = len(shield_das.__all__)
 
     assert actual_count == expected_count, (
