@@ -1188,6 +1188,103 @@ def test_data_recorder_metadata_update_preserves_existing_data(recorder):
     assert updated_metadata["run_info"]["run_type"] == original_run_type
 
 
+def test_data_recorder_stop_writes_end_time_to_metadata(recorder):
+    """
+    Test DataRecorder stop method to verify it writes run_info.end_time to
+    the metadata file when recording stops.
+    """
+    recorder.start()
+    time.sleep(0.05)
+
+    recorder.stop()
+
+    metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+    with open(metadata_path) as f:
+        metadata = json.load(f)
+
+    assert "end_time" in metadata["run_info"]
+
+
+def test_data_recorder_stop_end_time_has_expected_format(recorder):
+    """
+    Test DataRecorder stop method to verify the recorded end_time uses the
+    '%Y-%m-%d %H:%M:%S' timestamp format.
+    """
+    recorder.start()
+    time.sleep(0.05)
+
+    recorder.stop()
+
+    metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+    with open(metadata_path) as f:
+        metadata = json.load(f)
+
+    end_time = metadata["run_info"]["end_time"]
+    # Raises ValueError if the format is wrong
+    parsed = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
+    assert isinstance(parsed, datetime)
+
+
+def test_data_recorder_stop_end_time_preserves_existing_metadata(recorder):
+    """
+    Test DataRecorder stop method to confirm writing end_time preserves the
+    existing metadata contents.
+    """
+    recorder.start()
+    time.sleep(0.05)
+
+    recorder.stop()
+
+    metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+    with open(metadata_path) as f:
+        metadata = json.load(f)
+
+    assert metadata["run_info"]["run_type"] == "test_mode"
+    assert "start_time" in metadata["run_info"]
+
+
+def test_data_recorder_stop_does_not_raise_when_metadata_missing(recorder):
+    """
+    Test DataRecorder stop method to verify it does not raise when the
+    metadata file has been removed before stopping.
+    """
+    recorder.start()
+    time.sleep(0.05)
+
+    os.remove(os.path.join(recorder.run_dir, "run_metadata.json"))
+
+    # Should log a warning and return without raising
+    recorder.stop()
+
+    assert not os.path.exists(os.path.join(recorder.run_dir, "run_metadata.json"))
+
+
+def test_data_recorder_stop_does_not_raise_before_start(recorder):
+    """
+    Test DataRecorder stop method to verify it does not raise when called
+    before start(), i.e. when no run directory exists yet.
+    """
+    recorder.stop()
+
+    assert recorder.stop_event.is_set()
+
+
+def test_data_recorder_stop_does_not_raise_on_corrupt_metadata(recorder):
+    """
+    Test DataRecorder stop method to verify it does not raise when the
+    metadata file contains invalid JSON.
+    """
+    recorder.start()
+    time.sleep(0.05)
+
+    metadata_path = os.path.join(recorder.run_dir, "run_metadata.json")
+    with open(metadata_path, "w") as f:
+        f.write("not valid json {")
+
+    # Should log a warning and return without raising
+    recorder.stop()
+
+
 # =============================================================================
 # Tests for Helper Methods
 # =============================================================================
