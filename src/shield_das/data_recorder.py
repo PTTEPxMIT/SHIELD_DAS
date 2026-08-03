@@ -432,9 +432,43 @@ class DataRecorder:
         if self.thread:
             self.thread.join(timeout=1.0)
 
+        # Record the end time of the run in the metadata file
+        self._update_metadata_with_end_time()
+
         # Clean up keyboard listeners
         if not self._is_ci_environment():
             keyboard.unhook_all()
+
+    def _update_metadata_with_end_time(self):
+        """Update the metadata file with the run end time.
+
+        Writes ``run_info.end_time`` (format ``%Y-%m-%d %H:%M:%S``) into
+        ``run_metadata.json`` in the run directory. If the metadata file is
+        missing or unreadable (e.g. stop() called before start()), a warning
+        is printed and no exception is raised.
+        """
+        end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        run_dir = getattr(self, "run_dir", None)
+        if run_dir is None:
+            print("Warning: no run directory; end_time not written to metadata")
+            return
+
+        metadata_path = os.path.join(run_dir, "run_metadata.json")
+
+        try:
+            with open(metadata_path) as f:
+                metadata = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"Warning: could not update metadata with end_time: {exc}")
+            return
+
+        metadata["run_info"]["end_time"] = end_time
+
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        print(f"Updated metadata with end_time: {end_time}")
 
     def record_data(self, labjack=None):
         """Record data from all gauges passed to recorder
