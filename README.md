@@ -74,10 +74,10 @@ my_recorder.run()
 
 from shield_das import DataPlotter
 
-data_500C_run1 = "results/08.12/run_2_11h45/"
-data_500C_run2 = "results/08.18/run_2_09h47/"
-data_500C_run3 = "results/08.19/run_2_09h21/"
-data_500C_run4 = "results/08.25/run_1_09h07/"
+data_500C_run1 = "results/25.08.12/run_2_11h45/"
+data_500C_run2 = "results/25.08.18/run_2_09h47/"
+data_500C_run3 = "results/25.08.19/run_2_09h21/"
+data_500C_run4 = "results/25.08.25/run_1_09h07/"
 
 my_plotter = DataPlotter(
     dataset_paths=[data_500C_run1, data_500C_run2, data_500C_run3, data_500C_run4],
