@@ -194,7 +194,7 @@ class DataRecorder:
 
         # Get current date and time
         now = datetime.now()
-        current_date = now.strftime("%m.%d")
+        current_date = now.strftime("%y.%m.%d")
         current_time = now.strftime("%Hh%M")
 
         # Create date directory

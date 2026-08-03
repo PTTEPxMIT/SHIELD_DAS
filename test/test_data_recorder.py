@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -557,13 +558,14 @@ def test_data_recorder_creates_run_directory_in_normal_mode(temp_dir, mock_gauge
 def test_data_recorder_creates_date_subdirectory(recorder):
     """
     Test DataRecorder _create_results_directory to verify it creates a
-    date-based subdirectory (MM.DD format) under the results directory.
+    date-based subdirectory (YY.MM.DD format) under the results directory.
     """
     run_dir = recorder._create_results_directory()
     # Check that run_dir contains a date directory in the path
     path_parts = run_dir.split(os.sep)
     # Should have at least results_dir / date_dir / run_dir
     assert len(path_parts) >= 3
+    assert re.fullmatch(r"\d{2}\.\d{2}\.\d{2}", path_parts[-2])
 
 
 def test_data_recorder_increments_run_numbers(recorder):
