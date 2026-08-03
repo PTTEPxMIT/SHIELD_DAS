@@ -29,6 +29,15 @@ from .pressure_gauge import (
 )
 from .thermocouple import Thermocouple
 
+# Automatic upload of completed runs to SHIELD-Data
+from .uploader import (
+    UploaderConfig,
+    find_completed_runs,
+    normalize_run,
+    push_run,
+    sweep,
+)
+
 __all__ = [
     "Baratron626D_Gauge",
     "CVM211_Gauge",
@@ -37,13 +46,18 @@ __all__ = [
     "Dataset",
     "PressureGauge",
     "Thermocouple",
+    "UploaderConfig",
     "WGM701_Gauge",
     "average_pressure_after_increase",
     "calculate_error_on_pressure_reading",
     "calculate_flux_from_sample",
     "calculate_permeability_from_flux",
     "evaluate_permeability_values",
+    "find_completed_runs",
     "fit_permeability_data",
+    "normalize_run",
+    "push_run",
+    "sweep",
     "voltage_to_pressure",
     "voltage_to_temperature",
 ]

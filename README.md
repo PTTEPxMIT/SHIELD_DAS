@@ -151,3 +151,12 @@ pressure_error = calculate_error_on_pressure_reading(pressure)
 - `evaluate_permeability_values(datasets)` - Extract permeability from multiple datasets
 
 For complete documentation and examples, see **[examples_standalone_analysis.py](examples_standalone_analysis.py)**
+
+## Automatic upload of completed runs
+
+Completed runs can be uploaded automatically from the rig computer to the
+[SHIELD-Data](https://github.com/PTTEPxMIT/SHIELD-Data) repository as pull
+requests, using the `shield-das-upload` command (an idempotent "outbox
+sweeper" suitable for a scheduled task). See
+**[docs/auto_upload.md](docs/auto_upload.md)** for setup: GitHub token,
+config file, and Windows Task Scheduler.

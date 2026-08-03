@@ -26,6 +26,9 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+[project.scripts]
+shield-das-upload = "shield_das.uploader:main"
+
 [project.optional-dependencies]
 test = ["pytest", "pytest-cov", "numpy"]
 lint = ["ruff"]
