@@ -18,6 +18,11 @@ sweep it:
    [PTTEPxMIT/SHIELD-Data](https://github.com/PTTEPxMIT/SHIELD-Data) adding
    the run under `run_data/`, on a branch named `auto/run-<run_key>`.
 
+Runs that are still *in progress* are not the uploader's job — watch those
+live with `shield-das-live` instead (see
+[live_dashboard.md](live_dashboard.md)); once the run ends, the next sweep
+picks it up.
+
 A ledger at `results/.upload_ledger.json` records the sha256 of each uploaded
 CSV, so re-running the sweep uploads nothing new. If a run's CSV content ever
 changes, the changed hash triggers a re-upload that force-updates the same

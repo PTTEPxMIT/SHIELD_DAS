@@ -144,6 +144,15 @@ pressure_error = calculate_error_on_pressure_reading(pressure)
 
 For complete documentation and examples, see **[examples_standalone_analysis.py](examples_standalone_analysis.py)**
 
+## Live run dashboard
+
+While a run is being recorded, `shield-das-live --watch` serves a lightweight
+dashboard for it: upstream/downstream pressure (torr, log scale) and
+temperature on a shared time axis, refreshed by tailing the run's CSV
+incrementally. It binds the LAN by default so the same URL can be viewed
+remotely (e.g. over Tailscale). See
+**[docs/live_dashboard.md](docs/live_dashboard.md)**.
+
 ## Automatic upload of completed runs
 
 Completed runs can be uploaded automatically from the rig computer to the
