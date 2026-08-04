@@ -24,12 +24,7 @@ However, in order to interact with the Labjack, additional drivers are required 
 This is an example of a script that can be used to activate the DAS.
 
 ```python
-from shield_das import (
-    DataRecorder,
-    WGM701_Gauge,
-    CVM211_Gauge,
-    Baratron626D_Gauge
-)
+from shield_das import DataRecorder, WGM701_Gauge, CVM211_Gauge, Baratron626D_Gauge
 
 # Define gauges
 gauge_1 = WGM701_Gauge(
@@ -65,13 +60,11 @@ my_recorder = DataRecorder(
 
 # Start recording
 my_recorder.run()
-
 ```
 
 ## Example data visualisation script
 
 ```python
-
 from shield_das import DataPlotter
 
 data_500C_run1 = "results/25.08.12/run_2_11h45/"
@@ -84,7 +77,6 @@ my_plotter = DataPlotter(
     dataset_names=["500C_run1", "500C_run2", "500C_run3", "500C_run4"],
 )
 my_plotter.start()
-
 ```
 
 ## Standalone Analysis Functions
