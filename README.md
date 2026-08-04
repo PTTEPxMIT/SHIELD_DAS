@@ -113,7 +113,7 @@ from shield_das import voltage_to_temperature
 import numpy as np
 
 tc_voltage_mv = np.array([10.0, 20.0, 30.0])  # millivolts
-local_temp_c = np.array([25.0, 25.0, 25.0])   # cold junction temp
+local_temp_c = np.array([25.0, 25.0, 25.0])  # cold junction temp
 
 temperature = voltage_to_temperature(local_temp_c, tc_voltage_mv)
 print(temperature)  # [270.7, 508.3, 744.9] °C

@@ -15,7 +15,9 @@ requires-python = ">=3.9"
 license = { file = "LICENSE" }
 # pytz: imported by plotly-resampler but missing from its dependency metadata;
 # pandas 3 stopped providing it transitively, breaking fresh installs.
-dependencies = ["LabJackPython", "numpy", "dash", "dash_bootstrap_components", "pandas", "keyboard", "plotly-resampler", "h-transport-materials", "uncertainties", "pytz"]
+# setuptools: pybtex (via h-transport-materials) imports pkg_resources, which
+# setuptools >= 81 no longer ships by default on new Pythons.
+dependencies = ["LabJackPython", "numpy", "dash", "dash_bootstrap_components", "pandas", "keyboard", "plotly-resampler", "h-transport-materials", "uncertainties", "pytz", "setuptools"]
 classifiers = [
     "Natural Language :: English",
     "Topic :: Scientific/Engineering",
