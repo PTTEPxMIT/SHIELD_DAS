@@ -7,11 +7,12 @@ normalises each run into the SHIELD-Data layout
 `PTTEPxMIT/SHIELD-Data <https://github.com/PTTEPxMIT/SHIELD-Data>`_ for each
 new or changed run. A ledger file (``<results_dir>/.upload_ledger.json``)
 keyed by the sha256 of the run's CSV makes the sweep idempotent, so it is safe
-to run repeatedly from a scheduled task.
+to run any number of times.
 
-Uses only the Python standard library plus the ``git`` CLI. See
-``docs/auto_upload.md`` for setup instructions (token, config file, and
-Windows Task Scheduler).
+Run by hand after a run finishes — ``upload_runs.bat`` in the repo root
+double-click-runs it on the rig PC. Uses only the Python standard library plus
+the ``git`` CLI. See ``docs/auto_upload.md`` for setup instructions (token and
+config file).
 """
 
 import argparse
