@@ -255,6 +255,19 @@ def test_normalize_run_converts_csv_to_parquet(results_dir, staging_dir):
     assert pd.api.types.is_datetime64_any_dtype(df["RealTimestamp"])
 
 
+def test_normalize_run_aborts_on_failed_round_trip(
+    results_dir, staging_dir, monkeypatch
+):
+    """A conversion that fails verification raises and removes the parquet."""
+    pd = pytest.importorskip("pandas")
+    run_dir = make_run(results_dir)
+    monkeypatch.setattr(pd, "read_parquet", lambda path: pd.DataFrame())
+    with pytest.raises(RuntimeError, match="round-trip failed"):
+        normalize_run(run_dir, staging_dir)
+    staged = os.path.join(staging_dir, "25.08.01_run_1_10h00")
+    assert not os.path.exists(os.path.join(staged, "measurements.parquet"))
+
+
 def test_normalize_run_leaves_source_csv_untouched(results_dir, staging_dir):
     """The rig's own shield_data.csv is never modified by staging."""
     run_dir = make_run(results_dir)
