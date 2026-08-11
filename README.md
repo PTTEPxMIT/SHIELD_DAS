@@ -19,12 +19,38 @@ pip install SHIELD-DAS
 However, in order to interact with the Labjack, additional drivers are required from the [manufacturers site](https://support.labjack.com/docs/windows-setup-basic-driver-only).
 
 
-## Example data recording script
+## Recording a run
 
-This is an example of a script that can be used to activate the DAS.
+The easiest way to record a run is **[record_run.py](record_run.py)**:
+
+1. Open `record_run.py` and edit the settings in the **"EDIT ME"** block at the
+   top: furnace setpoint (°C), sample material and thickness (m), run type, and
+   recording/backup intervals. The gauge and thermocouple wiring lower down only
+   needs changing if the rig wiring changes.
+2. Run the script (the Run button in VS Code, or `python record_run.py`).
+   A new run directory is created automatically at
+   `results/<date>/run_<n>_<time>/`, containing the run metadata and
+   `shield_data.csv`, with rolling backup CSVs alongside.
+3. During the run, press **SPACEBAR** at each valve event. The recorder prompts
+   for them in sequence — V4 close, V5 close, V6 close, V3 open — and stores
+   each timestamp in the run metadata.
+4. To watch the run live, see the [live dashboard](#live-run-dashboard) below.
+5. Stop recording with **Ctrl+C**. Data is written continuously, so nothing is
+   lost on stop. Afterwards, upload the run with `upload_runs.bat` (see
+   [below](#uploading-completed-runs)).
+
+To test the DAS without the rig hardware, set `RUN_TYPE = "test_mode"`.
+
+Alternatively, an equivalent script can be written from scratch:
 
 ```python
-from shield_das import DataRecorder, WGM701_Gauge, CVM211_Gauge, Baratron626D_Gauge
+from shield_das import (
+    Baratron626D_Gauge,
+    CVM211_Gauge,
+    DataRecorder,
+    Thermocouple,
+    WGM701_Gauge,
+)
 
 # Define gauges
 gauge_1 = WGM701_Gauge(
@@ -38,24 +64,29 @@ gauge_2 = CVM211_Gauge(
 gauge_3 = Baratron626D_Gauge(
     name="Baratron626D_1KT",
     gauge_location="upstream",
-    full_scale_torr=1000,
+    full_scale_Torr=1000,
     ain_channel=6,
 )
 gauge_4 = Baratron626D_Gauge(
     name="Baratron626D_1T",
     gauge_location="downstream",
-    full_scale_torr=1,
+    full_scale_Torr=1,
     ain_channel=4,
 )
+
+# Define thermocouple
+thermocouple_1 = Thermocouple()
 
 # Create recorder
 my_recorder = DataRecorder(
     gauges=[gauge_1, gauge_2, gauge_3, gauge_4],
     thermocouples=[thermocouple_1],
+    furnace_setpoint=500,
+    sample_material="316",
+    sample_thickness=0.001,
     run_type="test_mode",
     recording_interval=0.5,
     backup_interval=5,
-    furnace_setpoint=500,
 )
 
 # Start recording
