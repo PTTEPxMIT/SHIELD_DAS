@@ -153,11 +153,12 @@ incrementally. It binds the LAN by default so the same URL can be viewed
 remotely (e.g. over Tailscale). See
 **[docs/live_dashboard.md](docs/live_dashboard.md)**.
 
-## Automatic upload of completed runs
+## Uploading completed runs
 
-Completed runs can be uploaded automatically from the rig computer to the
-[SHIELD-Data](https://github.com/PTTEPxMIT/SHIELD-Data) repository as pull
-requests, using the `shield-das-upload` command (an idempotent "outbox
-sweeper" suitable for a scheduled task). See
-**[docs/auto_upload.md](docs/auto_upload.md)** for setup: GitHub token,
-config file, and Windows Task Scheduler.
+After a run finishes, double-click **`upload_runs.bat`** on the rig computer
+to upload it to the
+[SHIELD-Data](https://github.com/PTTEPxMIT/SHIELD-Data) repository as a pull
+request. It wraps the `shield-das-upload` command (an idempotent "outbox
+sweeper" — already-uploaded runs are skipped, so it is safe to run any time).
+See **[docs/auto_upload.md](docs/auto_upload.md)** for the one-time setup:
+GitHub token and config file.

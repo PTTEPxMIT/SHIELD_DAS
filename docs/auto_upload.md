@@ -1,7 +1,9 @@
-# Automatic run upload to SHIELD-Data
+# Uploading completed runs to SHIELD-Data
 
-`shield-das-upload` is an "outbox sweeper" that runs on the rig computer. Each
-sweep it:
+`shield-das-upload` is an "outbox sweeper" that is run by hand on the rig
+computer whenever there are finished runs to upload — after a run ends,
+double-click `upload_runs.bat` in the repo root (or run the command in a
+terminal). Each sweep it:
 
 1. Scans the local `results/` directory for **completed** runs — runs that are
    not test-mode (`test_run_*`), have either a `run_info.end_time` in
@@ -41,9 +43,9 @@ SHIELD-Data:
    repositories* → `SHIELD-Data`.
 3. **Repository permissions**: `Contents` → *Read and write*, and
    `Pull requests` → *Read and write*. Nothing else.
-4. Set an expiry (maximum is about one year). Put a reminder in the lab
-   calendar — when the token expires, uploads silently stop and the sweep
-   logs authentication errors until a new token is configured.
+4. Set an expiry (maximum is about one year). When the token expires the
+   sweep fails with authentication errors until a new token is configured —
+   generate a fresh token the same way and update wherever it is stored.
 
 Provide the token to the uploader either via the environment variable
 `SHIELD_UPLOAD_TOKEN` (preferred) or the `token` key in the config file. The
@@ -68,31 +70,25 @@ All keys are optional; `staging_dir` defaults to
 
 ## Running it
 
+On the rig PC, double-click **`upload_runs.bat`** in the repo root after a run
+finishes. It runs a sweep, prints one PR URL per uploaded run, and keeps the
+window open so any errors can be read. The script looks for
+`shield-das-upload` in the repo's `.venv` first, then on the PATH.
+
+From a terminal, the equivalent commands are:
+
 ```bash
 shield-das-upload --dry-run   # show what would be uploaded, no network
 shield-das-upload             # sweep and open PRs
 shield-das-upload --config C:/SHIELD/uploader.json
 ```
 
-## Windows Task Scheduler setup
+Set `SHIELD_UPLOAD_TOKEN` as a *user* environment variable (System Properties
+→ Environment Variables) so the double-clicked script can see it, or put the
+token in the config file.
 
-On the rig PC, schedule a sweep every 5 minutes (run from an elevated prompt):
-
-```bat
-schtasks /Create /TN "SHIELD run upload" /SC MINUTE /MO 5 ^
-    /TR "C:\path\to\python-env\Scripts\shield-das-upload.exe" /F
-```
-
-Point `/TR` at the `shield-das-upload` executable inside the Python
-environment where SHIELD_DAS is installed. Set `SHIELD_UPLOAD_TOKEN` as a
-*system* environment variable (System Properties → Environment Variables) so
-the scheduled task can see it, or put the token in the config file readable
-only by the task's user. Check the task with `schtasks /Query /TN
-"SHIELD run upload"` and remove it with `schtasks /Delete /TN
-"SHIELD run upload" /F`.
-
-Because the sweep is idempotent, a 5-minute cadence is safe: most sweeps find
-nothing to do and exit immediately.
+Running the sweep more often than needed is harmless: it is idempotent, so a
+sweep with nothing new to upload does nothing and exits.
 
 ## How this interacts with SHIELD-Data CI
 
