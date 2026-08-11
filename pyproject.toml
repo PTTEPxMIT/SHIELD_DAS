@@ -17,7 +17,7 @@ license = { file = "LICENSE" }
 # pandas 3 stopped providing it transitively, breaking fresh installs.
 # setuptools<81: pybtex (via h-transport-materials) imports pkg_resources,
 # which newer setuptools removed; 80.x is the last line that ships it.
-dependencies = ["LabJackPython", "numpy", "dash", "dash_bootstrap_components", "pandas", "keyboard", "plotly-resampler", "h-transport-materials", "uncertainties", "pytz", "setuptools<81"]
+dependencies = ["LabJackPython", "numpy", "dash", "dash_bootstrap_components", "pandas", "pyarrow", "keyboard", "plotly-resampler", "h-transport-materials", "uncertainties", "pytz", "setuptools<81"]
 classifiers = [
     "Natural Language :: English",
     "Topic :: Scientific/Engineering",

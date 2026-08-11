@@ -11,11 +11,12 @@ terminal). Each sweep it:
    `min_age_minutes`, and lasted at least `min_duration_minutes` (first to
    last CSV timestamp).
 2. Normalises each run into the SHIELD-Data layout: a staged copy named
-   `YY.MM.DD_run_N_HHhMM/` with `shield_data.csv` renamed to
-   `pressure_gauge_data.csv`, `run_metadata.json` alongside it, and the
-   `backup/` directory excluded. Both old (`MM.DD`) and new (`YY.MM.DD`)
-   local date-directory formats are handled; the year for old-style
-   directories comes from `run_info.date`.
+   `YY.MM.DD_run_N_HHhMM/` with `shield_data.csv` converted to a
+   zstd-compressed `measurements.parquet` (~10x smaller; the conversion is
+   verified as an exact round-trip and the rig's own CSV is never touched),
+   `run_metadata.json` alongside it, and the `backup/` directory excluded.
+   Both old (`MM.DD`) and new (`YY.MM.DD`) local date-directory formats are
+   handled; the year for old-style directories comes from `run_info.date`.
 3. Opens a pull request on
    [PTTEPxMIT/SHIELD-Data](https://github.com/PTTEPxMIT/SHIELD-Data) adding
    the run under `run_data/`, on a branch named `auto/run-<run_key>`.
