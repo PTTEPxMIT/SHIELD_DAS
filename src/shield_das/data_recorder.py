@@ -28,8 +28,12 @@ class DataRecorder:
             if in test mode, runs without actual hardware interaction
         recording_interval: Time interval (seconds) between recordings, defaults to 0.5s
         backup_interval: How often to backup data (seconds)
-        sample_material: Material of the sample being tested, either "316" or
-            "AISI 1018"
+        sample_substrate: Substrate material of the sample being tested, e.g.
+            "carbon steel" or "316L steel"
+        sample_coating: Coating layers on the substrate, ordered as named on
+            the sample, each a dict with keys "material" (full name, e.g.
+            "tungsten") and "thickness_nm" (nm). Use an empty list for an
+            uncoated sample.
         sample_thickness: Thickness of the sample being tested in meters
 
     Attributes:
@@ -42,8 +46,9 @@ class DataRecorder:
         recording_interval: Time interval (in seconds) between recordings, defaults to
             0.5 seconds
         backup_interval: How often to rotate backup CSV files (seconds)
-        sample_material: Material of the sample being tested, either "316" or
-            "AISI 1018"
+        sample_substrate: Substrate material of the sample being tested
+        sample_coating: Coating layers on the substrate (list of dicts with
+            "material" and "thickness_nm"); empty list for an uncoated sample
         sample_thickness: Thickness of the sample being tested in meters
         stop_event: Event to control the recording thread
         thread: Thread for recording data
@@ -65,7 +70,8 @@ class DataRecorder:
     run_type: str
     recording_interval: float
     backup_interval: float
-    sample_material: str
+    sample_substrate: str
+    sample_coating: list[dict]
     sample_thickness: float
 
     stop_event: threading.Event
@@ -86,7 +92,8 @@ class DataRecorder:
         gauges: list[PressureGauge],
         thermocouples: list[Thermocouple],
         furnace_setpoint: float,
-        sample_material: str,
+        sample_substrate: str,
+        sample_coating: list[dict],
         sample_thickness: float,
         results_dir: str = "results",
         run_type="permeation_exp",
@@ -100,7 +107,8 @@ class DataRecorder:
         self.run_type = run_type
         self.recording_interval = recording_interval
         self.backup_interval = backup_interval
-        self.sample_material = sample_material
+        self.sample_substrate = sample_substrate
+        self.sample_coating = sample_coating
         self.sample_thickness = sample_thickness
 
         # Thread control
@@ -176,16 +184,56 @@ class DataRecorder:
         return self.run_type == "test_mode"
 
     @property
-    def sample_material(self) -> str:
-        return self._sample_material
+    def sample_substrate(self) -> str:
+        return self._sample_substrate
 
-    @sample_material.setter
-    def sample_material(self, value: str):
-        if value is None:
-            self._sample_material = value
-        elif value not in ["316", "AISI 1018"]:
-            raise ValueError("sample_material must be one of '316L', or '316'")
-        self._sample_material = value
+    @sample_substrate.setter
+    def sample_substrate(self, value: str):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                "sample_substrate must be a non-empty string, e.g. "
+                "'carbon steel' or '316L steel'"
+            )
+        self._sample_substrate = value
+
+    @property
+    def sample_coating(self) -> list[dict]:
+        return self._sample_coating
+
+    @sample_coating.setter
+    def sample_coating(self, value: list[dict]):
+        if not isinstance(value, list):
+            raise ValueError(
+                "sample_coating must be a list of layers, each "
+                "{'material': str, 'thickness_nm': float}; use [] for an "
+                "uncoated sample"
+            )
+        for layer in value:
+            if (
+                not isinstance(layer, dict)
+                or not isinstance(layer.get("material"), str)
+                or not layer["material"].strip()
+                or not isinstance(layer.get("thickness_nm"), int | float)
+                or isinstance(layer.get("thickness_nm"), bool)
+                or layer["thickness_nm"] <= 0
+            ):
+                raise ValueError(
+                    "each sample_coating layer must be a dict with a non-empty "
+                    "'material' string (full name, e.g. 'tungsten') and a "
+                    "positive 'thickness_nm' number"
+                )
+        self._sample_coating = value
+
+    @property
+    def sample_coating_summary(self) -> str:
+        """Human-readable coating description, e.g. "800nm tungsten" or
+        "200nm tungsten + 50nm chromium"; "none" for an uncoated sample."""
+        if not self.sample_coating:
+            return "none"
+        return " + ".join(
+            f"{layer['thickness_nm']:g}nm {layer['material']}"
+            for layer in self.sample_coating
+        )
 
     def _create_results_directory(self):
         """Creates a new directory for results based on date and run number."""
@@ -258,7 +306,7 @@ class DataRecorder:
     def _create_metadata_file(self):
         """Create a JSON metadata file with run information."""
         metadata = {
-            "version": "1.3",
+            "version": "1.4",
             "run_info": {
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -266,7 +314,9 @@ class DataRecorder:
                 "furnace_setpoint": self.furnace_setpoint,
                 "recording_interval_seconds": self.recording_interval,
                 "backup_interval_seconds": self.backup_interval,
-                "sample_material": self.sample_material,
+                "sample_substrate": self.sample_substrate,
+                "sample_coating": self.sample_coating_summary,
+                "sample_coating_layers": self.sample_coating,
                 "sample_thickness": self.sample_thickness,
                 "data_filename": "shield_data.csv",
             },

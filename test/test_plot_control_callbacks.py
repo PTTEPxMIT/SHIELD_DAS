@@ -15,7 +15,6 @@ from shield_das.callbacks.plot_control_callbacks import (
     register_plot_control_callbacks,
 )
 
-
 # =============================================================================
 # Tests for _normalize_range_values
 # =============================================================================

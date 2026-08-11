@@ -56,11 +56,42 @@ my_recorder = DataRecorder(
     recording_interval=0.5,
     backup_interval=5,
     furnace_setpoint=500,
+    sample_substrate="carbon steel",
+    sample_coating=[{"material": "tungsten", "thickness_nm": 800}],
+    sample_thickness=0.00065,
 )
 
 # Start recording
 my_recorder.run()
 ```
+
+### Describing the sample
+
+Every run must record what was mounted on the rig:
+
+- `sample_substrate` — the substrate material, spelled out in full, e.g.
+  `"carbon steel"`, `"316L steel"`.
+- `sample_coating` — the coating as a list of layers, ordered as named on the
+  sample. Each layer is `{"material": ..., "thickness_nm": ...}` with the
+  material spelled out in full (`"tungsten"`, `"silicon carbide"`,
+  `"chromium"`, `"alumina"` — not `"W"`, `"SiC"`). Pass an empty list `[]`
+  for an uncoated sample. A two-layer stack looks like:
+
+  ```python
+  sample_coating=[
+      {"material": "tungsten", "thickness_nm": 200},
+      {"material": "chromium", "thickness_nm": 50},
+  ]
+  ```
+
+- `sample_thickness` — the substrate thickness in metres.
+
+The recorder writes these to `run_metadata.json` (schema version 1.4) as
+`sample_substrate`, `sample_coating_layers` (the list above), and
+`sample_coating` — a derived human-readable summary such as
+`"800nm tungsten"`, `"200nm tungsten + 50nm chromium"`, or `"none"` for an
+uncoated sample. Versions ≤ 1.3 recorded a single `sample_material` field
+instead; readers treat that as the substrate.
 
 ## Example data visualisation script
 
