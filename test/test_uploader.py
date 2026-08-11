@@ -238,12 +238,45 @@ def test_normalize_run_creates_staged_directory(results_dir, staging_dir):
     assert os.path.isdir(staged)
 
 
-def test_normalize_run_renames_csv(results_dir, staging_dir):
-    """shield_data.csv is renamed to pressure_gauge_data.csv."""
+def test_normalize_run_converts_csv_to_parquet(results_dir, staging_dir):
+    """shield_data.csv is converted to measurements.parquet, exactly."""
+    pd = pytest.importorskip("pandas")
     run_dir = make_run(results_dir)
     staged = normalize_run(run_dir, staging_dir)
-    assert os.path.isfile(os.path.join(staged, "pressure_gauge_data.csv"))
+    parquet = os.path.join(staged, "measurements.parquet")
+    assert os.path.isfile(parquet)
     assert not os.path.exists(os.path.join(staged, "shield_data.csv"))
+    assert not os.path.exists(os.path.join(staged, "pressure_gauge_data.csv"))
+
+    df = pd.read_parquet(parquet)
+    source = pd.read_csv(os.path.join(run_dir, "shield_data.csv"))
+    assert len(df) == len(source)
+    assert df["TestGauge_Voltage (V)"].equals(source["TestGauge_Voltage (V)"])
+    assert pd.api.types.is_datetime64_any_dtype(df["RealTimestamp"])
+
+
+def test_normalize_run_aborts_on_failed_round_trip(
+    results_dir, staging_dir, monkeypatch
+):
+    """A conversion that fails verification raises and removes the parquet."""
+    pd = pytest.importorskip("pandas")
+    run_dir = make_run(results_dir)
+    monkeypatch.setattr(pd, "read_parquet", lambda path: pd.DataFrame())
+    with pytest.raises(RuntimeError, match="round-trip failed"):
+        normalize_run(run_dir, staging_dir)
+    staged = os.path.join(staging_dir, "25.08.01_run_1_10h00")
+    assert not os.path.exists(os.path.join(staged, "measurements.parquet"))
+
+
+def test_normalize_run_leaves_source_csv_untouched(results_dir, staging_dir):
+    """The rig's own shield_data.csv is never modified by staging."""
+    run_dir = make_run(results_dir)
+    csv_path = os.path.join(run_dir, "shield_data.csv")
+    with open(csv_path, "rb") as f:
+        before = f.read()
+    normalize_run(run_dir, staging_dir)
+    with open(csv_path, "rb") as f:
+        assert f.read() == before
 
 
 def test_normalize_run_copies_metadata(results_dir, staging_dir):
@@ -527,8 +560,8 @@ def test_push_run_copies_run_into_run_data(config, staged_run, monkeypatch):
         if "add" in cmd:
             repo_dir = cmd[cmd.index("-C") + 1]
             staged_copy = os.path.join(repo_dir, "run_data", "25.08.01_run_1_10h00")
-            seen["csv"] = os.path.isfile(
-                os.path.join(staged_copy, "pressure_gauge_data.csv")
+            seen["parquet"] = os.path.isfile(
+                os.path.join(staged_copy, "measurements.parquet")
             )
             seen["metadata"] = os.path.isfile(
                 os.path.join(staged_copy, "run_metadata.json")
@@ -543,7 +576,7 @@ def test_push_run_copies_run_into_run_data(config, staged_run, monkeypatch):
 
     push_run(staged_run, config)
 
-    assert seen == {"csv": True, "metadata": True}
+    assert seen == {"parquet": True, "metadata": True}
 
 
 def test_push_run_never_exposes_token_on_git_failure(

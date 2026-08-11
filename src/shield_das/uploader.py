@@ -2,17 +2,18 @@
 
 Scans the local ``results/`` directory for completed (non test-mode) runs,
 normalises each run into the SHIELD-Data layout
-(``run_data/YY.MM.DD_run_N_HHhMM/`` with the CSV renamed to
-``pressure_gauge_data.csv``), and opens a pull request against
+(``run_data/YY.MM.DD_run_N_HHhMM/`` with the CSV converted to a
+zstd-compressed ``measurements.parquet``), and opens a pull request against
 `PTTEPxMIT/SHIELD-Data <https://github.com/PTTEPxMIT/SHIELD-Data>`_ for each
 new or changed run. A ledger file (``<results_dir>/.upload_ledger.json``)
-keyed by the sha256 of the run's CSV makes the sweep idempotent, so it is safe
-to run any number of times.
+keyed by the sha256 of the run's source CSV makes the sweep idempotent, so it
+is safe to run any number of times.
 
 Run by hand after a run finishes — ``upload_runs.bat`` in the repo root
-double-click-runs it on the rig PC. Uses only the Python standard library plus
-the ``git`` CLI. See ``docs/auto_upload.md`` for setup instructions (token and
-config file).
+double-click-runs it on the rig PC. The conversion is verified as an exact
+round-trip (row counts, columns, bit-identical values) before the staged copy
+is pushed; the rig's own append-mode CSV is never touched. See
+``docs/auto_upload.md`` for setup instructions (token and config file).
 """
 
 import argparse
@@ -35,8 +36,12 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".shield_das_uploader.json")
 LEDGER_FILENAME = ".upload_ledger.json"
 DATA_CSV_NAME = "shield_data.csv"
-UPLOAD_CSV_NAME = "pressure_gauge_data.csv"
+UPLOAD_CSV_NAME = "pressure_gauge_data.csv"  # legacy upload name, pre-Parquet
+UPLOAD_PARQUET_NAME = "measurements.parquet"
 METADATA_NAME = "run_metadata.json"
+TIMESTAMP_COLUMN = "RealTimestamp"
+PARQUET_COMPRESSION = "zstd"
+PARQUET_COMPRESSION_LEVEL = 9
 TOKEN_ENV_VAR = "SHIELD_UPLOAD_TOKEN"
 
 # Date directories: old rigs use MM.DD, newer ones YY.MM.DD
@@ -304,13 +309,61 @@ def run_key(run_dir: str) -> str:
     return f"{date_part}_{run_name}"
 
 
+def _convert_csv_to_parquet(csv_path: str, parquet_path: str) -> None:
+    """Convert a run CSV to zstd-compressed Parquet, verifying exactness.
+
+    Timestamps are parsed to datetime64; every other column is carried
+    bit-identically. The written file is read back and compared against the
+    source before the function returns — a mismatch raises and removes the
+    Parquet file.
+
+    Args:
+        csv_path: Source shield_data.csv.
+        parquet_path: Destination Parquet file.
+
+    Raises:
+        RuntimeError: If the round-trip verification fails.
+    """
+    # Deliberately imported here: the uploader is stdlib-only except for this
+    # conversion, so --help/--dry-run never need pandas installed.
+    import pandas as pd
+
+    df = pd.read_csv(csv_path)
+    if TIMESTAMP_COLUMN in df.columns:
+        df[TIMESTAMP_COLUMN] = pd.to_datetime(df[TIMESTAMP_COLUMN], format="mixed")
+
+    df.to_parquet(
+        parquet_path,
+        index=False,
+        compression=PARQUET_COMPRESSION,
+        compression_level=PARQUET_COMPRESSION_LEVEL,
+    )
+
+    back = pd.read_parquet(parquet_path)
+    problems = []
+    if len(back) != len(df):
+        problems.append(f"row count {len(back)} != {len(df)}")
+    elif list(back.columns) != list(df.columns):
+        problems.append("column mismatch")
+    else:
+        for col in df.columns:
+            if not df[col].equals(back[col].astype(df[col].dtype)):
+                problems.append(f"value mismatch in {col!r}")
+    if problems:
+        os.unlink(parquet_path)
+        raise RuntimeError(
+            f"Parquet round-trip failed for {csv_path}: {'; '.join(problems)}"
+        )
+
+
 def normalize_run(run_dir: str, staging_dir: str) -> str:
     """Copy a run into the staging directory in the SHIELD-Data layout.
 
     Creates ``<staging_dir>/YY.MM.DD_run_N_HHhMM/`` containing the run's
-    files with ``shield_data.csv`` renamed to ``pressure_gauge_data.csv``.
-    The ``backup/`` subdirectory is excluded. Any existing staged copy of the
-    same run is replaced.
+    files with ``shield_data.csv`` converted to a zstd-compressed
+    ``measurements.parquet`` (verified as an exact round-trip; the source CSV
+    in ``results/`` is never modified). The ``backup/`` subdirectory is
+    excluded. Any existing staged copy of the same run is replaced.
 
     Args:
         run_dir: Path to the source run directory.
@@ -328,7 +381,8 @@ def normalize_run(run_dir: str, staging_dir: str) -> str:
     shutil.copytree(run_dir, staged, ignore=shutil.ignore_patterns("backup"))
 
     csv_src = os.path.join(staged, DATA_CSV_NAME)
-    os.replace(csv_src, os.path.join(staged, UPLOAD_CSV_NAME))
+    _convert_csv_to_parquet(csv_src, os.path.join(staged, UPLOAD_PARQUET_NAME))
+    os.unlink(csv_src)
     return staged
 
 
@@ -535,8 +589,9 @@ def push_run(staged_dir: str, config: UploaderConfig) -> str:
                 "base": "main",
                 "body": (
                     f"Auto-uploaded from the SHIELD rig by `shield-das-upload`.\n\n"
-                    f"Run `{key}` recorded by SHIELD_DAS; CSV renamed to "
-                    f"`{UPLOAD_CSV_NAME}`, `backup/` excluded."
+                    f"Run `{key}` recorded by SHIELD_DAS; CSV converted to "
+                    f"`{UPLOAD_PARQUET_NAME}` (verified exact round-trip), "
+                    f"`backup/` excluded."
                 ),
             },
         )
