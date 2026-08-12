@@ -19,12 +19,53 @@ pip install SHIELD-DAS
 However, in order to interact with the Labjack, additional drivers are required from the [manufacturers site](https://support.labjack.com/docs/windows-setup-basic-driver-only).
 
 
+## Running an experiment on the rig
+
+The repo root contains **`record_run.py`**, a ready-made recording script
+wired for the rig's standard gauge setup — no code needs to be written to
+start a run. A full run looks like:
+
+1. **Describe the run** — open `record_run.py` and edit the "EDIT PER RUN"
+   block: furnace setpoint, sample substrate, coating layers, sample
+   thickness (see [Describing the sample](#describing-the-sample)) and the
+   run type. Leave the gauge setup below that block alone unless the rig
+   wiring has changed.
+2. **Start recording** — double-click **`start_run.bat`** (or run
+   `python record_run.py` from the repo root). A new timestamped run
+   directory is created under `results/` and readings start immediately.
+3. **Watch it live (optional)** — run `shield-das-live --watch` in another
+   terminal to serve a live dashboard of the run
+   (see [Live run dashboard](#live-run-dashboard)).
+4. **Mark the valve events** — press SPACEBAR at each valve event, in
+   order: V4 close, V5 close, V6 close, V3 open. The script prompts for the
+   next event after each press. Note the spacebar hotkey is *global* — it
+   fires even when another window has focus, so don't type in other windows
+   with the spacebar between valve events.
+5. **Stop the run** — press Ctrl+C in the recording window. This is what
+   writes `end_time` into `run_metadata.json`, so always stop with Ctrl+C
+   rather than closing the window. (If Windows then asks
+   "Terminate batch job (Y/N)?", answer N to keep the output readable.)
+6. **Upload the run** — double-click **`upload_runs.bat`** to open a pull
+   request on SHIELD-Data with the run's data
+   (see [docs/auto_upload.md](docs/auto_upload.md)).
+
+To rehearse this loop without the rig, set `run_type = "test_mode"` in
+`record_run.py`: the recorder then runs without a LabJack attached,
+generating dummy readings. Test runs are written to `test_run_*` directories
+and are never uploaded.
+
 ## Example data recording script
 
 This is an example of a script that can be used to activate the DAS.
 
 ```python
-from shield_das import DataRecorder, WGM701_Gauge, CVM211_Gauge, Baratron626D_Gauge
+from shield_das import (
+    Baratron626D_Gauge,
+    CVM211_Gauge,
+    DataRecorder,
+    Thermocouple,
+    WGM701_Gauge,
+)
 
 # Define gauges
 gauge_1 = WGM701_Gauge(
@@ -38,15 +79,18 @@ gauge_2 = CVM211_Gauge(
 gauge_3 = Baratron626D_Gauge(
     name="Baratron626D_1KT",
     gauge_location="upstream",
-    full_scale_torr=1000,
+    full_scale_Torr=1000,
     ain_channel=6,
 )
 gauge_4 = Baratron626D_Gauge(
     name="Baratron626D_1T",
     gauge_location="downstream",
-    full_scale_torr=1,
+    full_scale_Torr=1,
     ain_channel=4,
 )
+
+# Define thermocouple
+thermocouple_1 = Thermocouple()
 
 # Create recorder
 my_recorder = DataRecorder(
@@ -173,7 +217,8 @@ pressure_error = calculate_error_on_pressure_reading(pressure)
 - `average_pressure_after_increase(time, pressure)` - Detect stable pressure after transient
 - `evaluate_permeability_values(datasets)` - Extract permeability from multiple datasets
 
-For complete documentation and examples, see **[examples_standalone_analysis.py](examples_standalone_analysis.py)**
+For complete documentation, see the docstrings in
+[`src/shield_das/analysis.py`](src/shield_das/analysis.py).
 
 ## Live run dashboard
 
