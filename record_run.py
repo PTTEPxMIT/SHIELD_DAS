@@ -7,8 +7,11 @@ setpoint, then run this script on the rig computer:
 
 During recording, press the spacebar at each valve event, in order:
 V4 close, V5 close, V6 close, V3 open. Results are written to a new
-timestamped directory under ``results/``.
+timestamped directory under ``results/`` next to this script, regardless
+of the directory the script is launched from.
 """
+
+from pathlib import Path
 
 from shield_das import (
     Baratron626D_Gauge,
@@ -66,6 +69,10 @@ recorder = DataRecorder(
     run_type=run_type,
     recording_interval=0.5,  # s between readings
     backup_interval=5.0,  # s between backup CSV rotations
+    # Anchor results next to this script so the live dashboard and the
+    # uploader (which both default to SHIELD_DAS/results/) find the runs
+    # no matter where the script is launched from.
+    results_dir=str(Path(__file__).parent / "results"),
 )
 
 recorder.run()
