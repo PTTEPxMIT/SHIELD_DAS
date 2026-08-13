@@ -8,6 +8,23 @@ This is a tool to be used with the SHIELD hydrogen permeation rig, providing a w
 
 <img width="1901" height="900" alt="Image" src="https://github.com/user-attachments/assets/4cbdcaeb-0226-4381-a8f3-61f411e6f0aa" />
 
+## The SHIELD software stack
+
+This repo is one of three that make up the SHIELD software stack:
+
+| Repo | Package | Role in the data flow |
+|------|---------|-----------------------|
+| **SHIELD_DAS** (this repo) | `shield_das` | **Records** rig data (LabJack + live Dash UI) |
+| [`SHIELD-Data`](https://github.com/PTTEPxMIT/SHIELD-Data) | `shield_data` | **Stores & serves** uploaded runs |
+| [`SHIELD-toolbox`](https://github.com/PTTEPxMIT/SHIELD-toolbox) | `shield_toolbox` | **Processes** the served data (analysis package + notebooks) |
+
+**Data flow:** DAS records → Data stores/serves → toolbox processes.
+
+This README covers recording a run, watching it live, and uploading it. For
+how to *process* recorded data — time-lag analysis extracting permeability,
+diffusivity, and solubility — see the
+[SHIELD-toolbox](https://github.com/PTTEPxMIT/SHIELD-toolbox) README.
+
 ## Installation
 
 The shield DAS package can be downloaded with `pip`
@@ -156,6 +173,11 @@ my_plotter.start()
 
 ## Standalone Analysis Functions
 
+> **Note:** full processing of recorded runs (time-lag analysis for
+> permeability, diffusivity, and solubility) lives in
+> [SHIELD-toolbox](https://github.com/PTTEPxMIT/SHIELD-toolbox). The functions
+> below are the DAS-side conversion and quick-look helpers used by the plotter.
+
 SHIELD_DAS provides **analysis functions** that can be used independently without running the full plotter application. This is useful when you want to:
 - Convert raw voltage data to pressure/temperature values
 - Perform custom analysis on experimental data
@@ -238,3 +260,12 @@ request. It wraps the `shield-das-upload` command (an idempotent "outbox
 sweeper" — already-uploaded runs are skipped, so it is safe to run any time).
 See **[docs/auto_upload.md](docs/auto_upload.md)** for the one-time setup:
 GitHub token and config file.
+
+## Processing recorded data
+
+Once a run is uploaded, processing happens downstream of this repo:
+[SHIELD-Data](https://github.com/PTTEPxMIT/SHIELD-Data) stores and serves the
+run, and [SHIELD-toolbox](https://github.com/PTTEPxMIT/SHIELD-toolbox)
+processes it with the time-lag method to extract **permeability, diffusivity,
+and solubility** of the sample and its coatings. See the SHIELD-toolbox README
+for setup and usage.
