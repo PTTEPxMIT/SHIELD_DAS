@@ -147,11 +147,14 @@ For complete documentation and examples, see **[examples_standalone_analysis.py]
 ## Live run dashboard
 
 While a run is being recorded, `shield-das-live --watch` serves a lightweight
-dashboard for it: upstream/downstream pressure (torr, log scale) and
-temperature on a shared time axis, refreshed by tailing the run's CSV
-incrementally. It binds the LAN by default so the same URL can be viewed
-remotely (e.g. over Tailscale). See
-**[docs/live_dashboard.md](docs/live_dashboard.md)**.
+local dashboard for it on the rig PC: upstream/downstream pressure (torr, log
+scale) and temperature on a shared time axis, refreshed by tailing the run's
+CSV incrementally. See **[docs/live_dashboard.md](docs/live_dashboard.md)**.
+
+For viewing the run remotely (no VPN needed), `shield-das-publish` mirrors
+downsampled readings to a free Supabase project and a GitHub Pages site plots
+them live from any browser. See
+**[docs/live_supabase.md](docs/live_supabase.md)**.
 
 ## Uploading completed runs
 
