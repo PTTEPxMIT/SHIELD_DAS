@@ -210,3 +210,35 @@ the publisher: unsent points wait in a bounded buffer (default 20 000 points
 everything), and retries back off from 15 s to 5 min. A paused project shows
 up as repeated `Supabase error`/`unreachable` warnings with a reminder to
 restore it from the dashboard.
+
+## The viewer site (`site/`)
+
+A static page (plain HTML/JS + Plotly, no build step) that anyone can open —
+phone included, no VPN. It polls the mirror every 10 s with the **anon** key
+(read-only via row-level security) and renders the same three stacked panels
+as the on-rig dashboard: upstream pressure (torr, log y), downstream pressure
+(torr, log y), temperature (°C), with a LIVE / STALE / ENDED / WAITING badge
+driven by the server-stamped heartbeat.
+
+First paint backfills up to 4 000 stride-decimated points via the
+`decimated_readings` RPC; after that only new rows are fetched. Traffic is a
+few kB per poll — far inside the free tier's egress allowance.
+
+### Enabling it (one-time, needs repo admin)
+
+1. In the repo settings: *Pages → Build and deployment → Source =
+   GitHub Actions*.
+2. Fill in `site/config.js` with the project URL and the **anon** key (never
+   the service key) and merge; `.github/workflows/deploy_pages.yml` deploys
+   on every push to `main` touching `site/**`.
+3. The dashboard is then at `https://<org>.github.io/SHIELD_DAS/`.
+
+If repo admin rights are unavailable, the `site/` folder is self-contained —
+it can be served from any static host (or a personal repo's Pages) unchanged.
+
+### Smoke test
+
+Start a `run_type="test_mode"` recording, run
+`shield-das-publish --include-test-runs`, and open the page: the badge should
+go LIVE and the three panels should fill in. Stop the recorder with Ctrl+C
+and the badge flips to ENDED within a poll or two.
