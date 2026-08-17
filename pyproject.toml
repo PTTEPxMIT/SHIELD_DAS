@@ -32,6 +32,7 @@ classifiers = [
 
 [project.scripts]
 shield-das-live = "shield_das.live_dashboard:main"
+shield-das-publish = "shield_das.publisher:main"
 shield-das-upload = "shield_das.uploader:main"
 
 [project.optional-dependencies]

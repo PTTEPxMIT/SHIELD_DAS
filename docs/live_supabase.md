@@ -134,3 +134,79 @@ each campaign:
 The publisher tolerates a paused project: it logs the failure, backs off, and
 keeps buffering recent points — but nobody restores the project for you, so
 the pre-campaign check matters.
+
+## The publisher (`shield-das-publish`)
+
+`shield-das-publish` runs on the rig PC next to the recorder (never inside
+it — it only ever reads `shield_data.csv`). It watches `results/` for a live
+run, then every few seconds tails the CSV, keeps one point per
+`sample_period_s` (default 5 s), converts voltages to torr/°C, and posts the
+batch to the mirror together with a heartbeat. Once an hour it asks the
+database to thin data older than `thin_after_hours` to one point per
+`thin_to_seconds`. When the run gains an `end_time` (Ctrl+C on the recorder)
+or its CSV goes stale, the run is marked ENDED and the publisher goes back to
+watching.
+
+It is stateless: safe to restart at any time (it resumes from the newest
+timestamp the server already has), and safe to leave running with no active
+run.
+
+### Rig PC setup
+
+1. Set the service-role key as a **user** environment variable (new terminals
+   pick it up; the config-file `supabase_key` field is the fallback):
+
+   ```bat
+   setx SHIELD_SUPABASE_KEY "<service_role key>"
+   ```
+
+2. Create `%USERPROFILE%\.shield_das_publisher.json`:
+
+   ```json
+   {
+     "supabase_url": "https://<ref>.supabase.co",
+     "results_dir": "C:\\path\\to\\SHIELD_DAS\\results"
+   }
+   ```
+
+   All other keys are optional overrides — see `PublisherConfig` in
+   `src/shield_das/publisher.py` for the full list and defaults.
+
+3. Keep it always armed with a logon task (replaces the old
+   `shield-das-live` task if one exists — remove that with
+   `schtasks /Delete /TN "SHIELD live dashboard" /F`):
+
+   ```bat
+   schtasks /Create /TN "SHIELD publisher" /SC ONLOGON ^
+     /TR "C:\path\to\python\Scripts\shield-das-publish.exe" /F
+   ```
+
+4. Smoke test without touching the mirror: start a `run_type="test_mode"`
+   recording, then
+
+   ```bash
+   shield-das-publish --include-test-runs --dry-run
+   ```
+
+   prints the exact payloads with zero network access. Drop `--dry-run` to
+   publish for real and watch the rows appear in the Supabase table editor.
+
+### Useful flags
+
+| Flag | Meaning |
+| ---- | ------- |
+| `--config PATH` | Alternate config file |
+| `--results-dir DIR` | Override the results directory |
+| `--supabase-url URL` | Override the project URL |
+| `--once` | Exit when the current run ends (default: keep watching) |
+| `--include-test-runs` | Also publish `test_run_*` directories |
+| `--dry-run` | Print payloads instead of sending anything |
+
+### Failure behaviour
+
+Network errors never interrupt recording (different process) and never crash
+the publisher: unsent points wait in a bounded buffer (default 20 000 points
+≈ 28 h at 5 s cadence; beyond that the oldest are dropped — the CSV keeps
+everything), and retries back off from 15 s to 5 min. A paused project shows
+up as repeated `Supabase error`/`unreachable` warnings with a reminder to
+restore it from the dashboard.

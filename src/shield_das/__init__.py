@@ -38,6 +38,13 @@ from .pressure_gauge import (
     PressureGauge,
     WGM701_Gauge,
 )
+
+# Live publisher pushing the active run to the Supabase mirror
+from .publisher import (
+    PublisherConfig,
+    publish_loop,
+    row_to_channels,
+)
 from .thermocouple import Thermocouple
 
 # Automatic upload of completed runs to SHIELD-Data
@@ -59,6 +66,7 @@ __all__ = [
     "IncrementalRunReader",
     "LiveDashboardConfig",
     "PressureGauge",
+    "PublisherConfig",
     "Thermocouple",
     "UploaderConfig",
     "WGM701_Gauge",
@@ -73,7 +81,9 @@ __all__ = [
     "find_completed_runs",
     "fit_permeability_data",
     "normalize_run",
+    "publish_loop",
     "push_run",
+    "row_to_channels",
     "sweep",
     "update_dashboard",
     "voltage_to_pressure",
