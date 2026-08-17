@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SHIELD live run</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f9f9f7;
+      --surface-1: #fcfcfb;
+      --text-primary: #0b0b0b;
+      --text-secondary: #52514e;
+      --text-muted: #898781;
+      --gridline: #e1e0d9;
+      --baseline: #c3c2b7;
+      --border: rgba(11, 11, 11, 0.1);
+      --badge-live: #0ca30c;
+      --badge-stale: #fab219;
+      --badge-ink: #ffffff;
+      --series-1: #2a78d6;
+      --series-2: #eb6834;
+      --series-3: #1baf7a;
+      --series-4: #eda100;
+      --series-5: #e87ba4;
+      --series-6: #008300;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --page: #0d0d0d;
+        --surface-1: #1a1a19;
+        --text-primary: #ffffff;
+        --text-secondary: #c3c2b7;
+        --text-muted: #898781;
+        --gridline: #2c2c2a;
+        --baseline: #383835;
+        --border: rgba(255, 255, 255, 0.1);
+        --series-1: #3987e5;
+        --series-2: #d95926;
+        --series-3: #199e70;
+        --series-4: #c98500;
+        --series-5: #d55181;
+        --series-6: #008300;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text-primary);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.4rem 1.1rem;
+      padding: 0.7rem 1.2rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-1);
+    }
+    header h1 { font-size: 1.05rem; margin: 0; font-weight: 650; }
+    #run-id { color: var(--text-secondary); }
+    #status-badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      padding: 0.15rem 0.55rem;
+      border-radius: 999px;
+      background: var(--text-muted);
+      color: var(--badge-ink);
+    }
+    #status-badge.live { background: var(--badge-live); }
+    #status-badge.stale { background: var(--badge-stale); color: #0b0b0b; }
+    #status-badge.ended { background: var(--text-secondary); }
+    .meta { color: var(--text-muted); font-size: 0.85rem; }
+    #sample-info {
+      flex-basis: 100%;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+    main { max-width: 1200px; margin: 0 auto; padding: 0.8rem 1rem 2rem; }
+    #chart {
+      width: 100%;
+      height: 820px;
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    #message {
+      padding: 3rem 1rem;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 1.05rem;
+    }
+    footer {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 1rem 1.5rem;
+      color: var(--text-muted);
+      font-size: 0.78rem;
+    }
+    footer a { color: inherit; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SHIELD live run</h1>
+    <span id="run-id">—</span>
+    <span id="status-badge">WAITING</span>
+    <span id="elapsed" class="meta"></span>
+    <span id="row-count" class="meta"></span>
+    <span id="sample-info"></span>
+  </header>
+  <main>
+    <div id="message">Connecting…</div>
+    <div id="chart" hidden></div>
+  </main>
+  <footer>
+    Live mirror of the run currently recording on the SHIELD rig — downsampled
+    view; full-rate data lands in
+    <a href="https://github.com/PTTEPxMIT/SHIELD-Data">SHIELD-Data</a> when the
+    run completes. Refreshes every 10&nbsp;s.
+  </footer>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
