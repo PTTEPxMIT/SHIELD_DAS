@@ -33,7 +33,7 @@ Other options:
 ```bash
 shield-das-live --results-dir results   # where runs are recorded
 shield-das-live --port 8051             # serve port (default 8051)
-shield-das-live --host 127.0.0.1        # local-only (default 0.0.0.0)
+shield-das-live --host 0.0.0.0          # expose on the LAN (default 127.0.0.1)
 shield-das-live --interval 2000         # refresh interval, ms
 shield-das-live --max-points 2000       # default plot fidelity
 shield-das-live --no-browser            # don't open a browser
@@ -44,30 +44,19 @@ shield-das-live --include-test-runs     # also monitor test_run_* dirs
 start a recorder with `run_type="test_mode"` and the dashboard will pick up
 the resulting `test_run_*` directory.
 
-## Keeping it always armed on the rig PC
+## Keeping the rig armed for remote viewing
 
-Register a logon task on the rig PC so the dashboard is waiting whenever a
-run starts (no elevation needed for a per-user logon task):
+The always-on logon task on the rig PC now runs the Supabase publisher, not
+this dashboard — remote viewers use the GitHub Pages site instead of
+connecting to the rig (see [live_supabase.md](live_supabase.md) for the task
+definition and the rest of that setup). If an old
+`"SHIELD live dashboard"` logon task is still registered, remove it with
+`schtasks /Delete /TN "SHIELD live dashboard" /F`.
 
-```bat
-schtasks /Create /TN "SHIELD live dashboard" /SC ONLOGON ^
-    /TR "C:\path\to\python-env\Scripts\shield-das-live.exe --watch --no-browser" /F
-```
-
-Point `/TR` at the `shield-das-live` executable inside the Python
-environment where SHIELD_DAS is installed, and add
-`--results-dir C:\path\to\results` if the task does not start in the
-recorder's working directory. Check it with `schtasks /Query /TN
-"SHIELD live dashboard"` and remove it with `schtasks /Delete /TN
-"SHIELD live dashboard" /F`.
-
-## Remote viewing
-
-By default the server binds `0.0.0.0`, so the dashboard is reachable from
-other machines on the LAN or tailnet at `http://<rig-hostname>:8051` — open
-the same URL from your laptop or phone via Tailscale or the lab network. On
-a slow link, drop the fidelity dropdown to 500 points to shrink each
-refresh. Use `--host 127.0.0.1` if you want the dashboard local-only.
+`shield-das-live` remains the on-rig console: run it on demand next to the
+recorder for a local, offline-capable view. It binds `127.0.0.1` by default;
+pass `--host 0.0.0.0` only if you deliberately want it reachable from the
+local network.
 
 ## Why it stays cheap
 

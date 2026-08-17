@@ -463,11 +463,11 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry point for the live run dashboard (``shield-das-live``).
 
     Serves the dashboard on ``--host``/``--port``. The default host
-    ``0.0.0.0`` binds all interfaces, which exposes the dashboard to the
-    LAN/tailnet — that is the intended remote-monitoring path (view the same
-    URL from another machine via Tailscale or the lab network). Use
-    ``--host 127.0.0.1`` to keep it local-only. The browser is always opened
-    toward ``http://127.0.0.1:<port>`` regardless of the bind host.
+    ``127.0.0.1`` keeps it local to the rig PC — remote viewing goes through
+    the Supabase live mirror instead (``shield-das-publish`` and the GitHub
+    Pages site; see ``docs/live_supabase.md``). Pass ``--host 0.0.0.0`` to
+    deliberately expose it to the local network. The browser is always
+    opened toward ``http://127.0.0.1:<port>`` regardless of the bind host.
 
     Args:
         argv: Command-line arguments (defaults to sys.argv).
@@ -490,10 +490,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--host",
-        default="0.0.0.0",
+        default="127.0.0.1",
         help=(
-            "Interface to bind (default: 0.0.0.0, which exposes the dashboard "
-            "to the LAN/tailnet for remote monitoring)"
+            "Interface to bind (default: 127.0.0.1, local-only; remote "
+            "viewing goes through the Supabase live mirror instead)"
         ),
     )
     parser.add_argument(
