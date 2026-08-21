@@ -56,10 +56,40 @@ my_recorder = DataRecorder(
     recording_interval=0.5,
     backup_interval=5,
     furnace_setpoint=500,
+    sample_substrate="carbon steel",
+    sample_thickness=0.001,  # m
 )
 
 # Start recording
 my_recorder.run()
+```
+
+## Leak test runs
+
+A leak test is a short recorded run taken with a sample installed and sealed,
+the upstream side unpressurized and the downstream volume isolated at a
+setpoint between 0.0025 and 1 Torr (inside the 1-Torr Baratron's range); its
+downstream dP/dt is the background leak rate that the analysis toolbox
+subtracts from later permeation runs on the same sample, paired via
+`sample_id`. Instead of the four permeation valve events, a leak test has a
+single spacebar event, `downstream_isolated_time`, pressed when the downstream
+volume is isolated at the setpoint (the start of the measurement window).
+
+```python
+leak_recorder = DataRecorder(
+    gauges=[gauge_1, gauge_2, gauge_3, gauge_4],
+    thermocouples=[thermocouple_1],
+    run_type="leak_test",
+    sample_id="W-800nm-001",  # required for leak tests
+    downstream_setpoint_torr=0.05,  # optional, recorded in metadata
+    furnace_setpoint=500,
+    sample_substrate="carbon steel",
+    sample_coating="800nm tungsten",
+    sample_coating_layers=[{"material": "tungsten", "thickness_nm": 800}],
+    sample_thickness=0.001,  # m
+)
+
+leak_recorder.run()  # a few minutes of recording is enough
 ```
 
 ## Example data visualisation script

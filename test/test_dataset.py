@@ -153,7 +153,9 @@ def test_dataset_initializes_metadata_attributes_to_none():
     dataset = Dataset(path="/test/path", name="Test")
 
     assert dataset.colour is None
-    assert dataset.sample_material is None
+    assert dataset.sample_substrate is None
+    assert dataset.sample_coating is None
+    assert dataset.sample_coating_layers is None
     assert dataset.sample_thickness is None
     assert dataset.furnace_setpoint is None
 
@@ -280,7 +282,7 @@ def test_dataset_metadata_property_raises_error_for_wrong_version(temp_dataset_d
 
     dataset = Dataset(path=str(temp_dataset_dir), name="Test")
 
-    with pytest.raises(ValueError, match="Unsupported metadata version: 1.0"):
+    with pytest.raises(ValueError, match=r"Unsupported metadata version: 1\.0"):
         _ = dataset.metadata
 
 
@@ -304,7 +306,7 @@ def test_dataset_metadata_rejects_unsupported_versions(temp_dataset_dir, wrong_v
 def test_dataset_metadata_error_message_includes_version(temp_dataset_dir):
     """
     Test Dataset metadata property to verify the error message includes the
-    unsupported version number and suggests using version 1.3.
+    unsupported version number and lists the supported versions.
     """
     metadata = {"version": "2.5", "run_info": {}}
     metadata_path = temp_dataset_dir / "run_metadata.json"
@@ -312,8 +314,27 @@ def test_dataset_metadata_error_message_includes_version(temp_dataset_dir):
 
     dataset = Dataset(path=str(temp_dataset_dir), name="Test")
 
-    with pytest.raises(ValueError, match="Only version 1.3 is supported"):
+    with pytest.raises(
+        ValueError, match=r"Only versions 1\.3, 1\.4 and 1\.5 are supported"
+    ):
         _ = dataset.metadata
+
+
+@pytest.mark.parametrize("supported_version", ["1.3", "1.4", "1.5"])
+def test_dataset_metadata_accepts_supported_versions(
+    temp_dataset_dir, supported_version
+):
+    """
+    Test Dataset metadata property to confirm it accepts metadata versions
+    1.3, 1.4 and 1.5 without raising errors.
+    """
+    metadata = {"version": supported_version, "run_info": {}}
+    metadata_path = temp_dataset_dir / "run_metadata.json"
+    metadata_path.write_text(json.dumps(metadata))
+
+    dataset = Dataset(path=str(temp_dataset_dir), name="Test")
+
+    assert dataset.metadata["version"] == supported_version
 
 
 def test_dataset_metadata_property_returns_full_metadata_dict(dataset_with_files):
@@ -811,25 +832,59 @@ def test_dataset_process_data_uses_default_furnace_setpoint_when_missing(
     assert dataset.furnace_setpoint == pytest.approx(298.15, abs=0.01)
 
 
-def test_dataset_process_data_extracts_sample_material(dataset_with_files):
+def test_dataset_process_data_falls_back_to_v13_sample_material(
+    dataset_with_files,
+):
     """
-    Test Dataset process_data to verify it extracts sample_material from
-    metadata.
+    Test Dataset process_data to verify v1.3 metadata's sample_material is
+    used as the substrate fallback.
     """
     dataset = Dataset(path=str(dataset_with_files), name="Test")
     dataset.process_data()
 
-    assert dataset.sample_material == "316"
+    assert dataset.sample_substrate == "316"
 
 
-def test_dataset_process_data_uses_default_sample_material_when_missing(
+def test_dataset_process_data_reads_v15_sample_fields(
+    temp_dataset_dir, sample_csv_data, sample_metadata_v1_3
+):
+    """
+    Test Dataset process_data to verify v1.5 metadata's sample_substrate,
+    sample_coating and sample_coating_layers are read, preferring
+    sample_substrate over any legacy sample_material key.
+    """
+    metadata = sample_metadata_v1_3
+    metadata["version"] = "1.5"
+    metadata["run_info"]["sample_substrate"] = "carbon steel"
+    metadata["run_info"]["sample_coating"] = "800nm tungsten"
+    metadata["run_info"]["sample_coating_layers"] = [
+        {"material": "tungsten", "thickness_nm": 800}
+    ]
+    metadata["run_info"]["sample_id"] = "SAMPLE-001"
+
+    metadata_path = temp_dataset_dir / "run_metadata.json"
+    metadata_path.write_text(json.dumps(metadata, indent=2))
+    csv_path = temp_dataset_dir / "shield_data.csv"
+    csv_path.write_text(sample_csv_data)
+
+    dataset = Dataset(path=str(temp_dataset_dir), name="Test")
+    dataset.process_data()
+
+    assert dataset.sample_substrate == "carbon steel"
+    assert dataset.sample_coating == "800nm tungsten"
+    assert dataset.sample_coating_layers == [
+        {"material": "tungsten", "thickness_nm": 800}
+    ]
+
+
+def test_dataset_process_data_uses_default_substrate_when_missing(
     temp_dataset_dir, sample_csv_data
 ):
     """
-    Test Dataset process_data to confirm it uses 'Unknown' as default
-    sample_material when not specified.
+    Test Dataset process_data to confirm it uses 'Unknown' as the default
+    substrate when no substrate/material key is present.
     """
-    # Create metadata without sample_material
+    # Create metadata without any sample material key
     metadata = {
         "version": "1.3",
         "run_info": {
@@ -855,7 +910,7 @@ def test_dataset_process_data_uses_default_sample_material_when_missing(
     dataset = Dataset(path=str(temp_dataset_dir), name="Test")
     dataset.process_data()
 
-    assert dataset.sample_material == "Unknown"
+    assert dataset.sample_substrate == "Unknown"
 
 
 def test_dataset_process_data_extracts_sample_thickness(dataset_with_files):
@@ -935,7 +990,7 @@ def test_dataset_process_data_completes_full_processing(
     assert dataset.downstream_error is not None
     assert dataset.valve_times is not None
     assert dataset.furnace_setpoint is not None
-    assert dataset.sample_material is not None
+    assert dataset.sample_substrate is not None
     assert dataset.sample_thickness is not None
 
 
