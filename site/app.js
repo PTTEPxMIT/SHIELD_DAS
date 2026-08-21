@@ -61,6 +61,8 @@ function formatElapsed(seconds) {
 function sampleLine(metadata) {
   const info = (metadata && metadata.run_info) || {};
   const parts = [];
+  if (info.run_type === "leak_test") parts.push("LEAK TEST");
+  if (info.sample_id) parts.push(`sample: ${info.sample_id}`);
   if (info.sample_substrate) parts.push(`substrate: ${info.sample_substrate}`);
   if (info.sample_coating) parts.push(`coating: ${info.sample_coating}`);
   if (info.furnace_setpoint) parts.push(`furnace: ${info.furnace_setpoint} K`);

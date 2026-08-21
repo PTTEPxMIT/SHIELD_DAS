@@ -16,6 +16,7 @@ import threading
 import time
 import webbrowser
 from dataclasses import dataclass, field
+from datetime import timedelta
 
 import dash
 import dash_bootstrap_components as dbc
@@ -44,6 +45,10 @@ from .run_monitor import (  # noqa: F401
 
 # Fidelity options offered by the max-points dropdown
 MAX_POINTS_OPTIONS = [500, 2000, 5000]
+
+# Fallback fit window (seconds) for the leak-rate readout when a leak test
+# has no downstream_isolated_time event in its metadata yet
+LEAK_RATE_WINDOW_SECONDS = 600.0
 
 
 def build_traces(
@@ -353,6 +358,113 @@ def update_dashboard(
     )
 
 
+def _find_downstream_baratron(metadata: dict) -> dict | None:
+    """Pick the downstream Baratron gauge for the leak-rate readout.
+
+    Prefers the 1-torr full-scale head (the range leak-test setpoints sit
+    in); falls back to any other downstream Baratron626D with a known full
+    scale.
+
+    Args:
+        metadata: Parsed ``run_metadata.json`` for the run.
+
+    Returns:
+        The gauge metadata dict, or None if no convertible downstream
+        Baratron is present.
+    """
+    candidates = [
+        gauge
+        for gauge in metadata.get("gauges", [])
+        if gauge.get("type") == "Baratron626D_Gauge"
+        and gauge.get("gauge_location") == "downstream"
+        and gauge.get("full_scale_torr")
+    ]
+    for gauge in candidates:
+        if float(gauge["full_scale_torr"]) == 1.0:
+            return gauge
+    return candidates[0] if candidates else None
+
+
+def _leak_rate_torr_per_s(reader: IncrementalRunReader, metadata: dict) -> float | None:
+    """Fit the downstream leak rate of a leak-test run in torr/s.
+
+    Linear fit (``np.polyfit`` degree 1) of the downstream Baratron pressure
+    (torr, converted from raw volts exactly as ``build_traces`` does) against
+    time (s). The fit window is every sample after
+    ``run_info.downstream_isolated_time`` when that event is in the
+    metadata, otherwise the last ``LEAK_RATE_WINDOW_SECONDS`` of data.
+
+    Args:
+        reader: Reader holding the run's data read so far.
+        metadata: Parsed ``run_metadata.json`` for the run.
+
+    Returns:
+        The fitted slope in torr/s, or None when there is no convertible
+        downstream Baratron, fewer than 2 usable samples, or no time span
+        to fit over.
+    """
+    gauge = _find_downstream_baratron(metadata)
+    if gauge is None:
+        return None
+
+    timestamps = reader.data.get(TIMESTAMP_COLUMN, [])
+    voltages = reader.data.get(f"{gauge.get('name')}_Voltage (V)", [])
+    n_rows = min(len(timestamps), len(voltages))
+    if n_rows < 2:
+        return None
+
+    isolated_raw = metadata.get("run_info", {}).get("downstream_isolated_time")
+    window_start = _parse_timestamp(isolated_raw) if isolated_raw else None
+    if window_start is None:
+        window_start = timestamps[n_rows - 1] - timedelta(
+            seconds=LEAK_RATE_WINDOW_SECONDS
+        )
+
+    selected = [i for i in range(n_rows) if timestamps[i] >= window_start]
+    if len(selected) < 2:
+        return None
+
+    voltage_v = np.asarray([voltages[i] for i in selected], dtype=float)
+    pressure_torr, unit = _convert_gauge_voltage(gauge, voltage_v)
+    if unit != "torr":
+        return None
+
+    first = timestamps[selected[0]]
+    time_s = np.array([(timestamps[i] - first).total_seconds() for i in selected])
+    if time_s[-1] <= 0:
+        return None  # no time span to fit over
+
+    slope_torr_per_s, _intercept = np.polyfit(time_s, pressure_torr, 1)
+    return float(slope_torr_per_s)
+
+
+def _leak_test_readout(state: DashboardState) -> tuple[str, dict, str]:
+    """Header badge and live leak-rate text for a leak-test run.
+
+    Args:
+        state: Current dashboard state.
+
+    Returns:
+        Tuple of (badge text, badge style, leak-rate text). For anything
+        other than an attached leak-test run the badge is hidden and both
+        texts are empty; a leak test with too little usable data shows
+        "Leak rate: —".
+    """
+    run_info = (state.metadata or {}).get("run_info", {})
+    if state.reader is None or run_info.get("run_type") != "leak_test":
+        return "", {"display": "none"}, ""
+
+    sample_id = run_info.get("sample_id")
+    badge_text = f"LEAK TEST — {sample_id}" if sample_id else "LEAK TEST"
+
+    rate = _leak_rate_torr_per_s(state.reader, state.metadata)
+    if rate is None:
+        rate_text = "Leak rate: —"
+    else:
+        rate_text = f"Leak rate: {rate:.2e} Torr/s ({rate * 3600:.2f} Torr/h)"
+    return badge_text, {}, rate_text
+
+
 def _create_layout(config: LiveDashboardConfig) -> dbc.Container:
     """Build the Dash layout for the live dashboard.
 
@@ -372,6 +484,16 @@ def _create_layout(config: LiveDashboardConfig) -> dbc.Container:
                 dbc.Badge("WAITING", id="live-status-badge", color="secondary"),
                 width="auto",
             ),
+            dbc.Col(
+                dbc.Badge(
+                    "",
+                    id="live-leak-badge",
+                    color="warning",
+                    style={"display": "none"},
+                ),
+                width="auto",
+            ),
+            dbc.Col(html.Span(id="live-leak-rate"), width="auto"),
             dbc.Col(html.Span(id="live-elapsed"), width="auto"),
             dbc.Col(html.Span(id="live-row-count"), width="auto"),
             dbc.Col(
@@ -420,6 +542,9 @@ def register_live_dashboard_callbacks(
             Output("live-status-badge", "color"),
             Output("live-elapsed", "children"),
             Output("live-row-count", "children"),
+            Output("live-leak-badge", "children"),
+            Output("live-leak-badge", "style"),
+            Output("live-leak-rate", "children"),
         ],
         [
             Input("live-interval", "n_intervals"),
@@ -435,9 +560,11 @@ def register_live_dashboard_callbacks(
 
         Returns:
             tuple: (figure, run label, status text, badge colour, elapsed
-            time text, row count text)
+            time text, row count text, leak badge text, leak badge style,
+            leak rate text)
         """
-        return update_dashboard(state, config, int(max_points or config.max_points))
+        outputs = update_dashboard(state, config, int(max_points or config.max_points))
+        return (*outputs, *_leak_test_readout(state))
 
 
 def create_app(config: LiveDashboardConfig) -> dash.Dash:

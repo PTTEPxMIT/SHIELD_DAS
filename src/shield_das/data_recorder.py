@@ -3,6 +3,7 @@ import json
 import os
 import threading
 import time
+import warnings
 from datetime import datetime
 
 import keyboard
@@ -28,9 +29,22 @@ class DataRecorder:
             if in test mode, runs without actual hardware interaction
         recording_interval: Time interval (seconds) between recordings, defaults to 0.5s
         backup_interval: How often to backup data (seconds)
-        sample_material: Material of the sample being tested, either "316" or
-            "AISI 1018"
+        sample_substrate: Substrate material of the sample being tested, as a
+            spelled-out name, e.g. "carbon steel" or "316L steel"
         sample_thickness: Thickness of the sample being tested in meters
+        sample_coating: Human-readable coating description, e.g.
+            "800nm tungsten"; defaults to "uncoated"
+        sample_coating_layers: Coating layers ordered as deposited, each a dict
+            with keys "material" (spelled-out name, e.g. "tungsten") and
+            "thickness_nm" (nm). None (the default) means no layers ([]).
+        sample_id: Identifier of the physical sample, used to pair leak tests
+            with later permeation runs on the same sample. Required when
+            run_type is "leak_test".
+        downstream_setpoint_torr: Downstream isolation setpoint in torr for a
+            leak test (within the 1-torr Baratron range, 0.0025-1 torr).
+            Optional; only written to metadata when given.
+        sample_material: Deprecated alias for sample_substrate. Passing both
+            raises a ValueError.
 
     Attributes:
         gauges: List of PressureGauge instances to record data from
@@ -42,9 +56,13 @@ class DataRecorder:
         recording_interval: Time interval (in seconds) between recordings, defaults to
             0.5 seconds
         backup_interval: How often to rotate backup CSV files (seconds)
-        sample_material: Material of the sample being tested, either "316" or
-            "AISI 1018"
+        sample_substrate: Substrate material of the sample being tested
         sample_thickness: Thickness of the sample being tested in meters
+        sample_coating: Human-readable coating description ("uncoated" if bare)
+        sample_coating_layers: Coating layers as a list of dicts with
+            "material" and "thickness_nm" (nm) keys; [] for an uncoated sample
+        sample_id: Identifier of the physical sample, or None
+        downstream_setpoint_torr: Downstream isolation setpoint (torr), or None
         stop_event: Event to control the recording thread
         thread: Thread for recording data
         run_dir: Directory for the current run's results
@@ -54,7 +72,11 @@ class DataRecorder:
         v5_close_time: Timestamp when V5 valve was closed (spacebar press 2)
         v6_close_time: Timestamp when V6 valve was closed (spacebar press 3)
         v3_open_time: Timestamp when V3 valve was opened (spacebar press 4)
-        valve_event_sequence: Ordered list of valve events to track
+        downstream_isolated_time: Timestamp when the downstream volume was
+            isolated at its setpoint (single spacebar press of a leak test)
+        valve_event_sequence: Ordered list of spacebar events to track. For a
+            leak test this is just ["downstream_isolated_time"]; other run
+            types use the four-valve permeation sequence.
         current_valve_index: Current position in the valve event sequence
     """
 
@@ -65,8 +87,12 @@ class DataRecorder:
     run_type: str
     recording_interval: float
     backup_interval: float
-    sample_material: str
+    sample_substrate: str
     sample_thickness: float
+    sample_coating: str
+    sample_coating_layers: list[dict]
+    sample_id: str | None
+    downstream_setpoint_torr: float | None
 
     stop_event: threading.Event
     thread: threading.Thread
@@ -77,6 +103,7 @@ class DataRecorder:
     v5_close_time: str | None
     v6_close_time: str | None
     v3_open_time: str | None
+    downstream_isolated_time: str | None
     start_time: datetime
     valve_event_sequence: list[str]
     current_valve_index: int
@@ -86,13 +113,31 @@ class DataRecorder:
         gauges: list[PressureGauge],
         thermocouples: list[Thermocouple],
         furnace_setpoint: float,
-        sample_material: str,
-        sample_thickness: float,
+        sample_substrate: str | None = None,
+        sample_thickness: float | None = None,
         results_dir: str = "results",
         run_type="permeation_exp",
         recording_interval: float = 0.5,
         backup_interval: float = 5.0,
+        sample_coating: str = "uncoated",
+        sample_coating_layers: list[dict] | None = None,
+        sample_id: str | None = None,
+        downstream_setpoint_torr: float | None = None,
+        sample_material: str | None = None,
     ):
+        if sample_material is not None:
+            if sample_substrate is not None:
+                raise ValueError(
+                    "Pass only sample_substrate; sample_material is a "
+                    "deprecated alias for it"
+                )
+            warnings.warn(
+                "sample_material is deprecated; use sample_substrate instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            sample_substrate = sample_material
+
         self.gauges = gauges
         self.thermocouples = thermocouples
         self.furnace_setpoint = furnace_setpoint
@@ -100,8 +145,19 @@ class DataRecorder:
         self.run_type = run_type
         self.recording_interval = recording_interval
         self.backup_interval = backup_interval
-        self.sample_material = sample_material
+        self.sample_substrate = sample_substrate
         self.sample_thickness = sample_thickness
+        self.sample_coating = sample_coating
+        self.sample_coating_layers = sample_coating_layers
+        self.sample_id = sample_id
+        self.downstream_setpoint_torr = downstream_setpoint_torr
+
+        if self.run_type == "leak_test" and self.sample_id is None:
+            raise ValueError(
+                "sample_id is required for a leak_test run: it is how the "
+                "analysis toolbox pairs the leak test with later permeation "
+                "runs on the same physical sample"
+            )
 
         # Thread control
         self.stop_event = threading.Event()
@@ -112,15 +168,21 @@ class DataRecorder:
         self.v5_close_time = None
         self.v6_close_time = None
         self.v3_open_time = None
+        self.downstream_isolated_time = None
         self.start_time = None
 
-        # Valve event sequence tracking
-        self.valve_event_sequence = [
-            "v4_close_time",
-            "v5_close_time",
-            "v6_close_time",
-            "v3_open_time",
-        ]
+        # Spacebar event sequence tracking: a leak test records a single
+        # downstream-isolation event; other run types record the four
+        # permeation valve events.
+        if self.run_type == "leak_test":
+            self.valve_event_sequence = ["downstream_isolated_time"]
+        else:
+            self.valve_event_sequence = [
+                "v4_close_time",
+                "v5_close_time",
+                "v6_close_time",
+                "v3_open_time",
+            ]
         self.current_valve_index = 0
 
     @property
@@ -176,16 +238,86 @@ class DataRecorder:
         return self.run_type == "test_mode"
 
     @property
-    def sample_material(self) -> str:
-        return self._sample_material
+    def sample_substrate(self) -> str:
+        return self._sample_substrate
 
-    @sample_material.setter
-    def sample_material(self, value: str):
+    @sample_substrate.setter
+    def sample_substrate(self, value: str):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                "sample_substrate must be a non-empty string with the "
+                "spelled-out material name, e.g. 'carbon steel' or "
+                "'316L steel'"
+            )
+        self._sample_substrate = value
+
+    @property
+    def sample_coating(self) -> str:
+        return self._sample_coating
+
+    @sample_coating.setter
+    def sample_coating(self, value: str):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                "sample_coating must be a non-empty string, e.g. "
+                "'800nm tungsten'; use 'uncoated' for a bare sample"
+            )
+        self._sample_coating = value
+
+    @property
+    def sample_coating_layers(self) -> list[dict]:
+        return self._sample_coating_layers
+
+    @sample_coating_layers.setter
+    def sample_coating_layers(self, value: list[dict] | None):
         if value is None:
-            self._sample_material = value
-        elif value not in ["316", "AISI 1018"]:
-            raise ValueError("sample_material must be one of '316L', or '316'")
-        self._sample_material = value
+            value = []
+        if not isinstance(value, list):
+            raise ValueError(
+                "sample_coating_layers must be a list of layers, each "
+                "{'material': str, 'thickness_nm': float}, or None for an "
+                "uncoated sample"
+            )
+        for layer in value:
+            if (
+                not isinstance(layer, dict)
+                or not isinstance(layer.get("material"), str)
+                or not layer["material"].strip()
+                or not isinstance(layer.get("thickness_nm"), int | float)
+                or isinstance(layer.get("thickness_nm"), bool)
+                or layer["thickness_nm"] <= 0
+            ):
+                raise ValueError(
+                    "each sample_coating_layers entry must be a dict with a "
+                    "non-empty 'material' string (spelled-out name, e.g. "
+                    "'tungsten') and a positive 'thickness_nm' number (nm)"
+                )
+        self._sample_coating_layers = value
+
+    @property
+    def sample_id(self) -> str | None:
+        return self._sample_id
+
+    @sample_id.setter
+    def sample_id(self, value: str | None):
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ValueError("sample_id must be a non-empty string or None")
+        self._sample_id = value
+
+    @property
+    def downstream_setpoint_torr(self) -> float | None:
+        return self._downstream_setpoint_torr
+
+    @downstream_setpoint_torr.setter
+    def downstream_setpoint_torr(self, value: float | None):
+        if value is not None and (
+            not isinstance(value, int | float) or isinstance(value, bool) or value <= 0
+        ):
+            raise ValueError(
+                "downstream_setpoint_torr must be a positive pressure in torr "
+                "(within the 1-torr Baratron range, 0.0025-1 torr) or None"
+            )
+        self._downstream_setpoint_torr = value
 
     def _create_results_directory(self):
         """Creates a new directory for results based on date and run number."""
@@ -256,9 +388,15 @@ class DataRecorder:
         return 1 if not numbers else max(numbers) + 1
 
     def _create_metadata_file(self):
-        """Create a JSON metadata file with run information."""
+        """Create a JSON metadata file with run information.
+
+        Writes schema version 1.5: sample_substrate/sample_coating/
+        sample_coating_layers (the store's v1.4 sample fields) plus
+        sample_id (always present, null if not given) and, when set,
+        downstream_setpoint_torr (torr).
+        """
         metadata = {
-            "version": "1.3",
+            "version": "1.5",
             "run_info": {
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -266,11 +404,18 @@ class DataRecorder:
                 "furnace_setpoint": self.furnace_setpoint,
                 "recording_interval_seconds": self.recording_interval,
                 "backup_interval_seconds": self.backup_interval,
-                "sample_material": self.sample_material,
+                "sample_substrate": self.sample_substrate,
+                "sample_coating": self.sample_coating,
+                "sample_coating_layers": self.sample_coating_layers,
                 "sample_thickness": self.sample_thickness,
+                "sample_id": self.sample_id,
                 "data_filename": "shield_data.csv",
             },
         }
+        if self.downstream_setpoint_torr is not None:
+            metadata["run_info"]["downstream_setpoint_torr"] = (
+                self.downstream_setpoint_torr
+            )
 
         if self.gauges:
             metadata["gauges"] = [
@@ -391,6 +536,7 @@ class DataRecorder:
         self.v5_close_time = None
         self.v6_close_time = None
         self.v3_open_time = None
+        self.downstream_isolated_time = None
         self.current_valve_index = 0
 
     def start(self):
