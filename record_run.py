@@ -39,7 +39,7 @@ SAMPLE_ID = None  # e.g. "S07"; REQUIRED when RUN_TYPE = "leak_test"
 # needs SAMPLE_ID), or "test_mode" (no hardware needed — for testing the DAS)
 RUN_TYPE = "permeation_exp"
 
-# Leak test only: the downstream isolation setpoint (torr, 0.0025–1);
+# Leak test only: the downstream isolation setpoint (torr, 0.0025-1);
 # recorded in the metadata. Ignored for other run types when None.
 DOWNSTREAM_SETPOINT_TORR = None
 
