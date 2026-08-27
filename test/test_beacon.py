@@ -10,10 +10,12 @@ mocked.
 
 import json
 import os
+import sys
 from unittest.mock import patch
 
 import pytest
 
+from shield_das import beacon as beacon_module
 from shield_das.beacon import (
     DEFAULT_GAUGES,
     BeaconConfig,
@@ -428,3 +430,159 @@ def test_dry_run_client_prints_a_readable_line(capsys):
     out = capsys.readouterr().out
     assert "WGM701" in out
     assert "1 points in window" in out
+
+
+# =============================================================================
+# LabJack handling (hardware mocked out entirely)
+# =============================================================================
+
+
+class FakeU6Module:
+    """Stand-in for the ``u6`` module, recording opens and closes."""
+
+    def __init__(self, voltages=None, open_error=None, close_error=None):
+        # `or` would treat an intentionally empty mapping as "use defaults".
+        default = {10: 3.5, 8: 2.0, 6: 5.0, 4: 10.0}
+        self.voltages = default if voltages is None else voltages
+        self.open_error = open_error
+        self.close_error = close_error
+        self.opens = 0
+        self.closes = 0
+        module = self
+
+        class _U6:
+            def __init__(self, firstFound=True):
+                module.opens += 1
+                if module.open_error:
+                    raise module.open_error
+
+            def getCalibrationData(self):
+                pass
+
+            def getAIN(self, positiveChannel, **kwargs):
+                return module.voltages[positiveChannel]
+
+            def close(self):
+                module.closes += 1
+                if module.close_error:
+                    raise module.close_error
+
+        self.U6 = _U6
+
+
+def test_sampler_opens_and_closes_the_device_each_time():
+    """Holding the handle would stop a run from claiming the LabJack."""
+    fake = FakeU6Module()
+    sampler = LabJackSampler(DEFAULT_GAUGES)
+
+    with patch.dict(sys.modules, {"u6": fake}):
+        first = sampler.sample()
+        second = sampler.sample()
+
+    assert first["WGM701"] == second["WGM701"]
+    assert fake.opens == 2
+    assert fake.closes == 2
+
+
+def test_sampler_reports_a_failed_open_as_runtime_error():
+    fake = FakeU6Module(open_error=OSError("device busy"))
+    with patch.dict(sys.modules, {"u6": fake}):
+        with pytest.raises(RuntimeError, match="LabJack read failed"):
+            LabJackSampler(DEFAULT_GAUGES).sample()
+
+
+def test_sampler_still_closes_after_a_read_failure():
+    """A leaked handle would lock the device out for the next run."""
+    fake = FakeU6Module(voltages={})  # KeyError on the first getAIN
+    with patch.dict(sys.modules, {"u6": fake}):
+        with pytest.raises(RuntimeError):
+            LabJackSampler(DEFAULT_GAUGES).sample()
+    assert fake.closes == 1
+
+
+def test_sampler_tolerates_a_failing_close():
+    fake = FakeU6Module(close_error=OSError("already gone"))
+    with patch.dict(sys.modules, {"u6": fake}):
+        channels = LabJackSampler(DEFAULT_GAUGES).sample()
+    assert "WGM701" in channels
+
+
+def test_read_channels_drops_non_finite_values():
+    """jsonb cannot hold NaN, so it must never reach the payload."""
+    unknown = [{"name": "Mystery", "type": "Nonesuch_Gauge", "ain_channel": 2}]
+    channels = read_channels(FakeLabJack({2: float("nan")}), unknown)
+    assert channels == {}
+
+
+# =============================================================================
+# Waking back up after a run
+# =============================================================================
+
+
+def test_loop_resumes_after_the_run_ends(tmp_path):
+    """The window is cleared on the way in, so no stale gap is published."""
+    run_dir = write_active_run(tmp_path)
+    client = RecordingClient()
+    sampler = FakeSampler([1e-6])
+    config = make_config(
+        results_dir=str(tmp_path), sample_period_s=1.0, push_period_s=1.0
+    )
+    clock = iter([float(i) for i in range(100)])
+
+    calls = {"n": 0}
+    real_find = beacon_module.find_active_run
+
+    def find_until_third_call(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] >= 3:  # the run "ends" partway through
+            return None
+        return real_find(*args, **kwargs)
+
+    with (
+        patch("shield_das.beacon.time.sleep"),
+        patch("shield_das.beacon.time.monotonic", lambda: next(clock)),
+        patch("shield_das.beacon.find_active_run", find_until_third_call),
+    ):
+        beacon_loop(config, client, sampler, iterations=4)
+
+    assert run_dir.exists()
+    assert sampler.calls == 2  # dormant for the first two iterations
+    assert len(client.payloads) == 2
+
+
+# =============================================================================
+# CLI overrides
+# =============================================================================
+
+
+def test_main_applies_url_and_results_dir_overrides(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"supabase_url": "https://old.supabase.co"}))
+
+    with patch("shield_das.beacon.beacon_loop") as loop:
+        main(
+            [
+                "--config",
+                str(config_path),
+                "--supabase-url",
+                "https://new.supabase.co",
+                "--results-dir",
+                str(tmp_path),
+                "--dry-run",
+                "--test-mode",
+            ]
+        )
+
+    config = loop.call_args[0][0]
+    assert config.supabase_url == "https://new.supabase.co"
+    assert config.results_dir == str(tmp_path)
+
+
+def test_main_exits_cleanly_on_ctrl_c(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"supabase_url": "https://x.supabase.co"}))
+
+    with patch("shield_das.beacon.beacon_loop", side_effect=KeyboardInterrupt):
+        exit_code = main(["--config", str(config_path), "--dry-run", "--test-mode"])
+
+    assert exit_code == 0
