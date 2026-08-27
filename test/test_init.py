@@ -195,7 +195,7 @@ def test_expected_export_count():
 
     # 8 analysis functions + 8 core classes/gauges + 5 uploader
     # + 7 live dashboard + 3 publisher = 31 total
-    expected_count = 31
+    expected_count = 35
     actual_count = len(shield_das.__all__)
 
     assert actual_count == expected_count, (

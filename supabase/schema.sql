@@ -195,3 +195,50 @@ from public, anon, authenticated;
 
 grant execute on function public.decimated_readings(bigint, int)
     to anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Standby beacon: the rig's present vacuum level while NO run is recording.
+--
+-- Exactly one row, overwritten in place -- the check constraint makes that a
+-- property of the table, not a convention. It holds the current value of each
+-- gauge plus a short rolling history window (see beacon.VacuumBeacon.payload),
+-- so the viewer site can show a number and a sparkline when there is no run to
+-- plot.
+--
+-- Deliberately NOT a row in runs/readings: a standby session is not an
+-- experiment, so it must never appear as a run, and it must never consume any
+-- of the readings cap that provides the 500 MB guarantee above. One row of a
+-- couple of kB is the entire storage cost, forever.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.standby (
+    id         int primary key default 1 check (id = 1),
+    updated_at timestamptz not null default now(),
+    data       jsonb not null default '{}'
+);
+
+-- Overwrite the snapshot, stamping updated_at from the database clock so a
+-- wrong rig clock cannot make a stale reading look fresh (as for heartbeat).
+create or replace function public.standby_update(p_data jsonb)
+returns void
+language sql
+set search_path = public
+as $$
+    insert into public.standby (id, updated_at, data)
+    values (1, now(), p_data)
+    on conflict (id) do update
+        set updated_at = now(),
+            data = excluded.data;
+$$;
+
+alter table public.standby enable row level security;
+
+drop policy if exists standby_read on public.standby;
+create policy standby_read on public.standby
+    for select using (true);
+
+grant select on public.standby to anon, authenticated;
+revoke insert, update, delete on public.standby from anon, authenticated;
+
+revoke execute on function public.standby_update(jsonb)
+from public, anon, authenticated;

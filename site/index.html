@@ -17,6 +17,7 @@
       --border: rgba(11, 11, 11, 0.1);
       --badge-live: #0ca30c;
       --badge-stale: #fab219;
+      --badge-standby: #2a78d6;
       --badge-ink: #ffffff;
       --series-1: #2a78d6;
       --series-2: #eb6834;
@@ -42,6 +43,7 @@
         --series-4: #c98500;
         --series-5: #d55181;
         --series-6: #008300;
+        --badge-standby: #3987e5;
       }
     }
     * { box-sizing: border-box; }
@@ -74,6 +76,7 @@
     #status-badge.live { background: var(--badge-live); }
     #status-badge.stale { background: var(--badge-stale); color: #0b0b0b; }
     #status-badge.ended { background: var(--text-secondary); }
+    #status-badge.standby { background: var(--badge-standby); }
     .meta { color: var(--text-muted); font-size: 0.85rem; }
     #sample-info {
       flex-basis: 100%;
@@ -87,6 +90,44 @@
       background: var(--surface-1);
       border: 1px solid var(--border);
       border-radius: 8px;
+    }
+    .standby-card {
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.4rem 1.3rem 1rem;
+    }
+    .standby-label {
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .standby-value {
+      font-size: clamp(2.2rem, 9vw, 3.6rem);
+      font-weight: 650;
+      line-height: 1.15;
+      margin: 0.15rem 0 0.1rem;
+      font-variant-numeric: tabular-nums;
+    }
+    #standby-age { color: var(--text-muted); font-size: 0.85rem; }
+    #standby-chart { width: 100%; height: 190px; margin-top: 0.9rem; }
+    #standby-others {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 1.4rem;
+      margin-top: 0.7rem;
+      padding-top: 0.7rem;
+      border-top: 1px solid var(--border);
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+      font-variant-numeric: tabular-nums;
+    }
+    #standby-others b { color: var(--text-muted); font-weight: 550; }
+    .standby-note {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      margin: 0.8rem 0 0;
     }
     #message {
       padding: 3rem 1rem;
@@ -116,12 +157,28 @@
   <main>
     <div id="message">Connecting…</div>
     <div id="chart" hidden></div>
+    <div id="standby" hidden>
+      <div class="standby-card">
+        <div class="standby-label">
+          Downstream vacuum · <span id="standby-primary">WGM701</span>
+        </div>
+        <div class="standby-value" id="standby-value">—</div>
+        <div id="standby-age"></div>
+        <div id="standby-chart"></div>
+        <div id="standby-others"></div>
+      </div>
+      <p class="standby-note">
+        No run is being recorded — this is the rig's present vacuum level,
+        sampled once a second and never stored.
+      </p>
+    </div>
   </main>
   <footer>
-    Live mirror of the run currently recording on the SHIELD rig — downsampled
+    Live mirror of the SHIELD rig: the run currently recording (downsampled
     view; full-rate data lands in
     <a href="https://github.com/PTTEPxMIT/SHIELD-Data">SHIELD-Data</a> when the
-    run completes. Refreshes every 10&nbsp;s.
+    run completes), or the present vacuum level when the rig is idle.
+    Refreshes every 5–10&nbsp;s.
   </footer>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
   <script src="config.js"></script>
