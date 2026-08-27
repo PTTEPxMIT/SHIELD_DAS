@@ -330,6 +330,14 @@ class SupabaseClient:
                 f"Supabase unreachable for {method} {path}: "
                 f"{_redact(str(exc.reason), self._key)}"
             ) from None
+        except OSError as exc:
+            # A socket read timeout raises bare TimeoutError, which is an
+            # OSError but NOT a URLError -- so without this it escapes and
+            # kills the caller. Same for connection resets mid-response.
+            raise RuntimeError(
+                f"Supabase timed out for {method} {path}: "
+                f"{_redact(str(exc), self._key)}"
+            ) from None
         if not body:
             return None
         return json.loads(body)

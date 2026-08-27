@@ -411,7 +411,12 @@ def beacon_loop(config: BeaconConfig, client, sampler, iterations: int | None = 
             logger.info("Run ended: beacon resuming")
             was_dormant = False
 
-        beacon.tick(time.time(), time.monotonic())
+        try:
+            beacon.tick(time.time(), time.monotonic())
+        except Exception:
+            # This process is meant to sit there for weeks unattended: an
+            # unforeseen error should cost one cycle, not the whole beacon.
+            logger.exception("Unexpected beacon error; continuing")
         time.sleep(min(0.5, config.sample_period_s / 2))
 
 
