@@ -1,17 +1,24 @@
-// SHIELD live viewer: polls the Supabase mirror with the read-only anon key
-// and renders the same three stacked panels as the on-rig dashboard
-// (upstream torr log-y, downstream torr log-y, temperature degC).
+// SHIELD live viewer: polls the Supabase mirror with the read-only anon key.
+//
+// Two modes, picked automatically:
+//   * a run is recording -> the same three stacked panels as the on-rig
+//     dashboard (upstream torr log-y, downstream torr log-y, temperature degC),
+//     filled by the publisher (shield-das-publish);
+//   * no run is recording -> the standby card: the rig's present vacuum level
+//     and the last minute of it, filled by the beacon (shield-das-beacon).
 //
 // Plain fetch() against PostgREST -- no client library, no realtime quota.
-// The publisher (shield-das-publish) fills the mirror; see
-// docs/live_supabase.md.
+// See docs/live_supabase.md.
 
 "use strict";
 
 const POLL_MS = 10000;
+const STANDBY_POLL_MS = 5000; // matches the beacon's push cadence
 const BACKFILL_POINTS = 4000;
 const REDECIMATE_ABOVE = 8000;
 const LIVE_WINDOW_MS = 120000;
+// The beacon pushes every 5 s; allow a wide margin before calling it stale.
+const STANDBY_FRESH_MS = 60000;
 
 // -- pure helpers (kept dependency-free for easy eyeballing/testing) ---------
 
@@ -49,6 +56,44 @@ function channelPlan(metadata) {
     plan.push({ key: `${tc.name}_C`, fallbackKey: null, panel: 3 });
   }
   return plan;
+}
+
+// Pressure in torr as a readable magnitude: "1.93 x 10^-4 torr" for the
+// decades a vacuum gauge lives in, plain digits near atmosphere.
+const SUPERSCRIPTS = {
+  "-": "⁻",
+  0: "⁰",
+  1: "¹",
+  2: "²",
+  3: "³",
+  4: "⁴",
+  5: "⁵",
+  6: "⁶",
+  7: "⁷",
+  8: "⁸",
+  9: "⁹",
+};
+
+function formatTorr(value) {
+  if (typeof value !== "number" || !isFinite(value)) return "—";
+  if (value === 0) return "0 torr";
+  const exponent = Math.floor(Math.log10(Math.abs(value)));
+  if (exponent >= -2 && exponent < 4) return `${value.toPrecision(3)} torr`;
+  const mantissa = value / 10 ** exponent;
+  const superscript = String(exponent)
+    .split("")
+    .map((character) => SUPERSCRIPTS[character])
+    .join("");
+  return `${mantissa.toFixed(2)} × 10${superscript} torr`;
+}
+
+// How long ago the beacon last reported, in words.
+function formatAge(milliseconds) {
+  const seconds = Math.max(0, Math.round(milliseconds / 1000));
+  if (seconds < 60) return `${seconds} s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  return `${Math.round(minutes / 60)} h ago`;
 }
 
 function formatElapsed(seconds) {
@@ -103,6 +148,10 @@ async function api(path, options = {}) {
 const fetchNewestRun = async () =>
   (await api("/runs?order=started_at.desc&limit=1"))[0] || null;
 
+// The beacon's single row: present values plus the recent history window.
+const fetchStandby = async () =>
+  (await api("/standby?id=eq.1&select=updated_at,data"))[0] || null;
+
 const fetchBackfill = (runId) =>
   api("/rpc/decimated_readings", {
     method: "POST",
@@ -118,7 +167,13 @@ const fetchSince = (runId, lastTs) =>
 // -- rendering ---------------------------------------------------------------
 
 const el = (id) => document.getElementById(id);
-const state = { run: null, rows: [], plotted: false };
+const state = {
+  run: null,
+  rows: [],
+  plotted: false,
+  standby: null,
+  showingStandby: false,
+};
 
 function buildFigure(run, rows, tokens) {
   const plan = channelPlan(run.metadata || {});
@@ -228,9 +283,115 @@ function panelTitle(text, y, tokens) {
   };
 }
 
+// The last minute of the primary gauge, as a bare sparkline. Log y unless a
+// reading has hit the gauge's zero floor, which log cannot draw.
+function renderSparkline(tokens) {
+  const history = state.standby.data.history || [];
+  const chart = el("standby-chart");
+  if (history.length < 2) {
+    chart.hidden = true;
+    return;
+  }
+  chart.hidden = false;
+
+  const latest = history[history.length - 1][0];
+  const values = history.map((point) => point[1]);
+  const positive = values.every((value) => value > 0);
+
+  Plotly.react(
+    chart,
+    [
+      {
+        type: "scatter",
+        mode: "lines",
+        x: history.map((point) => point[0] - latest),
+        y: values,
+        line: { width: 2, color: tokens.series[0] },
+        hovertemplate: "%{y:.3e} torr, %{x:.0f} s<extra></extra>",
+      },
+    ],
+    {
+      paper_bgcolor: tokens.surface,
+      plot_bgcolor: tokens.surface,
+      font: { color: tokens.ink, family: "system-ui, sans-serif" },
+      margin: { l: 62, r: 10, t: 6, b: 34 },
+      showlegend: false,
+      xaxis: {
+        gridcolor: tokens.grid,
+        linecolor: tokens.baseline,
+        tickcolor: tokens.baseline,
+        tickfont: { color: tokens.muted, size: 11 },
+        zeroline: false,
+        title: {
+          text: "seconds ago",
+          font: { color: tokens.muted, size: 11 },
+        },
+      },
+      yaxis: {
+        type: positive ? "log" : "linear",
+        gridcolor: tokens.grid,
+        linecolor: tokens.baseline,
+        tickcolor: tokens.baseline,
+        tickfont: { color: tokens.muted, size: 11 },
+        zeroline: false,
+        title: { text: "torr", font: { color: tokens.muted, size: 11 } },
+      },
+    },
+    { responsive: true, displaylogo: false, displayModeBar: false },
+  );
+}
+
+// The rig is idle: show what the vacuum is doing right now instead of an
+// empty "waiting for a run" page.
+function renderStandby(tokens, nowMs) {
+  const { data, updated_at: updatedAt } = state.standby;
+  const age = nowMs - Date.parse(updatedAt);
+  const fresh = age <= STANDBY_FRESH_MS;
+  const primary = data.primary || "WGM701";
+  const channels = data.channels || {};
+
+  const badge = el("status-badge");
+  badge.textContent = fresh ? "STANDBY" : "STALE";
+  badge.className = fresh ? "standby" : "stale";
+
+  el("run-id").textContent = "no run recording";
+  el("elapsed").textContent = "";
+  el("row-count").textContent = "";
+  el("sample-info").textContent = "";
+
+  el("standby-primary").textContent = primary;
+  el("standby-value").textContent = formatTorr(channels[primary]);
+  el("standby-age").textContent = fresh
+    ? `updated ${formatAge(age)}`
+    : `no reading for ${formatAge(age)} — is the beacon running on the rig?`;
+
+  el("standby-others").innerHTML = Object.entries(channels)
+    .filter(([name]) => name !== primary)
+    .map(
+      ([name, value]) =>
+        `<span><b>${name}</b> ${formatTorr(value)}</span>`,
+    )
+    .join("");
+
+  el("message").hidden = true;
+  el("chart").hidden = true;
+  el("standby").hidden = false;
+  renderSparkline(tokens);
+}
+
 function render() {
   const tokens = themeTokens();
-  const status = statusFor(state.run, Date.now());
+  const nowMs = Date.now();
+  const status = statusFor(state.run, nowMs);
+
+  // A live run owns the page; anything else defers to the beacon when it has
+  // something to say (a stale or ended run still leaves the rig pumping).
+  state.showingStandby = status !== "live" && state.standby !== null;
+  if (state.showingStandby) {
+    renderStandby(tokens, nowMs);
+    return;
+  }
+  el("standby").hidden = true;
 
   const badge = el("status-badge");
   badge.textContent = status.toUpperCase();
@@ -274,7 +435,12 @@ function render() {
 // -- polling loop ------------------------------------------------------------
 
 async function refresh() {
-  const run = await fetchNewestRun();
+  const [run, standby] = await Promise.all([
+    fetchNewestRun(),
+    fetchStandby().catch(() => null), // an un-migrated project has no standby table
+  ]);
+  state.standby = standby;
+
   if (!run) {
     state.run = null;
     state.rows = [];
@@ -319,11 +485,19 @@ function start() {
       "and anon key (docs/live_supabase.md).";
     return;
   }
-  tick();
-  setInterval(tick, POLL_MS);
+  const loop = async () => {
+    await tick();
+    // The standby card shows a 60 s window, so it earns a faster poll than
+    // the run view, whose points arrive every 5 s anyway.
+    setTimeout(loop, state.showingStandby ? STANDBY_POLL_MS : POLL_MS);
+  };
+  loop();
   window
     .matchMedia("(prefers-color-scheme: dark)")
-    .addEventListener("change", () => state.plotted && render());
+    .addEventListener(
+      "change",
+      () => (state.plotted || state.showingStandby) && render(),
+    );
 }
 
 start();

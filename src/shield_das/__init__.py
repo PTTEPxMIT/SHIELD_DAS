@@ -17,6 +17,14 @@ from .analysis import (
     voltage_to_temperature,
 )
 
+# Present-vacuum beacon for when no run is being recorded
+from .beacon import (
+    BeaconConfig,
+    VacuumBeacon,
+    beacon_loop,
+    read_channels,
+)
+
 # Core data acquisition and recording
 from .data_plotter import DataPlotter
 from .data_recorder import DataRecorder
@@ -58,6 +66,7 @@ from .uploader import (
 
 __all__ = [
     "Baratron626D_Gauge",
+    "BeaconConfig",
     "CVM211_Gauge",
     "DashboardState",
     "DataPlotter",
@@ -69,8 +78,10 @@ __all__ = [
     "PublisherConfig",
     "Thermocouple",
     "UploaderConfig",
+    "VacuumBeacon",
     "WGM701_Gauge",
     "average_pressure_after_increase",
+    "beacon_loop",
     "build_traces",
     "calculate_error_on_pressure_reading",
     "calculate_flux_from_sample",
@@ -83,6 +94,7 @@ __all__ = [
     "normalize_run",
     "publish_loop",
     "push_run",
+    "read_channels",
     "row_to_channels",
     "sweep",
     "update_dashboard",

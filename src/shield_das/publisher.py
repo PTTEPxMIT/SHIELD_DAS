@@ -124,6 +124,24 @@ class PublisherConfig:
     thin_to_seconds: int = 60
     max_buffer_rows: int = 20000
 
+    @staticmethod
+    def load_raw(path: str = DEFAULT_CONFIG_PATH) -> dict:
+        """Read the shared config file without interpreting it.
+
+        The beacon reads the same file (see ``beacon.BeaconConfig``) so the
+        rig keeps one config and one copy of the service-role key.
+
+        Args:
+            path: Path to the JSON config file.
+
+        Returns:
+            The decoded mapping, or an empty dict if the file is absent.
+        """
+        if not os.path.exists(path):
+            return {}
+        with open(path) as f:
+            return json.load(f)
+
     @classmethod
     def from_file(cls, path: str = DEFAULT_CONFIG_PATH) -> "PublisherConfig":
         """Load configuration from a JSON file.
@@ -135,10 +153,7 @@ class PublisherConfig:
         Returns:
             The loaded PublisherConfig.
         """
-        data = {}
-        if os.path.exists(path):
-            with open(path) as f:
-                data = json.load(f)
+        data = cls.load_raw(path)
 
         known = {f.name for f in fields(cls)}
         unknown = set(data) - known
@@ -411,6 +426,19 @@ class SupabaseClient:
         """
         self._request("POST", "/rpc/prune_runs", payload={"p_keep": keep})
 
+    def standby_update(self, data: dict) -> None:
+        """Overwrite the single ``standby`` row with the beacon's snapshot.
+
+        The RPC stamps ``updated_at`` from the database clock, so a wrong rig
+        clock cannot make a stale reading look fresh (same principle as
+        :meth:`heartbeat`).
+
+        Args:
+            data: Snapshot payload (current channel values plus the recent
+                history window). See ``beacon.VacuumBeacon.payload``.
+        """
+        self._request("POST", "/rpc/standby_update", payload={"p_data": data})
+
 
 class DryRunClient:
     """Stand-in client that prints requests instead of sending them."""
@@ -436,6 +464,15 @@ class DryRunClient:
 
     def prune_runs(self, keep: int) -> None:
         print(f"[dry-run] prune to newest {keep} runs")
+
+    def standby_update(self, data: dict) -> None:
+        history = data.get("history", [])
+        channels = data.get("channels", {})
+        primary = data.get("primary")
+        print(
+            f"[dry-run] standby {primary}={channels.get(primary)!r} torr, "
+            f"{len(history)} points in window, channels={channels}"
+        )
 
 
 class RunPublisher:

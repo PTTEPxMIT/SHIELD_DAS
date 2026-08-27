@@ -156,6 +156,15 @@ downsampled readings to a free Supabase project and a GitHub Pages site plots
 them live from any browser. See
 **[docs/live_supabase.md](docs/live_supabase.md)**.
 
+## Checking the vacuum when no run is going
+
+Double-click **`VACUUM_MONITOR.bat`** on the rig computer and the same site
+shows the rig's present vacuum level — the WGM701 reading in large type plus
+the last 60 s as a sparkline — so you can check it from a phone with no run
+recording. Nothing is written to disk and no run is created; it pauses on its
+own while a run *is* recording, and resumes when the run ends.
+**`STOP_VACUUM_MONITOR.bat`** stops it.
+
 ## Uploading completed runs
 
 After a run finishes, double-click **`upload_runs.bat`** on the rig computer

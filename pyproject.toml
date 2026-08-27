@@ -31,6 +31,7 @@ classifiers = [
 ]
 
 [project.scripts]
+shield-das-beacon = "shield_das.beacon:main"
 shield-das-live = "shield_das.live_dashboard:main"
 shield-das-publish = "shield_das.publisher:main"
 shield-das-upload = "shield_das.uploader:main"

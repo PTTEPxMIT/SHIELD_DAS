@@ -6,8 +6,14 @@ project instead of a VPN. The pieces:
 ```
 DataRecorder ──appends──▶ results/<date>/<run>/shield_data.csv      (unchanged)
 shield-das-publish ──downsampled, torr/°C──▶ Supabase (Postgres + PostgREST)
+shield-das-beacon ──present vacuum, no run needed──▶ Supabase (one row)
 GitHub Pages site ──read-only polling, anon key──▶ any browser, no VPN
 ```
+
+Two publishers, two questions. `shield-das-publish` answers *how is this run
+going?* and only exists while a run is recording. `shield-das-beacon` answers
+*what is the vacuum right now?* and only runs while one is **not** — see
+[The beacon](#the-beacon-shield-das-beacon) below.
 
 Supabase is a **disposable live mirror**: the system of record remains the CSV
 on the rig and the parquet run archive in SHIELD-Data. Anything in the mirror
@@ -211,10 +217,81 @@ everything), and retries back off from 15 s to 5 min. A paused project shows
 up as repeated `Supabase error`/`unreachable` warnings with a reminder to
 restore it from the dashboard.
 
+## The beacon (`shield-das-beacon`)
+
+Between campaigns there is no run, so the publisher has nothing to publish and
+the viewer site would just say "waiting for a run" — even though the question
+people actually want answered off-site is *is the rig still under vacuum?*
+
+The beacon answers it. Every second it opens the LabJack, reads the gauges,
+converts to torr, closes the device again, and keeps the last 60 s in memory.
+Every 5 s it overwrites **one row** in the `standby` table with the current
+values and that 60 s window. Then the site shows a number and a sparkline.
+
+Three properties are worth stating, because they are the reason it is built
+this way rather than as a low-rate recording:
+
+- **Nothing is stored.** No run directory, no CSV, no `runs` row, no
+  `readings` rows. A standby session cannot be mistaken for an experiment,
+  cannot be swept up by `shield-das-upload`, and cannot appear in a plot.
+  There is no exclusion rule to maintain because there is nothing to exclude.
+- **Storage is constant.** One row, overwritten in place — the
+  `check (id = 1)` constraint makes that a property of the table. It never
+  touches `readings`, so it consumes none of the 250 000-row cap that backs
+  the 500 MB guarantee above.
+- **It never blocks a run.** The LabJack is opened and closed per sample
+  (~12 ms, about 1 % duty cycle), not held. And while a run *is* recording —
+  when the recorder owns the device continuously — the beacon detects the
+  active run and goes dormant until it ends, so the two never contend.
+
+A side effect worth having: a continuously running beacon keeps the free-tier
+project active, so it never pauses for inactivity.
+
+### Rig PC setup
+
+The beacon reads the same `~/.shield_das_publisher.json` and the same
+`SHIELD_SUPABASE_KEY` as the publisher — one config file, one copy of the
+service-role key. Beacon-only keys can be added to that file
+(`primary_channel`, `sample_period_s`, `history_seconds`, `push_period_s`,
+`gauges`); see `BeaconConfig` in `src/shield_das/beacon.py`.
+
+Double-click **`VACUUM_MONITOR.bat`** to start it, **`STOP_VACUUM_MONITOR.bat`**
+to stop it. To keep it armed across reboots:
+
+```bat
+schtasks /Create /TN "SHIELD vacuum beacon" /SC ONLOGON ^
+  /TR "wscript.exe C:\path	o\SHIELD_DAS\_beacon_watcher.vbs" /F
+```
+
+Smoke test without touching the mirror or the hardware:
+
+```bash
+shield-das-beacon --dry-run --test-mode
+```
+
+Drop `--test-mode` to read the real gauges, still without sending anything.
+
+### Useful flags
+
+| Flag | Meaning |
+| ---- | ------- |
+| `--config PATH` | Alternate config file (shared with the publisher) |
+| `--supabase-url URL` | Override the project URL |
+| `--results-dir DIR` | Override where active runs are looked for |
+| `--sample-period S` | Seconds between LabJack samples (default 1) |
+| `--history-seconds S` | Length of the retained window (default 60) |
+| `--test-mode` | Simulated voltages instead of the LabJack |
+| `--dry-run` | Print payloads instead of sending anything |
+
 ## The viewer site (`site/`)
 
 A static page (plain HTML/JS + Plotly, no build step) that anyone can open —
-phone included, no VPN. It polls the mirror every 10 s with the **anon** key
+phone included, no VPN. It has two modes and picks between them itself: while
+a run is live it shows the run panels described below; otherwise it shows the
+**standby card** — the present vacuum level in large type, the last 60 s as a
+sparkline, the other gauges underneath, and a STANDBY badge that flips to
+STALE if the beacon stops reporting. It polls the mirror every 10 s (5 s on
+the standby card, matching the beacon's push cadence) with the **anon** key
 (read-only via row-level security) and renders the same three stacked panels
 as the on-rig dashboard: upstream pressure (torr, log y), downstream pressure
 (torr, log y), temperature (°C), with a LIVE / STALE / ENDED / WAITING badge
