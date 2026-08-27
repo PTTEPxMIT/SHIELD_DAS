@@ -586,3 +586,72 @@ def test_main_exits_cleanly_on_ctrl_c(tmp_path):
         exit_code = main(["--config", str(config_path), "--dry-run", "--test-mode"])
 
     assert exit_code == 0
+
+
+# =============================================================================
+# Staying alive
+# =============================================================================
+
+
+def test_socket_timeout_becomes_a_handled_error_not_a_crash():
+    """A read timeout raises bare TimeoutError, which is not a URLError.
+
+    Without this the exception escapes SupabaseClient and kills the process
+    -- observed on the rig: the beacon died on its first slow response.
+    """
+    from shield_das.publisher import SupabaseClient
+
+    client = SupabaseClient("https://x.supabase.co", "secret-key")
+    with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")):
+        with pytest.raises(RuntimeError, match="timed out"):
+            client.standby_update({"primary": "WGM701"})
+
+
+def test_timeout_error_does_not_leak_the_key():
+    from shield_das.publisher import SupabaseClient
+
+    client = SupabaseClient("https://x.supabase.co", "secret-key")
+    with patch(
+        "urllib.request.urlopen", side_effect=TimeoutError("secret-key blew up")
+    ):
+        with pytest.raises(RuntimeError) as excinfo:
+            client.standby_update({})
+    assert "secret-key" not in str(excinfo.value)
+
+
+def test_a_timing_out_push_backs_off_instead_of_killing_the_beacon():
+    from shield_das.publisher import SupabaseClient
+
+    client = SupabaseClient("https://x.supabase.co", "k")
+    beacon = VacuumBeacon(make_config(), client, FakeSampler([1e-6]))
+    beacon.sample(1000.0)
+
+    with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")):
+        beacon.push(1000.0, 100.0)  # must not raise
+
+    assert beacon._retry_at > 100.0  # backoff armed, beacon still alive
+
+
+def test_loop_survives_an_unexpected_error(tmp_path):
+    """An always-on process must not die on one bad cycle."""
+    client = RecordingClient()
+    sampler = FakeSampler([1e-6])
+    config = make_config(
+        results_dir=str(tmp_path), sample_period_s=1.0, push_period_s=1.0
+    )
+    clock = iter([float(i) for i in range(100)])
+    calls = {"n": 0}
+
+    def explode_once(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ValueError("something unforeseen")
+
+    with (
+        patch("shield_das.beacon.time.sleep"),
+        patch("shield_das.beacon.time.monotonic", lambda: next(clock)),
+        patch.object(VacuumBeacon, "tick", explode_once),
+    ):
+        beacon_loop(config, client, sampler, iterations=3)
+
+    assert calls["n"] == 3  # kept going after the exception
