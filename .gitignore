@@ -177,3 +177,12 @@ cython_debug/
 src/shield_das/_version.py
 
 results/
+
+# Pre-automation raw run archive (2.5 GB of CSVs; lives on the rig disk only)
+results_pre_automation/
+
+# Local scratch scripts (not part of the package)
+main.py
+launch_plotter.py
+plot_data.py
+TCtest.py
