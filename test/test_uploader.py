@@ -43,6 +43,7 @@ def make_run(
     corrupt_metadata=False,
     with_backup=False,
     stale=True,
+    run_type="permeation_exp",
 ):
     """Create a fake run directory and return its path.
 
@@ -57,6 +58,7 @@ def make_run(
         corrupt_metadata: Write invalid JSON as metadata.
         with_backup: Create a backup/ subdirectory with a file.
         stale: Backdate the CSV mtime by 2 hours.
+        run_type: run_info.run_type value.
     """
     run_dir = os.path.join(results_dir, date_dir, run_name)
     os.makedirs(run_dir)
@@ -80,7 +82,7 @@ def make_run(
         run_info = {
             "date": date,
             "start_time": f"{date} 10:00:00",
-            "run_type": "permeation_exp",
+            "run_type": run_type,
             "data_filename": "shield_data.csv",
         }
         if end_time is not None:
@@ -155,6 +157,43 @@ def test_find_completed_runs_skips_too_short_run(results_dir):
     """Runs shorter than min_duration_minutes are skipped."""
     make_run(results_dir, end_time="2025-08-01 10:02:00", duration_minutes=2.0)
     assert list(find_completed_runs(results_dir, min_duration_minutes=5)) == []
+
+
+def test_find_completed_runs_keeps_short_leak_test(results_dir):
+    """A 2-minute leak_test run passes the leak-specific duration floor."""
+    run_dir = make_run(
+        results_dir,
+        end_time="2025-08-01 10:02:00",
+        duration_minutes=2.0,
+        run_type="leak_test",
+    )
+    found = list(
+        find_completed_runs(
+            results_dir, min_duration_minutes=5, min_leak_duration_minutes=1
+        )
+    )
+    assert found == [os.path.abspath(run_dir)]
+
+
+def test_find_completed_runs_skips_too_short_leak_test(results_dir):
+    """A leak test shorter than min_leak_duration_minutes is still skipped."""
+    make_run(
+        results_dir,
+        end_time="2025-08-01 10:00:30",
+        duration_minutes=0.5,
+        run_type="leak_test",
+    )
+    found = list(
+        find_completed_runs(
+            results_dir, min_duration_minutes=5, min_leak_duration_minutes=1
+        )
+    )
+    assert found == []
+
+
+def test_uploader_config_default_min_leak_duration():
+    """UploaderConfig defaults min_leak_duration_minutes to 1.0."""
+    assert UploaderConfig().min_leak_duration_minutes == 1.0
 
 
 def test_find_completed_runs_skips_test_runs(results_dir):

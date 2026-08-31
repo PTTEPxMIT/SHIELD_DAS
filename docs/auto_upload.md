@@ -9,7 +9,10 @@ terminal). Each sweep it:
    not test-mode (`test_run_*`), have either a `run_info.end_time` in
    `run_metadata.json` or a `shield_data.csv` untouched for at least
    `min_age_minutes`, and lasted at least `min_duration_minutes` (first to
-   last CSV timestamp).
+   last CSV timestamp). Runs whose metadata has
+   `run_info.run_type == "leak_test"` use the lower
+   `min_leak_duration_minutes` floor instead, since leak tests are
+   deliberately short recordings that must still upload.
 2. Normalises each run into the SHIELD-Data layout: a staged copy named
    `YY.MM.DD_run_N_HHhMM/` with `shield_data.csv` converted to a
    zstd-compressed `measurements.parquet` (~10x smaller; the conversion is
@@ -62,7 +65,8 @@ Default location: `~/.shield_das_uploader.json` (override with `--config`).
   "repo": "PTTEPxMIT/SHIELD-Data",
   "staging_dir": "C:/SHIELD/results/.upload_staging",
   "min_age_minutes": 30,
-  "min_duration_minutes": 5
+  "min_duration_minutes": 5,
+  "min_leak_duration_minutes": 1
 }
 ```
 

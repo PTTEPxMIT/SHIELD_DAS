@@ -67,6 +67,10 @@ class UploaderConfig:
             many minutes.
         min_duration_minutes: Runs shorter than this (first-to-last CSV
             timestamp, in minutes) are skipped as aborted starts.
+        min_leak_duration_minutes: Duration floor (minutes) used instead of
+            ``min_duration_minutes`` for runs whose metadata has
+            ``run_info.run_type == "leak_test"`` — leak tests are
+            deliberately short and must still upload.
         token: GitHub token used for pushing and opening pull requests. The
             ``SHIELD_UPLOAD_TOKEN`` environment variable takes precedence.
     """
@@ -76,6 +80,7 @@ class UploaderConfig:
     staging_dir: str | None = None
     min_age_minutes: float = 30.0
     min_duration_minutes: float = 5.0
+    min_leak_duration_minutes: float = 1.0
     token: str | None = None
 
     def __post_init__(self):
@@ -187,6 +192,7 @@ def find_completed_runs(
     results_dir: str,
     min_age_minutes: float = 30.0,
     min_duration_minutes: float = 5.0,
+    min_leak_duration_minutes: float = 1.0,
 ) -> Iterator[str]:
     """Yield run directories that are complete and worth uploading.
 
@@ -197,7 +203,9 @@ def find_completed_runs(
     - its metadata has ``run_info.end_time``, OR its ``shield_data.csv`` was
       last modified more than ``min_age_minutes`` ago;
     - its duration (first-to-last CSV timestamp) is at least
-      ``min_duration_minutes``.
+      ``min_duration_minutes`` — or ``min_leak_duration_minutes`` when the
+      metadata has ``run_info.run_type == "leak_test"``, since leak tests
+      are deliberately short recordings.
 
     Runs with missing or corrupt metadata are skipped with a warning; this
     function never raises for a malformed run.
@@ -207,6 +215,8 @@ def find_completed_runs(
         min_age_minutes: Age threshold (minutes since last CSV write) used
             when no end_time is recorded.
         min_duration_minutes: Minimum run duration in minutes.
+        min_leak_duration_minutes: Minimum duration in minutes for leak-test
+            runs.
 
     Yields:
         Absolute paths of completed run directories.
@@ -256,12 +266,17 @@ def find_completed_runs(
             if duration is None:
                 logger.warning("Skipping %s: could not determine duration", run_dir)
                 continue
-            if duration < min_duration_minutes:
+            duration_floor = (
+                min_leak_duration_minutes
+                if run_info.get("run_type") == "leak_test"
+                else min_duration_minutes
+            )
+            if duration < duration_floor:
                 logger.info(
                     "Skipping %s: duration %.1f min < %.1f min",
                     run_dir,
                     duration,
-                    min_duration_minutes,
+                    duration_floor,
                 )
                 continue
 
@@ -629,6 +644,7 @@ def sweep(config: UploaderConfig, dry_run: bool = False) -> list[str]:
         config.results_dir,
         min_age_minutes=config.min_age_minutes,
         min_duration_minutes=config.min_duration_minutes,
+        min_leak_duration_minutes=config.min_leak_duration_minutes,
     ):
         try:
             key = run_key(run_dir)

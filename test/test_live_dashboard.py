@@ -19,6 +19,8 @@ from shield_das.live_dashboard import (
     IncrementalRunReader,
     LiveDashboardConfig,
     _decimation_indices,
+    _leak_rate_torr_per_s,
+    _leak_test_readout,
     build_traces,
     find_active_run,
     update_dashboard,
@@ -85,6 +87,7 @@ def make_run(
     gauges=GAUGES,
     thermocouples=THERMOCOUPLES,
     end_time=None,
+    run_info_extra=None,
 ):
     """Create a fake run directory with metadata and CSV; return its path."""
     run_dir = os.path.join(str(results_dir), date_name, run_name)
@@ -93,6 +96,8 @@ def make_run(
     run_info = {"date": "2026-08-04", "start_time": "2026-08-04 10:00:00"}
     if end_time is not None:
         run_info["end_time"] = end_time
+    if run_info_extra:
+        run_info.update(run_info_extra)
     metadata = {"version": "1.3", "run_info": run_info, "gauges": gauges}
     if thermocouples:
         metadata["thermocouples"] = thermocouples
@@ -536,3 +541,129 @@ def test_update_dashboard_polls_new_rows_between_ticks(tmp_path):
     *_first, rows = update_dashboard(state, config, max_points=500)
 
     assert rows == "4 rows"
+
+
+# =============================================================================
+# Tests for the leak-test header readout
+# =============================================================================
+
+
+def make_leak_run(results_dir, voltages, run_info_extra=None, run_name="run_1_10h00"):
+    """Create a leak-test run whose gauge voltages vary per row.
+
+    Args:
+        results_dir: Root results directory.
+        voltages: Per-row gauge voltage in volts (applied to every gauge).
+        run_info_extra: Extra run_info keys merged over the defaults.
+        run_name: Name of the run directory.
+
+    Returns:
+        Path to the created run directory.
+    """
+    extra = {"run_type": "leak_test", "sample_id": "SAMPLE-001"}
+    extra.update(run_info_extra or {})
+    run_dir = make_run(results_dir, run_name=run_name, run_info_extra=extra)
+
+    lines = [csv_header(GAUGES, THERMOCOUPLES)]
+    lines += [
+        csv_row(i, GAUGES, THERMOCOUPLES, voltage_v=v) for i, v in enumerate(voltages)
+    ]
+    with open(os.path.join(run_dir, "shield_data.csv"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+    return run_dir
+
+
+def attached_state(results_dir):
+    """Attach a DashboardState to whatever run is live in results_dir."""
+    state = DashboardState()
+    config = LiveDashboardConfig(results_dir=str(results_dir))
+    update_dashboard(state, config, max_points=500)
+    return state
+
+
+def test_leak_readout_hidden_for_normal_run(tmp_path):
+    """A non-leak-test run hides the leak badge and shows no rate."""
+    make_run(tmp_path)
+    state = attached_state(tmp_path)
+
+    badge_text, badge_style, rate_text = _leak_test_readout(state)
+
+    assert badge_text == ""
+    assert badge_style == {"display": "none"}
+    assert rate_text == ""
+
+
+def test_leak_readout_hidden_when_no_run(tmp_path):
+    """With nothing attached the leak badge stays hidden."""
+    state = DashboardState()
+
+    assert _leak_test_readout(state) == ("", {"display": "none"}, "")
+
+
+def test_leak_readout_badge_shows_sample_id(tmp_path):
+    """A leak-test run shows a visible badge with its sample_id."""
+    make_leak_run(tmp_path, voltages=[1.0 + 0.1 * i for i in range(10)])
+    state = attached_state(tmp_path)
+
+    badge_text, badge_style, rate_text = _leak_test_readout(state)
+
+    assert badge_text == "LEAK TEST — SAMPLE-001"
+    assert badge_style == {}
+    assert rate_text.startswith("Leak rate: ")
+    assert "Torr/s" in rate_text and "Torr/h" in rate_text
+
+
+def test_leak_rate_fits_downstream_pressure_slope(tmp_path):
+    """The fitted rate matches the known slope of the 1-torr Baratron trace.
+
+    Rows are 0.5 s apart and the voltage rises 0.1 V per row; on the 1-torr
+    full-scale head that is 0.01 torr per row, i.e. 0.02 torr/s.
+    """
+    make_leak_run(tmp_path, voltages=[1.0 + 0.1 * i for i in range(10)])
+    state = attached_state(tmp_path)
+
+    rate = _leak_rate_torr_per_s(state.reader, state.metadata)
+
+    assert rate == pytest.approx(0.02, rel=1e-6)
+
+
+def test_leak_rate_window_starts_at_downstream_isolated_time(tmp_path):
+    """Samples before downstream_isolated_time are excluded from the fit.
+
+    The first five rows are flat; the rate must come from the rising rows
+    after the isolation event only (0.02 torr per 0.5 s row = 0.04 torr/s).
+    """
+    voltages = [2.0] * 5 + [2.0 + 0.2 * i for i in range(5)]
+    isolated = datetime(2026, 8, 4, 10, 0, 0) + timedelta(seconds=2.5)
+    make_leak_run(
+        tmp_path,
+        voltages=voltages,
+        run_info_extra={
+            "downstream_isolated_time": isolated.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        },
+    )
+    state = attached_state(tmp_path)
+
+    rate = _leak_rate_torr_per_s(state.reader, state.metadata)
+
+    assert rate == pytest.approx(0.04, rel=1e-6)
+
+
+def test_leak_rate_none_with_too_few_samples(tmp_path):
+    """Fewer than 2 usable samples yields no rate and an em-dash readout."""
+    make_leak_run(tmp_path, voltages=[1.0])
+    state = attached_state(tmp_path)
+
+    assert _leak_rate_torr_per_s(state.reader, state.metadata) is None
+    _badge_text, _badge_style, rate_text = _leak_test_readout(state)
+    assert rate_text == "Leak rate: —"
+
+
+def test_leak_rate_none_without_downstream_baratron(tmp_path):
+    """A run with no downstream Baratron gauge yields no rate."""
+    make_leak_run(tmp_path, voltages=[1.0 + 0.1 * i for i in range(5)])
+    state = attached_state(tmp_path)
+    metadata = dict(state.metadata)
+    metadata["gauges"] = [g for g in GAUGES if g["name"] != "Baratron626D_1T"]
+
+    assert _leak_rate_torr_per_s(state.reader, metadata) is None

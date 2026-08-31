@@ -18,7 +18,6 @@ from shield_das.callbacks.export_callbacks import (
     register_export_callbacks,
 )
 
-
 # =============================================================================
 # Tests for _is_autoscale_event
 # =============================================================================

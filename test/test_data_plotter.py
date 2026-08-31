@@ -5,10 +5,8 @@ verifying initialization, data loading, plot generation, and layout creation.
 """
 
 import io
-import os
 import zipfile
-from pathlib import Path
-from unittest.mock import MagicMock, Mock, PropertyMock, patch
+from unittest.mock import Mock, patch
 
 import dash
 import dash_bootstrap_components as dbc
@@ -16,7 +14,6 @@ import plotly.graph_objects as go
 import pytest
 
 from shield_das.data_plotter import DataPlotter
-from shield_das.dataset import Dataset
 
 
 @pytest.fixture

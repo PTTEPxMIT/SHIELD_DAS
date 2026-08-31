@@ -35,7 +35,11 @@ class Dataset:
         valve_times: Dictionary of valve event times
         colour: Color for plotting this dataset
         temperature: Furnace set point temperature (K)
-        sample_material: Material name
+        sample_substrate: Substrate material name (e.g. "carbon steel")
+        sample_coating: Human-readable coating description (e.g.
+            "800nm tungsten"); "uncoated" for a bare sample
+        sample_coating_layers: Coating layers as a list of dicts with
+            "material" and "thickness_nm" (nm) keys (empty list if uncoated)
         sample_thickness: Sample thickness (m)
         furnace_set_point: Furnace set point temperature (K)
         local_temperature_data: Local temperature readings (optional)
@@ -54,7 +58,9 @@ class Dataset:
     colour: str
     valve_times: dict[str, float]
 
-    sample_material: str
+    sample_substrate: str
+    sample_coating: str
+    sample_coating_layers: list[dict]
     sample_thickness: float
 
     furnace_setpoint: float
@@ -77,7 +83,9 @@ class Dataset:
         self.downstream_error = None
         self.valve_times = None
         self.colour = None
-        self.sample_material = None
+        self.sample_substrate = None
+        self.sample_coating = None
+        self.sample_coating_layers = None
         self.sample_thickness = None
         self.furnace_setpoint = None
         self.local_temperature_data = None
@@ -106,12 +114,13 @@ class Dataset:
         with open(metadata_path) as f:
             metadata = json.load(f)
 
-        # Validate version - only support 1.3
+        # Validate version - support 1.3 (sample_material), 1.4
+        # (sample_substrate + coating) and 1.5 (adds sample_id and leak tests)
         version = metadata.get("version")
-        if version != "1.3":
+        if version not in ("1.3", "1.4", "1.5"):
             raise ValueError(
                 f"Unsupported metadata version: {version}. "
-                f"Only version 1.3 is supported. "
+                f"Only versions 1.3, 1.4 and 1.5 are supported. "
                 f"Please regenerate your data with the latest version of the recorder."
             )
 
@@ -191,9 +200,14 @@ class Dataset:
         self.furnace_setpoint = (
             self.metadata["run_info"].get("furnace_setpoint", 25.0) + 273.15
         )
-        self.sample_material = self.metadata["run_info"].get(
-            "sample_material", "Unknown"
+        # v1.4+ records sample_substrate/sample_coating; v1.3 only had
+        # sample_material (some very old runs used "material"), which maps
+        # onto the substrate with no coating info.
+        run_info = self.metadata["run_info"]
+        self.sample_substrate = run_info.get(
+            "sample_substrate",
+            run_info.get("sample_material", run_info.get("material", "Unknown")),
         )
-        self.sample_thickness = self.metadata["run_info"].get(
-            "sample_thickness", 0.00088
-        )
+        self.sample_coating = run_info.get("sample_coating", "Unknown")
+        self.sample_coating_layers = run_info.get("sample_coating_layers", [])
+        self.sample_thickness = run_info.get("sample_thickness", 0.00088)
