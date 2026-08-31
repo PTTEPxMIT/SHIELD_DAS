@@ -510,14 +510,41 @@ class DataRecorder:
             self.elapsed_time += self.recording_interval
 
     def _initialize_labjack(self):
-        """Initialize LabJack connection for data recording."""
+        """Initialize LabJack connection for data recording.
+
+        Retries for a few seconds if the device is momentarily open elsewhere:
+        the standby beacon opens, reads and closes the LabJack for ~12 ms once
+        a second, so a run starting at exactly the wrong instant would
+        otherwise die on a transient "already open" error. The beacon goes
+        dormant on its own once it sees this run recording.
+        """
         if self.test_mode:
             return None
 
-        labjack = u6.U6(firstFound=True)
-        labjack.getCalibrationData()
-        print("LabJack connected")
-        return labjack
+        attempts = 20
+        for attempt in range(1, attempts + 1):
+            labjack = None
+            try:
+                labjack = u6.U6(firstFound=True)
+                labjack.getCalibrationData()
+                print("LabJack connected")
+                return labjack
+            except Exception:
+                # Close a half-opened handle so the retry does not collide
+                # with our own leftover claim on the device.
+                if labjack is not None:
+                    try:
+                        labjack.close()
+                    except Exception:
+                        pass
+                if attempt == attempts:
+                    raise
+                if attempt == 1:
+                    print(
+                        "LabJack busy (another program is reading it) - "
+                        "retrying for up to 10 seconds..."
+                    )
+                time.sleep(0.5)
 
     def _initialize_recording_session(self):
         """Initialize recording session parameters."""
