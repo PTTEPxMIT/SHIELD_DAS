@@ -197,10 +197,12 @@ def read_channels(labjack, gauges: list[dict]) -> dict[str, float]:
 class LabJackSampler:
     """Samples the gauges by opening and closing the LabJack each time.
 
-    Holding the handle would block the recorder from starting a run. One
-    open/read/close cycle measures ~12 ms, so at the default 1 s cadence the
-    device is free ~99 % of the time and a run can claim it whenever it
-    wants.
+    One open/read/close cycle measures ~20 ms. In principle that leaves the
+    device free ~98 % of the time -- but on the rig's Windows UD driver,
+    ``close()`` does NOT release the USB claim to other processes while this
+    process lives, so in practice the recorder cannot open the LabJack while
+    the beacon runs. The entry-point run scripts therefore stop the beacon
+    before recording and restart it afterwards (see rig_config.py).
 
     Args:
         gauges: Gauge descriptions in ``run_metadata.json`` form.
@@ -237,7 +239,15 @@ class LabJackSampler:
                 try:
                     labjack.close()
                 except Exception:
-                    logger.debug("Ignoring LabJack close error", exc_info=True)
+                    # A failed close leaks the USB claim: the device then reads
+                    # as "already open" to every other process (the recorder
+                    # cannot start a run) until this process exits. Make it
+                    # loud so the log explains the symptom.
+                    logger.warning(
+                        "LabJack close failed - the handle may be leaked and "
+                        "the device held until the beacon is restarted",
+                        exc_info=True,
+                    )
 
 
 class VacuumBeacon:

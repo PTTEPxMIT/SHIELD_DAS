@@ -3,9 +3,9 @@ REM Publish the rig's present vacuum level so it can be checked from anywhere,
 REM with no run recording and nothing written to disk. Double-click this file.
 REM See docs/live_supabase.md ("The beacon").
 REM
-REM It stays out of the way: while a run IS being recorded the recorder owns
-REM the LabJack, so the beacon pauses and the site shows the run's own plots
-REM instead. It resumes when the run ends. You do not need to stop it first.
+REM It stays out of the way: main.py and leak_test.py stop the beacon when a
+REM run starts (the Windows LabJack driver does not let two processes share
+REM the device) and restart it when the run ends. You do not need to stop it.
 
 setlocal
 set "SITE=https://pttepxmit.github.io/SHIELD_DAS/"
