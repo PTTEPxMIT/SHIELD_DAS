@@ -278,8 +278,8 @@ def test_data_recorder_initializes_elapsed_time_to_zero(mock_gauge):
 
 def test_data_recorder_initializes_valve_times_to_none(mock_gauge):
     """
-    Test DataRecorder to verify all valve event times (v4_close, v5_close,
-    v6_close, v3_open) are initialized to None.
+    Test DataRecorder to verify all valve event times (v1_close, v2_close,
+    v3_open, v4_close, pressure_set, v4_open) are initialized to None.
     """
     recorder = DataRecorder(
         gauges=[mock_gauge],
@@ -288,10 +288,12 @@ def test_data_recorder_initializes_valve_times_to_none(mock_gauge):
         sample_material="316",
         sample_thickness=0.001,
     )
-    assert recorder.v4_close_time is None
-    assert recorder.v5_close_time is None
-    assert recorder.v6_close_time is None
+    assert recorder.v1_close_time is None
+    assert recorder.v2_close_time is None
     assert recorder.v3_open_time is None
+    assert recorder.v4_close_time is None
+    assert recorder.pressure_set_time is None
+    assert recorder.v4_open_time is None
 
 
 def test_data_recorder_initializes_current_valve_index_to_zero(mock_gauge):
@@ -321,8 +323,38 @@ def test_data_recorder_initializes_valve_event_sequence(mock_gauge):
         sample_material="316",
         sample_thickness=0.001,
     )
-    expected = ["v4_close_time", "v5_close_time", "v6_close_time", "v3_open_time"]
+    expected = [
+        "v1_close_time",
+        "v2_close_time",
+        "v3_open_time",
+        "v4_close_time",
+        "pressure_set_time",
+        "v4_open_time",
+    ]
     assert recorder.valve_event_sequence == expected
+
+
+def test_data_recorder_every_valve_event_has_a_description(mock_gauge):
+    """
+    Test that every event in the spacebar sequence has operator prompt text,
+    so the console never shows a bare metadata key.
+    """
+    from shield_das.data_recorder import VALVE_EVENT_DESCRIPTIONS
+
+    recorder = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
+    )
+    for event in recorder.valve_event_sequence:
+        assert event in VALVE_EVENT_DESCRIPTIONS
+        assert event.endswith("_time")
+    assert recorder._describe_event("v4_open_time") == (
+        "v4_open_time (open V4 (experiment start))"
+    )
+    assert recorder._describe_event("unknown_time") == "unknown_time"
 
 
 # =============================================================================
@@ -855,16 +887,14 @@ def test_data_recorder_start_resets_valve_times(recorder):
     to None at the beginning of a new recording session.
     """
     # Set some valve times
-    recorder.v4_close_time = "2025-01-01 12:00:00"
-    recorder.v5_close_time = "2025-01-01 12:01:00"
+    recorder.v1_close_time = "2025-01-01 12:00:00"
+    recorder.pressure_set_time = "2025-01-01 12:01:00"
 
     recorder.start()
     time.sleep(0.05)
 
-    assert recorder.v4_close_time is None
-    assert recorder.v5_close_time is None
-    assert recorder.v6_close_time is None
-    assert recorder.v3_open_time is None
+    for event in recorder.valve_event_sequence:
+        assert getattr(recorder, event) is None
 
     recorder.stop()
 

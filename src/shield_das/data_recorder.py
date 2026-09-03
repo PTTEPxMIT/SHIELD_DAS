@@ -12,6 +12,28 @@ import u6
 from .pressure_gauge import PressureGauge
 from .thermocouple import Thermocouple
 
+# Operator procedure for a permeation run, in the order the events happen.
+# Each spacebar press records the next one; the last (V4 open) is the start
+# of the experiment. Keys end in "_time" and are written into
+# run_metadata.json["run_info"], where Dataset picks them up as valve markers.
+VALVE_EVENT_SEQUENCE = [
+    "v1_close_time",
+    "v2_close_time",
+    "v3_open_time",
+    "v4_close_time",
+    "pressure_set_time",
+    "v4_open_time",
+]
+
+VALVE_EVENT_DESCRIPTIONS = {
+    "v1_close_time": "close V1",
+    "v2_close_time": "close V2",
+    "v3_open_time": "open V3",
+    "v4_close_time": "close V4",
+    "pressure_set_time": "set the upstream pressure",
+    "v4_open_time": "open V4 (experiment start)",
+}
+
 
 class DataRecorder:
     """
@@ -50,11 +72,16 @@ class DataRecorder:
         run_dir: Directory for the current run's results
         backup_dir: Directory for backup files
         elapsed_time: Time elapsed since the start of recording
-        v4_close_time: Timestamp when V4 valve was closed (spacebar press 1)
-        v5_close_time: Timestamp when V5 valve was closed (spacebar press 2)
-        v6_close_time: Timestamp when V6 valve was closed (spacebar press 3)
-        v3_open_time: Timestamp when V3 valve was opened (spacebar press 4)
-        valve_event_sequence: Ordered list of valve events to track
+        v1_close_time: Timestamp when V1 was closed (spacebar press 1)
+        v2_close_time: Timestamp when V2 was closed (spacebar press 2)
+        v3_open_time: Timestamp when V3 was opened (spacebar press 3)
+        v4_close_time: Timestamp when V4 was closed (spacebar press 4)
+        pressure_set_time: Timestamp when the upstream pressure was set
+            (spacebar press 5)
+        v4_open_time: Timestamp when V4 was opened, i.e. the start of the
+            experiment (spacebar press 6)
+        valve_event_sequence: Ordered list of valve events to track (see
+            VALVE_EVENT_SEQUENCE)
         current_valve_index: Current position in the valve event sequence
     """
 
@@ -73,10 +100,12 @@ class DataRecorder:
     run_dir: str
     backup_dir: str
     elapsed_time: float
-    v4_close_time: str | None
-    v5_close_time: str | None
-    v6_close_time: str | None
+    v1_close_time: str | None
+    v2_close_time: str | None
     v3_open_time: str | None
+    v4_close_time: str | None
+    pressure_set_time: str | None
+    v4_open_time: str | None
     start_time: datetime
     valve_event_sequence: list[str]
     current_valve_index: int
@@ -108,20 +137,12 @@ class DataRecorder:
         self.thread = None
 
         self.elapsed_time = 0.0
-        self.v4_close_time = None
-        self.v5_close_time = None
-        self.v6_close_time = None
-        self.v3_open_time = None
         self.start_time = None
 
-        # Valve event sequence tracking
-        self.valve_event_sequence = [
-            "v4_close_time",
-            "v5_close_time",
-            "v6_close_time",
-            "v3_open_time",
-        ]
-        self.current_valve_index = 0
+        # Valve event sequence tracking: each spacebar press records the next
+        # event in this list as a run_info timestamp in run_metadata.json.
+        self.valve_event_sequence = list(VALVE_EVENT_SEQUENCE)
+        self._reset_valve_events()
 
     @property
     def gauges(self) -> list[PressureGauge]:
@@ -325,7 +346,7 @@ class DataRecorder:
             return
 
         current_event = self.valve_event_sequence[self.current_valve_index]
-        print(f"Press SPACEBAR to record {current_event}...")
+        print(f"Press SPACEBAR to record {self._describe_event(current_event)}...")
 
         def on_spacebar():
             if self.current_valve_index < len(self.valve_event_sequence):
@@ -345,12 +366,29 @@ class DataRecorder:
                 # Show next event or completion message
                 if self.current_valve_index < len(self.valve_event_sequence):
                     next_event = self.valve_event_sequence[self.current_valve_index]
-                    print(f"Next: Press SPACEBAR to record {next_event}...")
+                    print(
+                        "Next: Press SPACEBAR to record "
+                        f"{self._describe_event(next_event)}..."
+                    )
                 else:
                     print("All valve events recorded!")
 
         # Set up keyboard listener for spacebar
         keyboard.on_press_key("space", lambda _: on_spacebar())
+
+    @staticmethod
+    def _describe_event(event_name: str) -> str:
+        """Human-readable prompt text for a valve event key.
+
+        Args:
+            event_name: Metadata key of the event (e.g. 'v4_open_time').
+
+        Returns:
+            The key followed by its operator description when one is known,
+            e.g. "v4_open_time (open V4 (experiment start))".
+        """
+        description = VALVE_EVENT_DESCRIPTIONS.get(event_name)
+        return f"{event_name} ({description})" if description else event_name
 
     def _is_ci_environment(self) -> bool:
         """Detect if we're running in a CI environment."""
@@ -370,7 +408,7 @@ class DataRecorder:
         """Update the metadata file with the valve event time.
 
         Args:
-            event_name: Name of the valve event (e.g., 'v5_close_time')
+            event_name: Name of the valve event (e.g., 'v1_close_time')
             timestamp: Timestamp when the event occurred
         """
         metadata_path = os.path.join(self.run_dir, "run_metadata.json")
@@ -387,10 +425,8 @@ class DataRecorder:
 
     def _reset_valve_events(self):
         """Reset all valve event times and tracking for a new recording session."""
-        self.v4_close_time = None
-        self.v5_close_time = None
-        self.v6_close_time = None
-        self.v3_open_time = None
+        for event in self.valve_event_sequence:
+            setattr(self, event, None)
         self.current_valve_index = 0
 
     def start(self):

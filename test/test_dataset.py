@@ -745,6 +745,52 @@ def test_dataset_process_data_handles_start_time_without_microseconds(
     assert "v5_close_time" in dataset.valve_times
 
 
+def test_dataset_process_data_extracts_non_valve_events_and_skips_end_time(
+    temp_dataset_dir, sample_csv_data
+):
+    """
+    Test Dataset process_data to verify every operator event written by the
+    recorder is extracted, including ones not named after a valve
+    (pressure_set_time), while the run's own start_time/end_time are not
+    treated as events.
+    """
+    metadata = {
+        "version": "1.3",
+        "run_info": {
+            "start_time": "2025-08-20 10:58:01",
+            "end_time": "2025-08-20 11:58:01",
+            "furnace_setpoint": 600.0,
+            "sample_material": "316",
+            "sample_thickness": 0.00088,
+            "v1_close_time": "2025-08-20 10:58:03.000000",
+            "pressure_set_time": "2025-08-20 10:58:11.000000",
+            "v4_open_time": "2025-08-20 10:58:21.000000",
+        },
+        "gauges": [
+            {
+                "name": "Baratron626D_1KT",
+                "type": "Baratron626D_Gauge",
+                "gauge_location": "upstream",
+                "full_scale_torr": 1000.0,
+            }
+        ],
+    }
+
+    (temp_dataset_dir / "run_metadata.json").write_text(json.dumps(metadata))
+    (temp_dataset_dir / "shield_data.csv").write_text(sample_csv_data)
+
+    dataset = Dataset(path=str(temp_dataset_dir), name="Test")
+    dataset.process_data()
+
+    assert set(dataset.valve_times) == {
+        "v1_close_time",
+        "pressure_set_time",
+        "v4_open_time",
+    }
+    assert dataset.valve_times["pressure_set_time"] == pytest.approx(10.0)
+    assert dataset.valve_times["v4_open_time"] == pytest.approx(20.0)
+
+
 # =============================================================================
 # Tests for process_data Method - Metadata Extraction
 # =============================================================================

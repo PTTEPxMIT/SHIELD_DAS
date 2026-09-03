@@ -182,8 +182,11 @@ class Dataset:
             except ValueError:
                 start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
 
+            # Every other "*_time" key in run_info is an operator event recorded
+            # by the recorder's spacebar sequence (valve operations, pressure
+            # set); their names are not assumed here.
             for key, value in self.metadata["run_info"].items():
-                if "_time" in key and key.startswith("v"):
+                if key.endswith("_time") and key not in ("start_time", "end_time"):
                     valve_dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
                     self.valve_times[key] = (valve_dt - start_time).total_seconds()
 
