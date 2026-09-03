@@ -69,7 +69,7 @@ def recorder(temp_dir, mock_gauge, mock_gauge2):
         gauges=[mock_gauge, mock_gauge2],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
         results_dir=temp_dir,
         run_type="test_mode",
@@ -96,7 +96,7 @@ def test_data_recorder_initializes_with_gauges(mock_gauge, mock_gauge2):
         gauges=[mock_gauge, mock_gauge2],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
     )
     assert recorder.gauges == [mock_gauge, mock_gauge2]
@@ -111,7 +111,7 @@ def test_data_recorder_initializes_with_thermocouples(mock_gauge, mock_thermocou
         gauges=[mock_gauge],
         thermocouples=[mock_thermocouple],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
     )
     assert recorder.thermocouples == [mock_thermocouple]
@@ -126,7 +126,7 @@ def test_data_recorder_initializes_with_default_results_dir(mock_gauge):
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
     )
     assert recorder.results_dir == "results"
@@ -142,7 +142,7 @@ def test_data_recorder_initializes_with_custom_results_dir(mock_gauge):
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
         results_dir=custom_dir,
     )
@@ -162,7 +162,7 @@ def test_data_recorder_initializes_with_valid_run_type(mock_gauge, run_type):
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
         run_type=run_type,
     )
@@ -178,7 +178,7 @@ def test_data_recorder_initializes_with_default_recording_interval(mock_gauge):
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
     )
     assert recorder.recording_interval == 0.5
@@ -193,7 +193,7 @@ def test_data_recorder_initializes_with_custom_recording_interval(mock_gauge):
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
         recording_interval=0.2,
     )
@@ -209,7 +209,7 @@ def test_data_recorder_initializes_with_default_backup_interval(mock_gauge):
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
     )
     assert recorder.backup_interval == 5.0
@@ -224,7 +224,7 @@ def test_data_recorder_initializes_with_custom_backup_interval(mock_gauge):
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
         backup_interval=10.0,
     )
@@ -240,7 +240,7 @@ def test_data_recorder_initializes_stop_event_as_threading_event(mock_gauge):
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
     )
     assert isinstance(recorder.stop_event, threading.Event)
@@ -255,7 +255,7 @@ def test_data_recorder_initializes_thread_as_none(mock_gauge):
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
     )
     assert recorder.thread is None
@@ -270,7 +270,7 @@ def test_data_recorder_initializes_elapsed_time_to_zero(mock_gauge):
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
     )
     assert recorder.elapsed_time == 0.0
@@ -285,7 +285,7 @@ def test_data_recorder_initializes_valve_times_to_none(mock_gauge):
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
     )
     assert recorder.v1_close_time is None
@@ -305,7 +305,7 @@ def test_data_recorder_initializes_current_valve_index_to_zero(mock_gauge):
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
     )
     assert recorder.current_valve_index == 0
@@ -320,7 +320,7 @@ def test_data_recorder_initializes_valve_event_sequence(mock_gauge):
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
     )
     expected = [
@@ -345,7 +345,7 @@ def test_data_recorder_every_valve_event_has_a_description(mock_gauge):
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
     )
     for event in recorder.valve_event_sequence:
@@ -372,7 +372,7 @@ def test_data_recorder_raises_error_for_invalid_gauges_type(mock_gauge):
             gauges=mock_gauge,
             thermocouples=[],
             furnace_setpoint=600.0,
-            sample_material="316",
+            sample_substrate="316L steel",
             sample_thickness=0.001,
         )
 
@@ -387,7 +387,7 @@ def test_data_recorder_raises_error_for_non_pressure_gauge_in_list():
             gauges=["not a gauge"],
             thermocouples=[],
             furnace_setpoint=600.0,
-            sample_material="316",
+            sample_substrate="316L steel",
             sample_thickness=0.001,
         )
 
@@ -402,7 +402,7 @@ def test_data_recorder_raises_error_for_invalid_thermocouples_type(mock_gauge):
             gauges=[mock_gauge],
             thermocouples="not a list",
             furnace_setpoint=600.0,
-            sample_material="316",
+            sample_substrate="316L steel",
             sample_thickness=0.001,
         )
 
@@ -419,7 +419,7 @@ def test_data_recorder_raises_error_for_non_thermocouple_in_list(mock_gauge):
             gauges=[mock_gauge],
             thermocouples=["not a thermocouple"],
             furnace_setpoint=600.0,
-            sample_material="316",
+            sample_substrate="316L steel",
             sample_thickness=0.001,
         )
 
@@ -434,7 +434,7 @@ def test_data_recorder_raises_error_for_non_string_results_dir(mock_gauge):
             gauges=[mock_gauge],
             thermocouples=[],
             furnace_setpoint=600.0,
-            sample_material="316",
+            sample_substrate="316L steel",
             sample_thickness=0.001,
             results_dir=123,
         )
@@ -451,46 +451,196 @@ def test_data_recorder_raises_error_for_invalid_run_type(mock_gauge, invalid_run
             gauges=[mock_gauge],
             thermocouples=[],
             furnace_setpoint=600.0,
-            sample_material="316",
+            sample_substrate="316L steel",
             sample_thickness=0.001,
             run_type=invalid_run_type,
         )
 
 
-@pytest.mark.parametrize(
-    "invalid_material",
-    ["304", "stainless steel", "AISI1018", ""],
-)
-def test_data_recorder_raises_error_for_invalid_sample_material(
-    mock_gauge, invalid_material
+@pytest.mark.parametrize("invalid_substrate", ["", "   ", 316, ["316L steel"]])
+def test_data_recorder_raises_error_for_invalid_sample_substrate(
+    mock_gauge, invalid_substrate
 ):
     """
-    Test DataRecorder to verify it raises ValueError when sample_material is
-    not one of the valid options: '316' or 'AISI 1018'.
+    Test DataRecorder to verify it rejects a sample_substrate that is not a
+    non-empty string (None is the only other accepted value).
     """
-    with pytest.raises(ValueError, match="sample_material must be one of"):
+    with pytest.raises(ValueError, match="sample_substrate must be a non-empty"):
         DataRecorder(
             gauges=[mock_gauge],
             thermocouples=[],
             furnace_setpoint=600.0,
-            sample_material=invalid_material,
+            sample_substrate=invalid_substrate,
             sample_thickness=0.001,
         )
 
 
-def test_data_recorder_accepts_none_for_sample_material(mock_gauge):
+def test_data_recorder_accepts_none_sample_for_leak_tests(mock_gauge):
     """
-    Test DataRecorder to verify it accepts None as a valid value for
-    sample_material parameter.
+    Test DataRecorder to verify a run with no mounted sample (substrate,
+    thickness and id all None) is accepted and reports no coating.
+    """
+    recorder = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        furnace_setpoint=0,
+        sample_substrate=None,
+        sample_thickness=None,
+        run_type="leak_test",
+    )
+    assert recorder.sample_substrate is None
+    assert recorder.sample_id is None
+    assert recorder.sample_coating_layers == []
+    assert recorder.sample_coating is None
+
+
+def test_data_recorder_uncoated_sample_has_coating_none(mock_gauge):
+    """
+    Test DataRecorder to verify an uncoated sample (no layers given) gets the
+    SHIELD-Data summary string "none" and an empty layer list.
     """
     recorder = DataRecorder(
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material=None,
-        sample_thickness=0.001,
+        sample_substrate="  316L steel ",
+        sample_thickness=0.008,
+        sample_id=" 316L-fresh-2 ",
     )
-    assert recorder.sample_material is None
+    assert recorder.sample_substrate == "316L steel"
+    assert recorder.sample_id == "316L-fresh-2"
+    assert recorder.sample_coating_layers == []
+    assert recorder.sample_coating == "none"
+
+
+def test_data_recorder_derives_coating_summary_from_layers(mock_gauge):
+    """
+    Test DataRecorder to verify sample_coating is derived from the layers in
+    order, in the SHIELD-Data format ("200nm tungsten + 50nm chromium").
+    """
+    recorder = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_substrate="carbon steel",
+        sample_thickness=0.00136,
+        sample_coating_layers=[
+            {"material": "tungsten", "thickness_nm": 200},
+            {"material": " chromium ", "thickness_nm": 50.0},
+        ],
+    )
+    assert recorder.sample_coating == "200nm tungsten + 50nm chromium"
+    assert recorder.sample_coating_layers == [
+        {"material": "tungsten", "thickness_nm": 200},
+        {"material": "chromium", "thickness_nm": 50.0},
+    ]
+
+
+@pytest.mark.parametrize(
+    "bad_layers",
+    [
+        "150nm alumina",
+        [{"material": "alumina"}],
+        [{"thickness_nm": 150}],
+        [{"material": "", "thickness_nm": 150}],
+        [{"material": "alumina", "thickness_nm": 0}],
+        [{"material": "alumina", "thickness_nm": "150"}],
+        [{"material": "alumina", "thickness_nm": True}],
+        ["alumina"],
+    ],
+)
+def test_data_recorder_rejects_malformed_coating_layers(mock_gauge, bad_layers):
+    """
+    Test DataRecorder to verify sample_coating_layers must be a list of
+    {'material': non-empty str, 'thickness_nm': positive number} dicts.
+    """
+    with pytest.raises(ValueError, match="coating.layer"):
+        DataRecorder(
+            gauges=[mock_gauge],
+            thermocouples=[],
+            furnace_setpoint=600.0,
+            sample_substrate="carbon steel",
+            sample_thickness=0.00136,
+            sample_coating_layers=bad_layers,
+        )
+
+
+@pytest.mark.parametrize("bad_id", ["", "  ", 7])
+def test_data_recorder_rejects_blank_sample_id(mock_gauge, bad_id):
+    """
+    Test DataRecorder to verify sample_id must be a non-empty string or None.
+    """
+    with pytest.raises(ValueError, match="sample_id must be"):
+        DataRecorder(
+            gauges=[mock_gauge],
+            thermocouples=[],
+            furnace_setpoint=600.0,
+            sample_substrate="carbon steel",
+            sample_thickness=0.00136,
+            sample_id=bad_id,
+        )
+
+
+def test_data_recorder_metadata_is_v14_with_sample_description(temp_dir, mock_gauge):
+    """
+    Test DataRecorder _create_metadata_file to verify it writes metadata
+    version 1.4 with the SHIELD-Data sample description fields and sample_id,
+    and no longer writes sample_material.
+    """
+    recorder = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        furnace_setpoint=350,
+        sample_id="CS-4",
+        sample_substrate="carbon steel",
+        sample_coating_layers=[{"material": "alumina", "thickness_nm": 150}],
+        sample_thickness=0.00136,
+        results_dir=temp_dir,
+        run_type="test_mode",
+    )
+    recorder.run_dir = temp_dir
+    recorder._create_metadata_file()
+
+    with open(os.path.join(temp_dir, "run_metadata.json")) as f:
+        metadata = json.load(f)
+
+    assert metadata["version"] == "1.4"
+    run_info = metadata["run_info"]
+    assert run_info["sample_id"] == "CS-4"
+    assert run_info["sample_substrate"] == "carbon steel"
+    assert run_info["sample_coating"] == "150nm alumina"
+    assert run_info["sample_coating_layers"] == [
+        {"material": "alumina", "thickness_nm": 150}
+    ]
+    assert run_info["sample_thickness"] == pytest.approx(0.00136)
+    assert "sample_material" not in run_info
+
+
+def test_data_recorder_start_warns_when_permeation_run_has_no_sample_id(
+    temp_dir, mock_gauge, capsys
+):
+    """
+    Test DataRecorder start to verify a permeation run without a sample_id
+    prints a warning (but still starts), and a run with one does not.
+    """
+    for sample_id, expect_warning in ((None, True), ("316L-3", False)):
+        recorder = DataRecorder(
+            gauges=[mock_gauge],
+            thermocouples=[],
+            furnace_setpoint=600.0,
+            sample_substrate="316L steel",
+            sample_thickness=0.008,
+            sample_id=sample_id,
+            results_dir=temp_dir,
+            run_type="test_mode",
+        )
+        # test_mode skips the hardware; force the permeation-run check path
+        recorder._run_type = "permeation_exp"
+        with patch.object(recorder, "_initialize_labjack", return_value=None):
+            recorder.start()
+        recorder.stop()
+        captured = capsys.readouterr()
+        assert ("no sample_id set" in captured.out) is expect_warning
 
 
 # =============================================================================
@@ -507,7 +657,7 @@ def test_data_recorder_test_mode_is_true_when_run_type_is_test_mode(mock_gauge):
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
         run_type="test_mode",
     )
@@ -523,7 +673,7 @@ def test_data_recorder_test_mode_is_false_when_run_type_is_permeation_exp(mock_g
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
         run_type="permeation_exp",
     )
@@ -539,7 +689,7 @@ def test_data_recorder_test_mode_is_false_when_run_type_is_leak_test(mock_gauge)
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
         run_type="leak_test",
     )
@@ -578,7 +728,7 @@ def test_data_recorder_creates_run_directory_in_normal_mode(temp_dir, mock_gauge
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
         results_dir=temp_dir,
         run_type="permeation_exp",
@@ -747,7 +897,7 @@ def test_data_recorder_metadata_includes_thermocouples_when_present(
         gauges=[mock_gauge],
         thermocouples=[mock_thermocouple],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
         results_dir=temp_dir,
         run_type="test_mode",
@@ -957,7 +1107,7 @@ def test_data_recorder_raises_error_for_duplicate_ain_channels(
         gauges=[mock_gauge, mock_gauge2],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
         results_dir=temp_dir,
         run_type="test_mode",
@@ -1079,7 +1229,7 @@ def test_data_recorder_records_thermocouple_data(
         gauges=[mock_gauge],
         thermocouples=[mock_thermocouple],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
         results_dir=temp_dir,
         run_type="test_mode",
@@ -1110,7 +1260,7 @@ def test_data_recorder_calls_thermocouple_record_method(
         gauges=[mock_gauge],
         thermocouples=[mock_thermocouple],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
         results_dir=temp_dir,
         run_type="test_mode",
@@ -1633,7 +1783,7 @@ def test_data_recorder_initialize_labjack_test_mode_property_check():
         gauges=[mock_gauge],
         thermocouples=[],
         furnace_setpoint=600.0,
-        sample_material="316",
+        sample_substrate="316L steel",
         sample_thickness=0.001,
         run_type="test_mode",
     )

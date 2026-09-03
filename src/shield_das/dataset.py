@@ -11,6 +11,10 @@ from .analysis import (
     voltage_to_temperature,
 )
 
+# run_metadata.json versions this reader understands. 1.3 and 1.4 share the
+# same file layout; 1.4 adds the structured sample description and sample_id.
+SUPPORTED_METADATA_VERSIONS = ("1.3", "1.4")
+
 
 class Dataset:
     """
@@ -35,7 +39,12 @@ class Dataset:
         valve_times: Dictionary of valve event times
         colour: Color for plotting this dataset
         temperature: Furnace set point temperature (K)
-        sample_material: Material name
+        sample_material: Substrate name (v1.4 sample_substrate, else the v1.3
+            sample_material), "Unknown" if neither is recorded
+        sample_substrate: Substrate material as recorded, or None
+        sample_coating: Human-readable coating summary, or None
+        sample_coating_layers: Coating layers as recorded (empty if uncoated)
+        sample_id: Identifier of the physical sample, or None
         sample_thickness: Sample thickness (m)
         furnace_set_point: Furnace set point temperature (K)
         local_temperature_data: Local temperature readings (optional)
@@ -78,6 +87,10 @@ class Dataset:
         self.valve_times = None
         self.colour = None
         self.sample_material = None
+        self.sample_substrate = None
+        self.sample_coating = None
+        self.sample_coating_layers = []
+        self.sample_id = None
         self.sample_thickness = None
         self.furnace_setpoint = None
         self.local_temperature_data = None
@@ -106,12 +119,13 @@ class Dataset:
         with open(metadata_path) as f:
             metadata = json.load(f)
 
-        # Validate version - only support 1.3
+        # Validate version: 1.3 and 1.4 share the same file layout (1.4 adds
+        # the structured sample description and sample_id to run_info).
         version = metadata.get("version")
-        if version != "1.3":
+        if version not in SUPPORTED_METADATA_VERSIONS:
             raise ValueError(
                 f"Unsupported metadata version: {version}. "
-                f"Only version 1.3 is supported. "
+                f"Supported versions: {', '.join(SUPPORTED_METADATA_VERSIONS)}. "
                 f"Please regenerate your data with the latest version of the recorder."
             )
 
@@ -194,9 +208,18 @@ class Dataset:
         self.furnace_setpoint = (
             self.metadata["run_info"].get("furnace_setpoint", 25.0) + 273.15
         )
-        self.sample_material = self.metadata["run_info"].get(
-            "sample_material", "Unknown"
+        # Sample description: v1.4 fields, falling back to the v1.3
+        # sample_material (which SHIELD-Data treats as the substrate).
+        run_info = self.metadata["run_info"]
+        self.sample_substrate = run_info.get("sample_substrate") or run_info.get(
+            "sample_material"
         )
+        self.sample_material = (
+            self.sample_substrate if self.sample_substrate is not None else "Unknown"
+        )
+        self.sample_coating = run_info.get("sample_coating")
+        self.sample_coating_layers = run_info.get("sample_coating_layers") or []
+        self.sample_id = run_info.get("sample_id")
         self.sample_thickness = self.metadata["run_info"].get(
             "sample_thickness", 0.00088
         )

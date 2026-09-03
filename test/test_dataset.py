@@ -312,8 +312,21 @@ def test_dataset_metadata_error_message_includes_version(temp_dataset_dir):
 
     dataset = Dataset(path=str(temp_dataset_dir), name="Test")
 
-    with pytest.raises(ValueError, match="Only version 1.3 is supported"):
+    with pytest.raises(ValueError, match=r"Supported versions: 1\.3, 1\.4"):
         _ = dataset.metadata
+
+
+def test_dataset_metadata_property_accepts_version_1_4(temp_dataset_dir):
+    """
+    Test Dataset metadata property to confirm it accepts version 1.4 (the
+    1.3 layout plus the structured sample description) without raising.
+    """
+    metadata = {"version": "1.4", "run_info": {}}
+    (temp_dataset_dir / "run_metadata.json").write_text(json.dumps(metadata))
+
+    dataset = Dataset(path=str(temp_dataset_dir), name="Test")
+
+    assert dataset.metadata["version"] == "1.4"
 
 
 def test_dataset_metadata_property_returns_full_metadata_dict(dataset_with_files):
@@ -902,6 +915,50 @@ def test_dataset_process_data_uses_default_sample_material_when_missing(
     dataset.process_data()
 
     assert dataset.sample_material == "Unknown"
+
+
+def test_dataset_process_data_extracts_v14_sample_description(
+    temp_dataset_dir, sample_csv_data
+):
+    """
+    Test Dataset process_data to verify the v1.4 sample fields are exposed
+    (sample_id, substrate, coating, layers) and that sample_material mirrors
+    the substrate so older callers keep working.
+    """
+    metadata = {
+        "version": "1.4",
+        "run_info": {
+            "start_time": "2025-08-20 10:58:01",
+            "furnace_setpoint": 600.0,
+            "sample_id": "CS-4",
+            "sample_substrate": "carbon steel",
+            "sample_coating": "150nm alumina",
+            "sample_coating_layers": [{"material": "alumina", "thickness_nm": 150}],
+            "sample_thickness": 0.00136,
+        },
+        "gauges": [
+            {
+                "name": "Baratron626D_1KT",
+                "type": "Baratron626D_Gauge",
+                "gauge_location": "upstream",
+                "full_scale_torr": 1000.0,
+            }
+        ],
+    }
+    (temp_dataset_dir / "run_metadata.json").write_text(json.dumps(metadata))
+    (temp_dataset_dir / "shield_data.csv").write_text(sample_csv_data)
+
+    dataset = Dataset(path=str(temp_dataset_dir), name="Test")
+    dataset.process_data()
+
+    assert dataset.sample_id == "CS-4"
+    assert dataset.sample_substrate == "carbon steel"
+    assert dataset.sample_material == "carbon steel"
+    assert dataset.sample_coating == "150nm alumina"
+    assert dataset.sample_coating_layers == [
+        {"material": "alumina", "thickness_nm": 150}
+    ]
+    assert dataset.sample_thickness == pytest.approx(0.00136)
 
 
 def test_dataset_process_data_extracts_sample_thickness(dataset_with_files):

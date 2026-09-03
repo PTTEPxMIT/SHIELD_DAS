@@ -24,8 +24,10 @@ my_recorder = DataRecorder(
     furnace_setpoint=0,
     run_type="leak_test",
     # No sample is being characterized in a leak test; recorded as null in metadata.
+    sample_id=None,
+    sample_substrate=None,
+    sample_coating_layers=[],
     sample_thickness=None,
-    sample_material=None,
 )
 
 was_running = stop_vacuum_beacon()

@@ -12,6 +12,12 @@ import u6
 from .pressure_gauge import PressureGauge
 from .thermocouple import Thermocouple
 
+# run_metadata.json schema version written by this recorder. 1.4 adds the
+# structured sample description used by PTTEPxMIT/SHIELD-Data (substrate,
+# coating layers, derived coating summary) plus sample_id, and drops the old
+# sample_material field.
+METADATA_VERSION = "1.4"
+
 # Operator procedure for a permeation run, in the order the events happen.
 # Each spacebar press records the next one; the last (V4 open) is the start
 # of the experiment. Keys end in "_time" and are written into
@@ -50,9 +56,18 @@ class DataRecorder:
             if in test mode, runs without actual hardware interaction
         recording_interval: Time interval (seconds) between recordings, defaults to 0.5s
         backup_interval: How often to backup data (seconds)
-        sample_material: Material of the sample being tested, either "316" or
-            "AISI 1018"
+        sample_substrate: Substrate material of the mounted sample, spelled out
+            in full (e.g. "316L steel", "carbon steel"); None when no sample is
+            mounted (leak tests)
         sample_thickness: Thickness of the sample being tested in meters
+        sample_coating_layers: Coating as a list of layers ordered as named on
+            the sample, each ``{"material": str, "thickness_nm": number}``
+            with materials spelled out in full ("tungsten", "alumina", ...).
+            Empty (the default) for an uncoated sample.
+        sample_id: Short identifier that tells this physical coupon apart from
+            every other one of the same substrate and coating (e.g.
+            "316L-fresh-2"). Optional, but warned about when missing on a
+            permeation run.
 
     Attributes:
         gauges: List of PressureGauge instances to record data from
@@ -64,9 +79,13 @@ class DataRecorder:
         recording_interval: Time interval (in seconds) between recordings, defaults to
             0.5 seconds
         backup_interval: How often to rotate backup CSV files (seconds)
-        sample_material: Material of the sample being tested, either "316" or
-            "AISI 1018"
+        sample_substrate: Substrate material of the mounted sample, or None
         sample_thickness: Thickness of the sample being tested in meters
+        sample_coating_layers: Normalised list of coating layers
+        sample_coating: Human-readable coating summary derived from the layers
+            ("150nm alumina", "200nm tungsten + 50nm chromium", "none"), or
+            None when no sample is mounted
+        sample_id: Identifier of the physical sample, or None
         stop_event: Event to control the recording thread
         thread: Thread for recording data
         run_dir: Directory for the current run's results
@@ -92,8 +111,10 @@ class DataRecorder:
     run_type: str
     recording_interval: float
     backup_interval: float
-    sample_material: str
-    sample_thickness: float
+    sample_substrate: str | None
+    sample_thickness: float | None
+    sample_coating_layers: list[dict]
+    sample_id: str | None
 
     stop_event: threading.Event
     thread: threading.Thread
@@ -115,8 +136,10 @@ class DataRecorder:
         gauges: list[PressureGauge],
         thermocouples: list[Thermocouple],
         furnace_setpoint: float,
-        sample_material: str,
-        sample_thickness: float,
+        sample_substrate: str | None,
+        sample_thickness: float | None,
+        sample_coating_layers: list[dict] | None = None,
+        sample_id: str | None = None,
         results_dir: str = "results",
         run_type="permeation_exp",
         recording_interval: float = 0.5,
@@ -129,8 +152,10 @@ class DataRecorder:
         self.run_type = run_type
         self.recording_interval = recording_interval
         self.backup_interval = backup_interval
-        self.sample_material = sample_material
+        self.sample_substrate = sample_substrate
         self.sample_thickness = sample_thickness
+        self.sample_coating_layers = sample_coating_layers
+        self.sample_id = sample_id
 
         # Thread control
         self.stop_event = threading.Event()
@@ -197,16 +222,75 @@ class DataRecorder:
         return self.run_type == "test_mode"
 
     @property
-    def sample_material(self) -> str:
-        return self._sample_material
+    def sample_substrate(self) -> str | None:
+        return self._sample_substrate
 
-    @sample_material.setter
-    def sample_material(self, value: str):
+    @sample_substrate.setter
+    def sample_substrate(self, value: str | None):
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ValueError(
+                "sample_substrate must be a non-empty string such as "
+                "'316L steel' or 'carbon steel', or None when no sample is mounted"
+            )
+        self._sample_substrate = value.strip() if value is not None else None
+
+    @property
+    def sample_id(self) -> str | None:
+        return self._sample_id
+
+    @sample_id.setter
+    def sample_id(self, value: str | None):
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ValueError("sample_id must be a non-empty string or None")
+        self._sample_id = value.strip() if value is not None else None
+
+    @property
+    def sample_coating_layers(self) -> list[dict]:
+        return self._sample_coating_layers
+
+    @sample_coating_layers.setter
+    def sample_coating_layers(self, value: list[dict] | None):
         if value is None:
-            self._sample_material = value
-        elif value not in ["316", "AISI 1018"]:
-            raise ValueError("sample_material must be one of '316L', or '316'")
-        self._sample_material = value
+            value = []
+        if not isinstance(value, list):
+            raise ValueError(
+                "sample_coating_layers must be a list of "
+                "{'material': str, 'thickness_nm': number} dicts"
+            )
+        layers = []
+        for layer in value:
+            material = layer.get("material") if isinstance(layer, dict) else None
+            thickness = layer.get("thickness_nm") if isinstance(layer, dict) else None
+            if (
+                not isinstance(material, str)
+                or not material.strip()
+                or isinstance(thickness, bool)
+                or not isinstance(thickness, (int, float))
+                or thickness <= 0
+            ):
+                raise ValueError(
+                    f"Invalid coating layer {layer!r}: expected "
+                    "{'material': <non-empty str>, 'thickness_nm': <positive number>}"
+                )
+            layers.append({"material": material.strip(), "thickness_nm": thickness})
+        self._sample_coating_layers = layers
+
+    @property
+    def sample_coating(self) -> str | None:
+        """Human-readable coating summary, as stored in SHIELD-Data.
+
+        Derived from ``sample_coating_layers``: ``"none"`` for an uncoated
+        sample, otherwise the layers joined with " + " (e.g.
+        ``"200nm tungsten + 50nm chromium"``). None when no sample is mounted.
+        """
+        if self.sample_substrate is None:
+            return None
+        if not self.sample_coating_layers:
+            return "none"
+        return " + ".join(
+            f"{layer['thickness_nm']:g}nm {layer['material']}"
+            for layer in self.sample_coating_layers
+        )
 
     def _create_results_directory(self):
         """Creates a new directory for results based on date and run number."""
@@ -278,8 +362,11 @@ class DataRecorder:
 
     def _create_metadata_file(self):
         """Create a JSON metadata file with run information."""
+        # Version 1.4 = the 1.3 layout plus the structured sample description
+        # (sample_substrate / sample_coating_layers / sample_coating, matching
+        # PTTEPxMIT/SHIELD-Data) and sample_id; sample_material is gone.
         metadata = {
-            "version": "1.3",
+            "version": METADATA_VERSION,
             "run_info": {
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -287,7 +374,10 @@ class DataRecorder:
                 "furnace_setpoint": self.furnace_setpoint,
                 "recording_interval_seconds": self.recording_interval,
                 "backup_interval_seconds": self.backup_interval,
-                "sample_material": self.sample_material,
+                "sample_id": self.sample_id,
+                "sample_substrate": self.sample_substrate,
+                "sample_coating": self.sample_coating,
+                "sample_coating_layers": self.sample_coating_layers,
                 "sample_thickness": self.sample_thickness,
                 "data_filename": "shield_data.csv",
             },
@@ -438,6 +528,12 @@ class DataRecorder:
         ain_channels = [g.ain_channel for g in self.gauges]
         if len(ain_channels) != len(set(ain_channels)):
             raise ValueError("Error: Duplicate AIN channels detected among gauges")
+
+        if self.run_type == "permeation_exp" and self.sample_id is None:
+            print(
+                "Warning: no sample_id set for this permeation run - the sample "
+                "will only be identifiable by substrate/coating/thickness"
+            )
 
         # Record start time for valve event time tracking
         self.start_time = datetime.now()

@@ -56,6 +56,13 @@ my_recorder = DataRecorder(
     recording_interval=0.5,
     backup_interval=5,
     furnace_setpoint=500,
+    # Sample description (metadata v1.4, same fields as PTTEPxMIT/SHIELD-Data)
+    sample_id="CS-4",                      # tells this coupon apart from others
+    sample_substrate="carbon steel",       # spelled out in full
+    sample_coating_layers=[                # [] for an uncoated sample
+        {"material": "alumina", "thickness_nm": 150},
+    ],
+    sample_thickness=0.00136,              # metres
 )
 
 # Start recording

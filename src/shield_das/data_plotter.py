@@ -206,7 +206,7 @@ class DataPlotter:
         Creates a Dataset instance, assigns a color, processes the data files,
         and adds it to the internal datasets list.
 
-        Only supports metadata version 1.3. Will raise ValueError for other versions.
+        Supports metadata versions 1.3 and 1.4. Will raise ValueError for others.
 
         Args:
             dataset_path: Absolute path to folder containing run_metadata.json
@@ -214,7 +214,7 @@ class DataPlotter:
             dataset_name: Display name to assign to this dataset
 
         Raises:
-            ValueError: If metadata version is not 1.3
+            ValueError: If metadata version is not 1.3 or 1.4
             FileNotFoundError: If metadata file or required data files are missing
         """
         # Create Dataset instance with path and name
