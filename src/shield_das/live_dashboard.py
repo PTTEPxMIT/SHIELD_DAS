@@ -4,7 +4,8 @@ Serves a small Dash app (``shield-das-live``) that automatically finds the run
 currently being recorded under ``results/``, tails its ``shield_data.csv``
 incrementally (never re-reading the whole file), and shows three stacked plots
 sharing a time axis: upstream pressure (torr, log scale), downstream pressure
-(torr, log scale), and temperature (°C). Voltage-to-pressure conversion reuses
+(torr, linear, fixed 0-1 torr, WGM701 gauges hidden), and temperature (°C).
+Voltage-to-pressure conversion reuses
 the existing per-gauge functions; browser payload is capped by stride-based
 decimation so remote viewing over a slow link stays cheap regardless of run
 length. See ``docs/live_dashboard.md``.
@@ -45,6 +46,12 @@ from .run_monitor import (  # noqa: F401
 # Fidelity options offered by the max-points dropdown
 MAX_POINTS_OPTIONS = [500, 2000, 5000]
 
+# Downstream panel: linear axis pinned to the 1-torr Baratron's range, so the
+# permeation rise is readable at a glance. Wide-range log gauges on the
+# downstream side (the WGM701) are omitted from the panel; they still record.
+DOWNSTREAM_RANGE_TORR = (0.0, 1.0)
+DOWNSTREAM_HIDDEN_GAUGE_TYPES = frozenset({"WGM701_Gauge"})
+
 
 def build_traces(
     reader: IncrementalRunReader, metadata: dict, max_points: int
@@ -52,9 +59,11 @@ def build_traces(
     """Build the three-panel live figure from a reader's current data.
 
     Panels (shared time axis): upstream pressure (torr, log y), downstream
-    pressure (torr, log y), and temperature (°C, via
-    ``analysis.voltage_to_temperature`` with cold-junction compensation).
-    Gauge columns are mapped through the run metadata, never hardcoded. Each
+    pressure (torr, linear y fixed to ``DOWNSTREAM_RANGE_TORR``), and
+    temperature (°C, via ``analysis.voltage_to_temperature`` with cold-junction
+    compensation). Downstream gauges whose type is in
+    ``DOWNSTREAM_HIDDEN_GAUGE_TYPES`` (the WGM701) are not plotted. Gauge
+    columns are mapped through the run metadata, never hardcoded. Each
     trace is decimated to at most ``max_points`` points (most recent point
     always kept) so the browser payload stays constant as the run grows.
     Gauges whose type has no known conversion are plotted as raw volts and
@@ -93,6 +102,8 @@ def build_traces(
         column = f"{gauge.get('name')}_Voltage (V)"
         if row is None or column not in reader.data:
             continue
+        if row == 2 and gauge.get("type") in DOWNSTREAM_HIDDEN_GAUGE_TYPES:
+            continue
         voltage_v = np.asarray(reader.data[column], dtype=float)[indices]
         values, unit = _convert_gauge_voltage(gauge, voltage_v)
         row_units[row].add(unit)
@@ -107,6 +118,14 @@ def build_traces(
         if row_units[row] == {"V"}:
             # Only unconverted gauges in this panel: label as raw volts
             fig.update_yaxes(title_text="Voltage (V)", row=row, col=1)
+        elif row == 2:
+            fig.update_yaxes(
+                title_text="Pressure (torr)",
+                type="linear",
+                range=list(DOWNSTREAM_RANGE_TORR),
+                row=row,
+                col=1,
+            )
         else:
             fig.update_yaxes(title_text="Pressure (torr)", type="log", row=row, col=1)
 

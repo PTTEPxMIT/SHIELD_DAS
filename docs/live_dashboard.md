@@ -8,7 +8,9 @@ the CSV, and shows three stacked plots on a shared time axis:
 - **Upstream pressure** (torr, log scale) — all gauges with
   `gauge_location: "upstream"`, converted with the existing per-gauge
   voltage-to-pressure functions.
-- **Downstream pressure** (torr, log scale) — same for `"downstream"`.
+- **Downstream pressure** (torr, linear, fixed 0–1 torr) — same for
+  `"downstream"`, except that WGM701 gauges are left off this panel (the
+  axis is pinned to the 1-torr Baratron's range). They are still recorded.
 - **Temperature** (°C) — thermocouple voltage with cold-junction
   compensation, when the run has a thermocouple.
 
