@@ -135,10 +135,93 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
--- Read RPC for the viewer site's first paint: stride-decimated rows for one
--- run, at most p_max_points of them, always including the newest row
--- (the SQL twin of run_monitor._decimation_indices). Also sidesteps
--- PostgREST's default 1000-row response limit.
+-- Read RPC for the viewer site: one run's channels as time-bucketed series.
+--
+-- Returns a single jsonb document, so PostgREST's 1000-row response cap
+-- (which applies to set-returning functions too) can never truncate it:
+--
+--   {"ts": [...iso...], "channels": {"CVM211": [...], ...},
+--    "last_ts": <newest raw ts>, "points": <buckets>, "rows": <raw rows>}
+--
+-- The span (optionally only rows after p_since) is cut into p_max_points
+-- equal time buckets; each channel is averaged per bucket and ts is the mean
+-- time of the bucket's rows. Empty buckets are skipped, a channel missing
+-- from a bucket is null, and values are float4 so the payload stays small.
+-- A 24 h run at the 5 s publish cadence comes back as ~1200 points in
+-- ~50 kB instead of 13 000 rows in a dozen capped responses.
+-- ---------------------------------------------------------------------------
+
+create or replace function public.run_series(
+    p_run_id bigint,
+    p_max_points int,
+    p_since timestamptz default null
+)
+returns jsonb
+language sql
+stable
+set search_path = public
+as $$
+    with span as (
+        select extract(epoch from min(ts)) as t0,
+               extract(epoch from max(ts)) as t1,
+               count(*) as n
+        from public.readings
+        where run_id = p_run_id
+          and (p_since is null or ts > p_since)
+    ),
+    bucketed as (
+        -- upper bound nudged past t1 so the newest row lands in the last
+        -- bucket (width_bucket is half-open) and a one-row span is legal
+        select r.ts, r.data,
+               width_bucket(extract(epoch from r.ts), s.t0, s.t1 + 0.001,
+                            greatest(1, p_max_points)) as bucket
+        from public.readings r, span s
+        where r.run_id = p_run_id
+          and (p_since is null or r.ts > p_since)
+    ),
+    buckets as (
+        select bucket,
+               to_timestamp(avg(extract(epoch from ts))) as t,
+               max(ts) as newest
+        from bucketed
+        group by bucket
+    ),
+    kv as (
+        select b.bucket, e.key, (e.value #>> '{}')::double precision as value
+        from bucketed b
+        cross join lateral jsonb_each(b.data) e
+        where jsonb_typeof(e.value) = 'number'
+    ),
+    per_bucket as (
+        select bucket, key, avg(value) as value
+        from kv
+        group by bucket, key
+    ),
+    channel_arrays as (
+        select k.key,
+               jsonb_agg(to_jsonb(pb.value::real) order by b.bucket) as values
+        from (select distinct key from kv) k
+        cross join buckets b
+        left join per_bucket pb on pb.bucket = b.bucket and pb.key = k.key
+        group by k.key
+    )
+    select jsonb_build_object(
+        'ts', coalesce((select jsonb_agg(to_jsonb(t) order by bucket) from buckets),
+                       '[]'::jsonb),
+        'channels', coalesce((select jsonb_object_agg(key, values) from channel_arrays),
+                             '{}'::jsonb),
+        'last_ts', (select to_jsonb(max(newest)) from buckets),
+        'points', (select count(*) from buckets),
+        'rows', (select n from span)
+    );
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Older read RPC (superseded by run_series; kept so a viewer page loaded
+-- before an upgrade keeps working): stride-decimated rows for one run, at
+-- most p_max_points of them, always including the newest row (the SQL twin
+-- of run_monitor._decimation_indices). NOTE: as a set-returning function its
+-- result IS subject to PostgREST's 1000-row cap.
 -- ---------------------------------------------------------------------------
 
 create or replace function public.decimated_readings(
@@ -184,8 +267,8 @@ grant select on public.runs, public.readings to anon, authenticated;
 revoke insert, update, delete on public.runs, public.readings
     from anon, authenticated;
 
--- Functions are executable by everyone unless revoked; only the decimated
--- read RPC stays public.
+-- Functions are executable by everyone unless revoked; only the read RPCs
+-- stay public.
 revoke execute on function
     public.enforce_readings_cap(),
     public.thin_readings(bigint, int, int),
@@ -193,8 +276,10 @@ revoke execute on function
     public.heartbeat(bigint)
 from public, anon, authenticated;
 
-grant execute on function public.decimated_readings(bigint, int)
-    to anon, authenticated;
+grant execute on function
+    public.run_series(bigint, int, timestamptz),
+    public.decimated_readings(bigint, int)
+to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Standby beacon: the rig's present vacuum level while NO run is recording.
