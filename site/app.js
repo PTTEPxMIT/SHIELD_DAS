@@ -2,8 +2,9 @@
 //
 // Two modes, picked automatically:
 //   * a run is recording -> the same three stacked panels as the on-rig
-//     dashboard (upstream torr log-y, downstream torr log-y, temperature degC),
-//     filled by the publisher (shield-das-publish);
+//     dashboard (upstream torr log-y, downstream torr linear-y fixed to
+//     0-1 torr with the WGM701 hidden, temperature degC), filled by the
+//     publisher (shield-das-publish);
 //   * no run is recording -> the standby card: the rig's present vacuum level
 //     and the last minute of it, filled by the beacon (shield-das-beacon).
 //
@@ -19,6 +20,10 @@ const REDECIMATE_ABOVE = 8000;
 const LIVE_WINDOW_MS = 120000;
 // The beacon pushes every 5 s; allow a wide margin before calling it stale.
 const STANDBY_FRESH_MS = 60000;
+// Downstream panel: linear axis pinned to the 1-torr Baratron's range; the
+// wide-range WGM701 is omitted there (twin of live_dashboard.py's constants).
+const DOWNSTREAM_RANGE_TORR = [0, 1];
+const DOWNSTREAM_HIDDEN_GAUGE_TYPES = new Set(["WGM701_Gauge"]);
 
 // -- pure helpers (kept dependency-free for easy eyeballing/testing) ---------
 
@@ -48,6 +53,7 @@ function channelPlan(metadata) {
   for (const gauge of metadata.gauges || []) {
     const panel = panels[gauge.gauge_location];
     if (!panel) continue;
+    if (panel === 2 && DOWNSTREAM_HIDDEN_GAUGE_TYPES.has(gauge.type)) continue;
     // The publisher stores converted pressure under the gauge name, or raw
     // volts under <name>_V for gauge types it cannot convert.
     plan.push({ key: gauge.name, fallbackKey: `${gauge.name}_V`, panel });
@@ -214,17 +220,22 @@ function buildFigure(run, rows, tokens) {
     tickfont: { color: tokens.muted, size: 11 },
     zeroline: false,
   };
-  const pressureAxis = (panel) => ({
-    ...axisBase,
-    type: panelHasData[panel] && !panelIsRawVolts[panel] ? "log" : "linear",
-    title: {
-      text:
-        panelHasData[panel] && panelIsRawVolts[panel]
-          ? "Voltage (V)"
-          : "Pressure (torr)",
-      font: { color: tokens.muted, size: 12 },
-    },
-  });
+  const pressureAxis = (panel) => {
+    const inTorr = panelHasData[panel] && !panelIsRawVolts[panel];
+    const axis = {
+      ...axisBase,
+      type: inTorr && panel === 1 ? "log" : "linear",
+      title: {
+        text:
+          panelHasData[panel] && panelIsRawVolts[panel]
+            ? "Voltage (V)"
+            : "Pressure (torr)",
+        font: { color: tokens.muted, size: 12 },
+      },
+    };
+    if (inTorr && panel === 2) axis.range = DOWNSTREAM_RANGE_TORR;
+    return axis;
+  };
 
   const layout = {
     uirevision: run.run_key, // keep zoom/pan across refreshes

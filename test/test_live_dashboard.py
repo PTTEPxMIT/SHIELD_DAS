@@ -342,8 +342,23 @@ def test_build_traces_splits_gauges_by_location(tmp_path):
 
     by_row = trace_names_by_row(fig)
     assert sorted(by_row["y"]) == ["Baratron626D_1KT", "CVM211"]
-    assert sorted(by_row["y2"]) == ["Baratron626D_1T", "WGM701"]
+    assert by_row["y2"] == ["Baratron626D_1T"]
     assert by_row["y3"] == ["TC1"]
+
+
+def test_build_traces_hides_wgm701_from_downstream_panel(tmp_path):
+    """A downstream WGM701 is recorded but not plotted; upstream ones still are."""
+    gauges = [
+        {"name": "WGM_up", "type": "WGM701_Gauge", "gauge_location": "upstream"},
+        {"name": "WGM_down", "type": "WGM701_Gauge", "gauge_location": "downstream"},
+    ]
+    reader, metadata = loaded_reader(tmp_path, gauges=gauges, thermocouples=[])
+    assert "WGM_down_Voltage (V)" in reader.data
+    fig = build_traces(reader, metadata, max_points=500)
+
+    by_row = trace_names_by_row(fig)
+    assert by_row["y"] == ["WGM_up"]
+    assert "y2" not in by_row
 
 
 def test_build_traces_converts_voltages_per_gauge_type(tmp_path):
@@ -358,18 +373,28 @@ def test_build_traces_converts_voltages_per_gauge_type(tmp_path):
     assert traces["Baratron626D_1T"].y[0] == pytest.approx(0.5)
     # CVM211 (log): 10^(5 - 5) = 1 torr
     assert traces["CVM211"].y[0] == pytest.approx(1.0)
+
+
+def test_build_traces_converts_upstream_wgm701(tmp_path):
+    """A WGM701 on the upstream side is converted with its log formula."""
+    gauges = [{"name": "WGM701", "type": "WGM701_Gauge", "gauge_location": "upstream"}]
+    reader, metadata = loaded_reader(tmp_path, gauges=gauges, thermocouples=[])
+    fig = build_traces(reader, metadata, max_points=500)
+
+    traces = {t.name: t for t in fig.data}
     # WGM701 (log): 10^((5 - 5.5)/0.5) = 0.1 torr
     assert traces["WGM701"].y[0] == pytest.approx(0.1)
 
 
-def test_build_traces_pressure_axes_are_log_torr(tmp_path):
-    """Pressure panels use log axes labelled in torr."""
+def test_build_traces_pressure_axes(tmp_path):
+    """Upstream is log torr; downstream is linear torr pinned to 0-1."""
     reader, metadata = loaded_reader(tmp_path)
     fig = build_traces(reader, metadata, max_points=500)
 
     assert fig.layout.yaxis.type == "log"
     assert fig.layout.yaxis.title.text == "Pressure (torr)"
-    assert fig.layout.yaxis2.type == "log"
+    assert fig.layout.yaxis2.type == "linear"
+    assert tuple(fig.layout.yaxis2.range) == (0.0, 1.0)
     assert fig.layout.yaxis2.title.text == "Pressure (torr)"
     assert fig.layout.yaxis3.title.text == "Temperature (°C)"
 

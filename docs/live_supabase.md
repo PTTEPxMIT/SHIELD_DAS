@@ -294,7 +294,8 @@ STALE if the beacon stops reporting. It polls the mirror every 10 s (5 s on
 the standby card, matching the beacon's push cadence) with the **anon** key
 (read-only via row-level security) and renders the same three stacked panels
 as the on-rig dashboard: upstream pressure (torr, log y), downstream pressure
-(torr, log y), temperature (°C), with a LIVE / STALE / ENDED / WAITING badge
+(torr, linear y fixed to 0–1 torr, WGM701 hidden), temperature (°C), with a
+LIVE / STALE / ENDED / WAITING badge
 driven by the server-stamped heartbeat.
 
 First paint backfills up to 4 000 stride-decimated points via the
