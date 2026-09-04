@@ -292,9 +292,10 @@ a run is live it shows the run panels described below; otherwise it shows the
 sparkline, the other gauges underneath, and a STANDBY badge that flips to
 STALE if the beacon stops reporting. It polls the mirror every 10 s (5 s on
 the standby card, matching the beacon's push cadence) with the **anon** key
-(read-only via row-level security) and renders the same three stacked panels
-as the on-rig dashboard: upstream pressure (torr, log y), downstream pressure
-(torr, linear y fixed to 0–1 torr, WGM701 hidden), temperature (°C), with a
+(read-only via row-level security) and renders the same three panels as the
+on-rig dashboard: downstream pressure (torr, linear y fixed to 0–1 torr,
+WGM701 hidden) full-width on top, with upstream pressure (torr, log y) and
+temperature (°C) side by side beneath it at a quarter of the height, and a
 LIVE / STALE / ENDED / WAITING badge
 driven by the server-stamped heartbeat.
 

@@ -3,14 +3,16 @@
 `shield-das-live` serves a small web dashboard for the run that is *currently
 being recorded*. It finds the newest run under `results/` with no
 `end_time` in its metadata and a recently written `shield_data.csv`, tails
-the CSV, and shows three stacked plots on a shared time axis:
+the CSV, and shows three plots on a shared time axis. Downstream pressure
+fills the top of the page; upstream pressure and temperature sit side by
+side beneath it at a quarter of its height.
 
-- **Upstream pressure** (torr, log scale) — all gauges with
-  `gauge_location: "upstream"`, converted with the existing per-gauge
-  voltage-to-pressure functions.
-- **Downstream pressure** (torr, linear, fixed 0–1 torr) — same for
-  `"downstream"`, except that WGM701 gauges are left off this panel (the
-  axis is pinned to the 1-torr Baratron's range). They are still recorded.
+- **Downstream pressure** (torr, linear, fixed 0–1 torr) — all gauges with
+  `gauge_location: "downstream"`, converted with the existing per-gauge
+  voltage-to-pressure functions, except that WGM701 gauges are left off
+  this panel (the axis is pinned to the 1-torr Baratron's range). They are
+  still recorded.
+- **Upstream pressure** (torr, log scale) — same for `"upstream"`.
 - **Temperature** (°C) — thermocouple voltage with cold-junction
   compensation, when the run has a thermocouple.
 

@@ -2,9 +2,10 @@
 
 Serves a small Dash app (``shield-das-live``) that automatically finds the run
 currently being recorded under ``results/``, tails its ``shield_data.csv``
-incrementally (never re-reading the whole file), and shows three stacked plots
-sharing a time axis: upstream pressure (torr, log scale), downstream pressure
-(torr, linear, fixed 0-1 torr, WGM701 gauges hidden), and temperature (°C).
+incrementally (never re-reading the whole file), and shows three plots sharing
+a time axis: downstream pressure (torr, linear, fixed 0-1 torr, WGM701 gauges
+hidden) full-width on top, with upstream pressure (torr, log scale) and
+temperature (°C) side by side beneath it at a quarter of its height.
 Voltage-to-pressure conversion reuses
 the existing per-gauge functions; browser payload is capped by stride-based
 decimation so remote viewing over a slow link stays cheap regardless of run
@@ -52,16 +53,25 @@ MAX_POINTS_OPTIONS = [500, 2000, 5000]
 DOWNSTREAM_RANGE_TORR = (0.0, 1.0)
 DOWNSTREAM_HIDDEN_GAUGE_TYPES = frozenset({"WGM701_Gauge"})
 
+# Panel grid: downstream spans the full-width top row; upstream and temperature
+# sit side by side beneath it. The top row is four times the height of the
+# bottom row, so the permeation rise is the plot you see.
+DOWNSTREAM_CELL = (1, 1)
+UPSTREAM_CELL = (2, 1)
+TEMPERATURE_CELL = (2, 2)
+ROW_HEIGHTS = [0.8, 0.2]
+
 
 def build_traces(
     reader: IncrementalRunReader, metadata: dict, max_points: int
 ) -> go.Figure:
     """Build the three-panel live figure from a reader's current data.
 
-    Panels (shared time axis): upstream pressure (torr, log y), downstream
-    pressure (torr, linear y fixed to ``DOWNSTREAM_RANGE_TORR``), and
+    Panels (shared time axis): downstream pressure (torr, linear y fixed to
+    ``DOWNSTREAM_RANGE_TORR``) full-width on top at four times the height of
+    the row beneath, which holds upstream pressure (torr, log y) and
     temperature (°C, via ``analysis.voltage_to_temperature`` with cold-junction
-    compensation). Downstream gauges whose type is in
+    compensation) side by side. Downstream gauges whose type is in
     ``DOWNSTREAM_HIDDEN_GAUGE_TYPES`` (the WGM701) are not plotted. Gauge
     columns are mapped through the run metadata, never hardcoded. Each
     trace is decimated to at most ``max_points`` points (most recent point
@@ -76,16 +86,18 @@ def build_traces(
         max_points: Maximum plotted points per trace.
 
     Returns:
-        Plotly figure with three stacked subplots sharing the x-axis.
+        Plotly figure with three subplots whose x-axes match.
     """
     fig = make_subplots(
-        rows=3,
-        cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.06,
+        rows=2,
+        cols=2,
+        specs=[[{"colspan": 2}, None], [{}, {}]],
+        row_heights=ROW_HEIGHTS,
+        vertical_spacing=0.09,
+        horizontal_spacing=0.08,
         subplot_titles=(
-            "Upstream pressure",
             "Downstream pressure",
+            "Upstream pressure",
             "Temperature",
         ),
     )
@@ -94,40 +106,45 @@ def build_traces(
     indices = _decimation_indices(len(timestamps), max_points)
     x_values = [timestamps[i] for i in indices]
 
-    location_rows = {"upstream": 1, "downstream": 2}
-    row_units: dict[int, set[str]] = {1: set(), 2: set()}
+    location_cells = {"upstream": UPSTREAM_CELL, "downstream": DOWNSTREAM_CELL}
+    location_units: dict[str, set[str]] = {"upstream": set(), "downstream": set()}
 
     for gauge in metadata.get("gauges", []):
-        row = location_rows.get(gauge.get("gauge_location"))
+        location = gauge.get("gauge_location")
+        cell = location_cells.get(location)
         column = f"{gauge.get('name')}_Voltage (V)"
-        if row is None or column not in reader.data:
+        if cell is None or column not in reader.data:
             continue
-        if row == 2 and gauge.get("type") in DOWNSTREAM_HIDDEN_GAUGE_TYPES:
+        if (
+            location == "downstream"
+            and gauge.get("type") in DOWNSTREAM_HIDDEN_GAUGE_TYPES
+        ):
             continue
         voltage_v = np.asarray(reader.data[column], dtype=float)[indices]
         values, unit = _convert_gauge_voltage(gauge, voltage_v)
-        row_units[row].add(unit)
+        location_units[location].add(unit)
         trace_name = gauge["name"] if unit == "torr" else f"{gauge['name']} (raw V)"
         fig.add_trace(
             go.Scattergl(x=x_values, y=values, mode="lines", name=trace_name),
-            row=row,
-            col=1,
+            row=cell[0],
+            col=cell[1],
         )
 
-    for row in (1, 2):
-        if row_units[row] == {"V"}:
+    for location, cell in location_cells.items():
+        row, col = cell
+        if location_units[location] == {"V"}:
             # Only unconverted gauges in this panel: label as raw volts
-            fig.update_yaxes(title_text="Voltage (V)", row=row, col=1)
-        elif row == 2:
+            fig.update_yaxes(title_text="Voltage (V)", row=row, col=col)
+        elif location == "downstream":
             fig.update_yaxes(
                 title_text="Pressure (torr)",
                 type="linear",
                 range=list(DOWNSTREAM_RANGE_TORR),
                 row=row,
-                col=1,
+                col=col,
             )
         else:
-            fig.update_yaxes(title_text="Pressure (torr)", type="log", row=row, col=1)
+            fig.update_yaxes(title_text="Pressure (torr)", type="log", row=row, col=col)
 
     thermocouples = metadata.get("thermocouples", [])
     local_temp_c = reader.data.get(LOCAL_TEMPERATURE_COLUMN)
@@ -149,12 +166,14 @@ def build_traces(
                     mode="lines",
                     name=thermocouple.get("name", "thermocouple"),
                 ),
-                row=3,
-                col=1,
+                row=TEMPERATURE_CELL[0],
+                col=TEMPERATURE_CELL[1],
             )
             temperature_plotted = True
 
-    fig.update_yaxes(title_text="Temperature (°C)", row=3, col=1)
+    fig.update_yaxes(
+        title_text="Temperature (°C)", row=TEMPERATURE_CELL[0], col=TEMPERATURE_CELL[1]
+    )
     if not temperature_plotted:
         fig.add_annotation(
             text="no thermocouple in this run",
@@ -164,14 +183,16 @@ def build_traces(
             y=0.5,
             showarrow=False,
             font={"color": "#888888"},
-            row=3,
-            col=1,
+            row=TEMPERATURE_CELL[0],
+            col=TEMPERATURE_CELL[1],
         )
 
-    fig.update_xaxes(title_text="Time", row=3, col=1)
+    # All three panels follow the same time axis (zoom one, all zoom)
+    fig.update_xaxes(matches="x")
+    fig.update_xaxes(title_text="Time", row=2)
     fig.update_layout(
         template="plotly_white",
-        height=850,
+        height=900,
         margin={"l": 60, "r": 20, "t": 40, "b": 40},
         legend={"orientation": "h", "y": 1.06},
         uirevision=reader.run_dir,  # keep zoom/pan across interval refreshes

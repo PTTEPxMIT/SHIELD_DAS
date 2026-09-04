@@ -1,10 +1,11 @@
 // SHIELD live viewer: polls the Supabase mirror with the read-only anon key.
 //
 // Two modes, picked automatically:
-//   * a run is recording -> the same three stacked panels as the on-rig
-//     dashboard (upstream torr log-y, downstream torr linear-y fixed to
-//     0-1 torr with the WGM701 hidden, temperature degC), filled by the
-//     publisher (shield-das-publish);
+//   * a run is recording -> the same three panels as the on-rig dashboard:
+//     downstream torr (linear-y fixed to 0-1 torr, WGM701 hidden) full-width
+//     on top, upstream torr (log-y) and temperature degC side by side beneath
+//     it at a quarter of the height; filled by the publisher
+//     (shield-das-publish);
 //   * no run is recording -> the standby card: the rig's present vacuum level
 //     and the last minute of it, filled by the beacon (shield-das-beacon).
 //
@@ -24,6 +25,15 @@ const STANDBY_FRESH_MS = 60000;
 // wide-range WGM701 is omitted there (twin of live_dashboard.py's constants).
 const DOWNSTREAM_RANGE_TORR = [0, 1];
 const DOWNSTREAM_HIDDEN_GAUGE_TYPES = new Set(["WGM701_Gauge"]);
+// Panel geometry (paper fractions): downstream owns the top; upstream and
+// temperature share the strip beneath it at a quarter of its height.
+const TOP_DOMAIN = [0.3, 0.98];
+const BOTTOM_DOMAIN = [0.03, 0.2];
+const BOTTOM_LEFT_X = [0, 0.46];
+const BOTTOM_RIGHT_X = [0.54, 1];
+// Trace y-axes stay y/y2/y3 for panels 1/2/3; the x-axes are laid out so the
+// downstream panel (2) owns the primary one.
+const PANEL_X_AXIS = { 1: "x2", 2: "x", 3: "x3" };
 
 // -- pure helpers (kept dependency-free for easy eyeballing/testing) ---------
 
@@ -200,13 +210,17 @@ function buildFigure(run, rows, tokens) {
 
     panelHasData[entry.panel] = true;
     if (entry.panel !== 3 && !usesFallback) panelIsRawVolts[entry.panel] = false;
+    // Panel 2 (downstream) rides the primary x-axis; the two bottom panels
+    // each have their own, matched to it.
     const axis = entry.panel === 1 ? "y" : `y${entry.panel}`;
+    const xAxis = PANEL_X_AXIS[entry.panel];
     traces.push({
       type: "scattergl",
       mode: "lines",
       name: usesFallback ? `${entry.key} (raw V)` : key,
       x,
       y,
+      xaxis: xAxis,
       yaxis: axis,
       line: { width: 2, color: tokens.series[index % tokens.series.length] },
       connectgaps: false,
@@ -247,22 +261,36 @@ function buildFigure(run, rows, tokens) {
     showlegend: true,
     legend: { orientation: "h", y: 1.05, font: { color: tokens.ink } },
     annotations: [
-      panelTitle("Upstream pressure", 0.995, tokens),
-      panelTitle("Downstream pressure", 0.64, tokens),
-      panelTitle("Temperature", 0.285, tokens),
+      panelTitle("Downstream pressure", TOP_DOMAIN[1] + 0.005, 0, tokens),
+      panelTitle("Upstream pressure", BOTTOM_DOMAIN[1] + 0.005, 0, tokens),
+      panelTitle("Temperature", BOTTOM_DOMAIN[1] + 0.005, BOTTOM_RIGHT_X[0], tokens),
     ],
   };
-  // Three stacked panels sharing one time axis (anchored to the bottom panel)
-  layout.xaxis = {
+  const timeTitle = { text: "Time", font: { color: tokens.muted, size: 12 } };
+  // Downstream: full-width top panel on the primary time axis
+  layout.xaxis = { ...axisBase, anchor: "y2", domain: [0, 1] };
+  layout.yaxis2 = { ...pressureAxis(2), anchor: "x", domain: TOP_DOMAIN };
+  // Upstream and temperature: side by side beneath, time axes matched to
+  // the top one so zooming any panel zooms all three.
+  layout.xaxis2 = {
+    ...axisBase,
+    anchor: "y",
+    domain: BOTTOM_LEFT_X,
+    matches: "x",
+    title: timeTitle,
+  };
+  layout.yaxis = { ...pressureAxis(1), anchor: "x2", domain: BOTTOM_DOMAIN };
+  layout.xaxis3 = {
     ...axisBase,
     anchor: "y3",
-    title: { text: "Time", font: { color: tokens.muted, size: 12 } },
+    domain: BOTTOM_RIGHT_X,
+    matches: "x",
+    title: timeTitle,
   };
-  layout.yaxis = { ...pressureAxis(1), domain: [0.72, 0.98] };
-  layout.yaxis2 = { ...pressureAxis(2), domain: [0.37, 0.63] };
   layout.yaxis3 = {
     ...axisBase,
-    domain: [0.02, 0.28],
+    anchor: "x3",
+    domain: BOTTOM_DOMAIN,
     title: { text: "Temperature (°C)", font: { color: tokens.muted, size: 12 } },
   };
 
@@ -271,8 +299,8 @@ function buildFigure(run, rows, tokens) {
       text: "no thermocouple in this run",
       xref: "paper",
       yref: "paper",
-      x: 0.5,
-      y: 0.14,
+      x: (BOTTOM_RIGHT_X[0] + BOTTOM_RIGHT_X[1]) / 2,
+      y: (BOTTOM_DOMAIN[0] + BOTTOM_DOMAIN[1]) / 2,
       showarrow: false,
       font: { color: tokens.muted },
     });
@@ -280,12 +308,12 @@ function buildFigure(run, rows, tokens) {
   return { traces, layout };
 }
 
-function panelTitle(text, y, tokens) {
+function panelTitle(text, y, x, tokens) {
   return {
     text,
     xref: "paper",
     yref: "paper",
-    x: 0,
+    x,
     y,
     xanchor: "left",
     yanchor: "bottom",
