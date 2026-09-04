@@ -299,9 +299,18 @@ temperature (°C) side by side beneath it at a quarter of the height, and a
 LIVE / STALE / ENDED / WAITING badge
 driven by the server-stamped heartbeat.
 
-First paint backfills up to 4 000 stride-decimated points via the
-`decimated_readings` RPC; after that only new rows are fetched. Traffic is a
-few kB per poll — far inside the free tier's egress allowance.
+First paint fetches the whole run as time-bucketed series from the
+`run_series` RPC: one JSON document of at most 1 200 points per channel
+(each point the mean of its time bucket), about 100 kB however long the
+run. After that each poll asks the same RPC for only the rows since the
+last point, a few hundred bytes. Once the page has accumulated 3 000 points
+it re-fetches the full series so the trace stays at plot resolution.
+
+A single document sidesteps PostgREST's 1 000-row response cap, which
+applies to set-returning RPCs too: the older `decimated_readings` RPC hit
+it on long runs, so the first paint stopped a few hours in and the page
+crawled forward 1 000 raw rows per poll. `decimated_readings` is kept
+only so a viewer tab opened before the upgrade keeps working.
 
 ### Enabling it (one-time, needs repo admin)
 

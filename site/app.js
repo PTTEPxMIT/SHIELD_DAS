@@ -16,8 +16,14 @@
 
 const POLL_MS = 10000;
 const STANDBY_POLL_MS = 5000; // matches the beacon's push cadence
-const BACKFILL_POINTS = 4000;
-const REDECIMATE_ABOVE = 8000;
+// The run is fetched as time-bucketed series from the run_series RPC (one
+// JSON document, immune to PostgREST's 1000-row cap): SERIES_POINTS buckets
+// for the first paint, then only the rows since the last one on each poll.
+// Once the accumulated points pass RESERIES_ABOVE the whole series is
+// re-fetched so the trace stays at plot resolution however long the run.
+const SERIES_POINTS = 1200;
+const POLL_POINTS = 500;
+const RESERIES_ABOVE = 3000;
 const LIVE_WINDOW_MS = 120000;
 // The beacon pushes every 5 s; allow a wide margin before calling it stale.
 const STANDBY_FRESH_MS = 60000;
@@ -37,14 +43,19 @@ const PANEL_X_AXIS = { 1: "x2", 2: "x", 3: "x3" };
 
 // -- pure helpers (kept dependency-free for easy eyeballing/testing) ---------
 
-// Stride decimation that always keeps the newest point (twin of
-// run_monitor._decimation_indices).
-function decimate(rows, maxPoints) {
-  if (rows.length <= maxPoints) return rows;
-  const stride = Math.ceil(rows.length / maxPoints);
-  const kept = [];
-  for (let i = rows.length - 1; i >= 0; i -= stride) kept.push(rows[i]);
-  return kept.reverse();
+// Append one run_series result onto another, in place. Channels absent from
+// either side are padded with nulls so every array stays as long as ts.
+function appendSeries(base, extra) {
+  const before = base.ts.length;
+  base.ts.push(...extra.ts);
+  const keys = new Set([...Object.keys(base.channels), ...Object.keys(extra.channels)]);
+  for (const key of keys) {
+    const existing = base.channels[key] || new Array(before).fill(null);
+    const added = extra.channels[key] || new Array(extra.ts.length).fill(null);
+    base.channels[key] = existing.concat(added);
+  }
+  if (extra.last_ts) base.last_ts = extra.last_ts;
+  return base;
 }
 
 // Run status from the server-stamped liveness fields.
@@ -57,6 +68,8 @@ function statusFor(run, nowMs) {
 
 // Channel plan from run metadata: which mirror channels go on which panel.
 // Mirrors build_traces: panel by gauge_location, never hardcoded names.
+// The publisher stores converted pressure under the gauge name, or raw volts
+// under <name>_V for gauge types it cannot convert.
 function channelPlan(metadata) {
   const panels = { upstream: 1, downstream: 2 };
   const plan = [];
@@ -64,8 +77,6 @@ function channelPlan(metadata) {
     const panel = panels[gauge.gauge_location];
     if (!panel) continue;
     if (panel === 2 && DOWNSTREAM_HIDDEN_GAUGE_TYPES.has(gauge.type)) continue;
-    // The publisher stores converted pressure under the gauge name, or raw
-    // volts under <name>_V for gauge types it cannot convert.
     plan.push({ key: gauge.name, fallbackKey: `${gauge.name}_V`, panel });
   }
   for (const tc of metadata.thermocouples || []) {
@@ -168,45 +179,45 @@ const fetchNewestRun = async () =>
 const fetchStandby = async () =>
   (await api("/standby?id=eq.1&select=updated_at,data"))[0] || null;
 
-const fetchBackfill = (runId) =>
-  api("/rpc/decimated_readings", {
+// Bucketed series for one run: {ts: [...], channels: {name: [...]},
+// last_ts, points, rows}. With `since`, only rows after that timestamp.
+const fetchSeries = (runId, maxPoints, since = null) =>
+  api("/rpc/run_series", {
     method: "POST",
-    body: JSON.stringify({ p_run_id: runId, p_max_points: BACKFILL_POINTS }),
+    body: JSON.stringify({
+      p_run_id: runId,
+      p_max_points: maxPoints,
+      p_since: since,
+    }),
   });
-
-const fetchSince = (runId, lastTs) =>
-  api(
-    `/readings?run_id=eq.${runId}&ts=gt.${encodeURIComponent(lastTs)}` +
-      "&order=ts.asc&select=id,run_id,ts,data",
-  );
 
 // -- rendering ---------------------------------------------------------------
 
 const el = (id) => document.getElementById(id);
+const emptySeries = () => ({ ts: [], channels: {}, last_ts: null });
 const state = {
   run: null,
-  rows: [],
+  series: emptySeries(),
   plotted: false,
   standby: null,
   showingStandby: false,
 };
 
-function buildFigure(run, rows, tokens) {
+function buildFigure(run, series, tokens) {
   const plan = channelPlan(run.metadata || {});
-  const x = rows.map((row) => row.ts);
+  const x = series.ts;
   const traces = [];
   const panelHasData = { 1: false, 2: false, 3: false };
   const panelIsRawVolts = { 1: true, 2: true };
 
   plan.forEach((entry, index) => {
     const usesFallback =
-      rows.length > 0 &&
-      !(entry.key in rows[rows.length - 1].data) &&
+      !(entry.key in series.channels) &&
       entry.fallbackKey &&
-      entry.fallbackKey in rows[rows.length - 1].data;
+      entry.fallbackKey in series.channels;
     const key = usesFallback ? entry.fallbackKey : entry.key;
-    const y = rows.map((row) => (key in row.data ? row.data[key] : null));
-    if (!y.some((value) => value !== null)) return;
+    const y = series.channels[key];
+    if (!y || !y.some((value) => value !== null)) return;
 
     panelHasData[entry.panel] = true;
     if (entry.panel !== 3 && !usesFallback) panelIsRawVolts[entry.panel] = false;
@@ -444,16 +455,17 @@ function render() {
     return;
   }
 
+  const ts = state.series.ts;
   el("run-id").textContent = state.run.run_key;
   el("sample-info").textContent = sampleLine(state.run.metadata);
-  el("row-count").textContent = `${state.rows.length} points`;
-  if (state.rows.length >= 2) {
-    const first = Date.parse(state.rows[0].ts);
-    const last = Date.parse(state.rows[state.rows.length - 1].ts);
+  el("row-count").textContent = `${ts.length} points`;
+  if (ts.length >= 2) {
+    const first = Date.parse(ts[0]);
+    const last = Date.parse(ts[ts.length - 1]);
     el("elapsed").textContent = formatElapsed((last - first) / 1000);
   }
 
-  if (state.rows.length === 0) {
+  if (ts.length === 0) {
     el("message").textContent = "Run registered — waiting for data…";
     el("message").hidden = false;
     el("chart").hidden = true;
@@ -462,7 +474,7 @@ function render() {
 
   el("message").hidden = true;
   el("chart").hidden = false;
-  const { traces, layout } = buildFigure(state.run, state.rows, tokens);
+  const { traces, layout } = buildFigure(state.run, state.series, tokens);
   Plotly.react("chart", traces, layout, {
     responsive: true,
     displaylogo: false,
@@ -482,24 +494,22 @@ async function refresh() {
 
   if (!run) {
     state.run = null;
-    state.rows = [];
+    state.series = emptySeries();
     render();
     return;
   }
 
-  if (!state.run || state.run.id !== run.id) {
-    state.run = run;
-    state.rows = await fetchBackfill(run.id);
+  const newRun = !state.run || state.run.id !== run.id;
+  state.run = run;
+  if (newRun || !state.series.last_ts) {
+    state.series = await fetchSeries(run.id, SERIES_POINTS);
   } else {
-    state.run = run;
-    if (state.rows.length > 0) {
-      const lastTs = state.rows[state.rows.length - 1].ts;
-      state.rows.push(...(await fetchSince(run.id, lastTs)));
-    } else {
-      state.rows = await fetchBackfill(run.id);
-    }
-    if (state.rows.length > REDECIMATE_ABOVE) {
-      state.rows = decimate(state.rows, BACKFILL_POINTS);
+    // Only what arrived since the last poll: a handful of rows, bucketed to
+    // at most POLL_POINTS if the page was asleep for a while.
+    const extra = await fetchSeries(run.id, POLL_POINTS, state.series.last_ts);
+    appendSeries(state.series, extra);
+    if (state.series.ts.length > RESERIES_ABOVE) {
+      state.series = await fetchSeries(run.id, SERIES_POINTS);
     }
   }
   render();
