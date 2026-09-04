@@ -328,7 +328,11 @@ def loaded_reader(tmp_path, **kwargs):
 
 
 def trace_names_by_row(fig):
-    """Map subplot row (via yaxis) to trace names."""
+    """Map subplot (via yaxis) to trace names.
+
+    Layout: ``y`` = downstream (top, full width), ``y2`` = upstream
+    (bottom left), ``y3`` = temperature (bottom right).
+    """
     mapping = {}
     for trace in fig.data:
         mapping.setdefault(trace.yaxis, []).append(trace.name)
@@ -336,14 +340,33 @@ def trace_names_by_row(fig):
 
 
 def test_build_traces_splits_gauges_by_location(tmp_path):
-    """Upstream gauges land in panel 1, downstream in panel 2."""
+    """Downstream gauges land on the top panel, upstream bottom-left."""
     reader, metadata = loaded_reader(tmp_path)
     fig = build_traces(reader, metadata, max_points=500)
 
     by_row = trace_names_by_row(fig)
-    assert sorted(by_row["y"]) == ["Baratron626D_1KT", "CVM211"]
-    assert by_row["y2"] == ["Baratron626D_1T"]
+    assert by_row["y"] == ["Baratron626D_1T"]
+    assert sorted(by_row["y2"]) == ["Baratron626D_1KT", "CVM211"]
     assert by_row["y3"] == ["TC1"]
+
+
+def test_build_traces_panel_geometry(tmp_path):
+    """Downstream is full-width on top, four times the height of the row below."""
+    reader, metadata = loaded_reader(tmp_path)
+    fig = build_traces(reader, metadata, max_points=500)
+
+    top = fig.layout.yaxis.domain
+    bottom_left = fig.layout.yaxis2.domain
+    bottom_right = fig.layout.yaxis3.domain
+    assert tuple(bottom_left) == tuple(bottom_right)
+    assert top[0] > bottom_left[1]
+    assert top[1] - top[0] == pytest.approx(4 * (bottom_left[1] - bottom_left[0]))
+
+    assert tuple(fig.layout.xaxis.domain) == (0.0, 1.0)
+    assert fig.layout.xaxis2.domain[1] < fig.layout.xaxis3.domain[0]
+    # All time axes follow the primary one
+    assert fig.layout.xaxis2.matches == "x"
+    assert fig.layout.xaxis3.matches == "x"
 
 
 def test_build_traces_hides_wgm701_from_downstream_panel(tmp_path):
@@ -357,8 +380,8 @@ def test_build_traces_hides_wgm701_from_downstream_panel(tmp_path):
     fig = build_traces(reader, metadata, max_points=500)
 
     by_row = trace_names_by_row(fig)
-    assert by_row["y"] == ["WGM_up"]
-    assert "y2" not in by_row
+    assert by_row["y2"] == ["WGM_up"]
+    assert "y" not in by_row
 
 
 def test_build_traces_converts_voltages_per_gauge_type(tmp_path):
@@ -387,14 +410,14 @@ def test_build_traces_converts_upstream_wgm701(tmp_path):
 
 
 def test_build_traces_pressure_axes(tmp_path):
-    """Upstream is log torr; downstream is linear torr pinned to 0-1."""
+    """Downstream (top) is linear torr pinned to 0-1; upstream is log torr."""
     reader, metadata = loaded_reader(tmp_path)
     fig = build_traces(reader, metadata, max_points=500)
 
-    assert fig.layout.yaxis.type == "log"
+    assert fig.layout.yaxis.type == "linear"
+    assert tuple(fig.layout.yaxis.range) == (0.0, 1.0)
     assert fig.layout.yaxis.title.text == "Pressure (torr)"
-    assert fig.layout.yaxis2.type == "linear"
-    assert tuple(fig.layout.yaxis2.range) == (0.0, 1.0)
+    assert fig.layout.yaxis2.type == "log"
     assert fig.layout.yaxis2.title.text == "Pressure (torr)"
     assert fig.layout.yaxis3.title.text == "Temperature (°C)"
 
@@ -429,8 +452,8 @@ def test_build_traces_unknown_gauge_type_falls_back_to_raw_volts(tmp_path):
 
     traces = {t.name: t for t in fig.data}
     assert traces["Mystery (raw V)"].y[0] == pytest.approx(5.0)
-    assert fig.layout.yaxis.title.text == "Voltage (V)"
-    assert fig.layout.yaxis.type != "log"
+    assert fig.layout.yaxis2.title.text == "Voltage (V)"
+    assert fig.layout.yaxis2.type != "log"
 
 
 def test_build_traces_decimates_to_max_points(tmp_path):
