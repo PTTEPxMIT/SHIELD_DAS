@@ -29,9 +29,7 @@ cfg_path = pathlib.Path.home() / ".shield_das_publisher.json"
 cfg = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
 cfg["supabase_url"] = url
 cfg["supabase_key"] = service
-cfg.setdefault(
-    "results_dir", r"C:\Users\remidm\Documents\JD\SHIELD_DAS\results"
-)
+cfg.setdefault("results_dir", r"C:\Users\remidm\Documents\JD\SHIELD_DAS\results")
 cfg_path.write_text(json.dumps(cfg, indent=2) + "\n")
 print(f"  wrote {cfg_path}")
 
