@@ -330,7 +330,14 @@ def _convert_csv_to_parquet(csv_path: str, parquet_path: str) -> None:
 
     df = pd.read_csv(csv_path)
     if TIMESTAMP_COLUMN in df.columns:
-        df[TIMESTAMP_COLUMN] = pd.to_datetime(df[TIMESTAMP_COLUMN], format="mixed")
+        try:
+            df[TIMESTAMP_COLUMN] = pd.to_datetime(
+                df[TIMESTAMP_COLUMN], format="mixed"
+            )
+        except ValueError:
+            # pandas < 2.0 has no format="mixed"; the default parser handles
+            # per-element mixed formats there.
+            df[TIMESTAMP_COLUMN] = pd.to_datetime(df[TIMESTAMP_COLUMN])
 
     df.to_parquet(
         parquet_path,
