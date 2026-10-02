@@ -114,6 +114,15 @@ function formatTorr(value) {
   return `${mantissa.toFixed(2)} × 10${superscript} torr`;
 }
 
+// A standby channel in its own units: thermocouples arrive as <name>_C in
+// degrees Celsius, raw-volt fallbacks as <name>_V, everything else in torr.
+function formatChannel(name, value) {
+  if (typeof value !== "number" || !isFinite(value)) return "—";
+  if (name.endsWith("_C")) return `${value.toFixed(1)} °C`;
+  if (name.endsWith("_V")) return `${value.toPrecision(3)} V`;
+  return formatTorr(value);
+}
+
 // How long ago the beacon last reported, in words.
 function formatAge(milliseconds) {
   const seconds = Math.max(0, Math.round(milliseconds / 1000));
@@ -419,7 +428,7 @@ function renderStandby(tokens, nowMs) {
     .filter(([name]) => name !== primary)
     .map(
       ([name, value]) =>
-        `<span><b>${name}</b> ${formatTorr(value)}</span>`,
+        `<span><b>${name}</b> ${formatChannel(name, value)}</span>`,
     )
     .join("");
 

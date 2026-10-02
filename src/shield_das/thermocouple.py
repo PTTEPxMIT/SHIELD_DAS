@@ -33,49 +33,72 @@ class Thermocouple:
         self.voltage_data = []
         self.local_temperature_data = []
 
-    def record_ain_channel_voltage(
+    def read(
         self,
         labjack,  # Remove type hint to avoid import issues
         resolution_index: int | None = 8,
         gain_index: int | None = 2,
-    ) -> float:
+    ) -> tuple[float, float]:
         """
-        Read temperature from a Type K thermocouple connected to a LabJack U6 using
-        differential input mode.
+        Read a Type K thermocouple connected to a LabJack U6 using differential
+        input mode, without storing anything.
 
-        This function reads the cold junction temperature from the device's internal
-        sensor, reads the differential voltage from the thermocouple input channels,
-        applies cold junction compensation, and converts the resulting voltage to
-        temperature.
+        Reads the differential voltage from the thermocouple input channels and the
+        cold junction temperature from the device's internal sensor. Use
+        ``analysis.voltage_to_temperature`` to combine the two into a temperature.
 
         Args:
-            labjack: An instance of the LabJack U6 device.
+            labjack: An instance of the LabJack U6 device, or None for simulated
+                readings (test mode).
             resolution_index: The LabJack resolution index for ADC measurement
                 (default 8).
             gain_index: The LabJack gain setting index to set input voltage range and
                 resolution (default 2).
 
         Returns:
-            The calculated temperature in degrees Celsius.
+            The thermocouple voltage in millivolts and the cold junction
+            temperature in degrees Celsius.
         """
         if labjack is None:
             rng = np.random.default_rng()
-            ain_channel_voltage = rng.uniform(0.1, 0.2)
-            local_temperature = rng.uniform(20, 25)
-        else:
-            ain_channel_voltage = labjack.getAIN(
-                positiveChannel=0,
-                resolutionIndex=resolution_index,
-                gainIndex=gain_index,
-                differential=True,
-            )
-            # convert volts to millivolts
-            ain_channel_voltage *= 1000
-            ain_channel_voltage *= -1
+            return float(rng.uniform(0.1, 0.2)), float(rng.uniform(20, 25))
 
-            # get cold junction temperature in Celsius
-            local_temperature = labjack.getTemperature() - 273.15 + 2.5
+        ain_channel_voltage = labjack.getAIN(
+            positiveChannel=0,
+            resolutionIndex=resolution_index,
+            gainIndex=gain_index,
+            differential=True,
+        )
+        # convert volts to millivolts
+        ain_channel_voltage *= 1000
+        ain_channel_voltage *= -1
 
+        # get cold junction temperature in Celsius
+        local_temperature = labjack.getTemperature() - 273.15 + 2.5
+
+        return ain_channel_voltage, local_temperature
+
+    def record_ain_channel_voltage(
+        self,
+        labjack,  # Remove type hint to avoid import issues
+        resolution_index: int | None = 8,
+        gain_index: int | None = 2,
+    ) -> None:
+        """
+        Read the thermocouple (see ``read``) and append the voltage and cold junction
+        temperature to ``voltage_data`` and ``local_temperature_data``.
+
+        Args:
+            labjack: An instance of the LabJack U6 device, or None for simulated
+                readings (test mode).
+            resolution_index: The LabJack resolution index for ADC measurement
+                (default 8).
+            gain_index: The LabJack gain setting index to set input voltage range and
+                resolution (default 2).
+        """
+        ain_channel_voltage, local_temperature = self.read(
+            labjack, resolution_index=resolution_index, gain_index=gain_index
+        )
         self.local_temperature_data.append(local_temperature)
         self.voltage_data.append(ain_channel_voltage)
 
