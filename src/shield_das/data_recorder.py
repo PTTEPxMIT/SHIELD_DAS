@@ -37,9 +37,8 @@ class DataRecorder:
         sample_coating_layers: Coating layers ordered as deposited, each a dict
             with keys "material" (spelled-out name, e.g. "tungsten") and
             "thickness_nm" (nm). None (the default) means no layers ([]).
-        sample_id: Identifier of the physical sample, used to pair leak tests
-            with later permeation runs on the same sample. Required when
-            run_type is "leak_test".
+        sample_id: Optional identifier of the physical sample (e.g. "S07"),
+            written to the run metadata for any run type.
         downstream_setpoint_torr: Downstream isolation setpoint in torr for a
             leak test (within the 1-torr Baratron range, 0.0025-1 torr).
             Optional; only written to metadata when given.
@@ -151,13 +150,6 @@ class DataRecorder:
         self.sample_coating_layers = sample_coating_layers
         self.sample_id = sample_id
         self.downstream_setpoint_torr = downstream_setpoint_torr
-
-        if self.run_type == "leak_test" and self.sample_id is None:
-            raise ValueError(
-                "sample_id is required for a leak_test run: it is how the "
-                "analysis toolbox pairs the leak test with later permeation "
-                "runs on the same physical sample"
-            )
 
         # Thread control
         self.stop_event = threading.Event()

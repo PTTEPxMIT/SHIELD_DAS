@@ -68,10 +68,9 @@ my_recorder.run()
 
 A leak test is a short recorded run taken with a sample installed and sealed,
 the upstream side unpressurized and the downstream volume isolated at a
-setpoint between 0.0025 and 1 Torr (inside the 1-Torr Baratron's range); its
-downstream dP/dt is the background leak rate that the analysis toolbox
-subtracts from later permeation runs on the same sample, paired via
-`sample_id`. Instead of the four permeation valve events, a leak test has a
+setpoint between 0.0025 and 1 Torr (inside the 1-Torr Baratron's range). Its
+downstream dP/dt is the background leak rate of the sealed assembly, a
+standalone diagnostic of the seals. Instead of the four permeation valve events, a leak test has a
 single spacebar event, `downstream_isolated_time`, pressed when the downstream
 volume is isolated at the setpoint (the start of the measurement window).
 
@@ -80,7 +79,7 @@ leak_recorder = DataRecorder(
     gauges=[gauge_1, gauge_2, gauge_3, gauge_4],
     thermocouples=[thermocouple_1],
     run_type="leak_test",
-    sample_id="W-800nm-001",  # required for leak tests
+    sample_id="W-800nm-001",  # optional, identifies the physical sample
     downstream_setpoint_torr=0.05,  # optional, recorded in metadata
     furnace_setpoint=500,
     sample_substrate="carbon steel",

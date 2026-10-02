@@ -165,7 +165,7 @@ def test_data_recorder_initializes_with_valid_run_type(mock_gauge, run_type):
         sample_substrate="316L steel",
         sample_thickness=0.001,
         run_type=run_type,
-        sample_id="SAMPLE-001",  # required for leak_test
+        sample_id="SAMPLE-001",
     )
     assert recorder.run_type == run_type
 
@@ -556,21 +556,20 @@ def test_data_recorder_rejects_malformed_coating_layers(mock_gauge, bad_layers):
 # =============================================================================
 
 
-def test_data_recorder_leak_test_requires_sample_id(mock_gauge):
+def test_data_recorder_leak_test_sample_id_optional(mock_gauge):
     """
-    Test DataRecorder to verify run_type="leak_test" without a sample_id
-    raises ValueError (the toolbox needs it to pair the leak test with later
-    permeation runs on the same sample).
+    Test DataRecorder to verify run_type="leak_test" does not require a
+    sample_id (a leak test is a standalone measurement).
     """
-    with pytest.raises(ValueError, match="sample_id is required for a leak_test"):
-        DataRecorder(
-            gauges=[mock_gauge],
-            thermocouples=[],
-            furnace_setpoint=600.0,
-            sample_substrate="316L steel",
-            sample_thickness=0.001,
-            run_type="leak_test",
-        )
+    recorder = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_substrate="316L steel",
+        sample_thickness=0.001,
+        run_type="leak_test",
+    )
+    assert recorder.sample_id is None
 
 
 def test_data_recorder_leak_test_event_sequence(mock_gauge):
