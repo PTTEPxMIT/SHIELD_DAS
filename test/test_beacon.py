@@ -202,6 +202,59 @@ def test_sampler_test_mode_needs_no_hardware():
     assert set(channels) == {gauge["name"] for gauge in DEFAULT_GAUGES}
 
 
+class FakeThermocoupleLabJack(FakeLabJack):
+    """Adds the differential thermocouple read and the cold-junction sensor."""
+
+    def __init__(self, voltages, thermocouple_v, device_temperature_k=295.65):
+        super().__init__(voltages)
+        self.thermocouple_v = thermocouple_v
+        self.device_temperature_k = device_temperature_k
+
+    def getAIN(self, positiveChannel, differential=False, **kwargs):
+        if differential:
+            self.reads += 1
+            return self.thermocouple_v
+        return super().getAIN(positiveChannel, **kwargs)
+
+    def getTemperature(self):
+        return self.device_temperature_k
+
+
+def test_config_defaults_include_the_furnace_thermocouple():
+    assert BeaconConfig().thermocouples == ["furnace_thermocouple"]
+
+
+def test_read_channels_matches_the_publishers_temperature():
+    """A beacon temperature and a recorded one of the same reading must agree."""
+    from shield_das.publisher import row_to_channels
+
+    # The recorder flips the sign and converts to mV; device 295.65 K plus the
+    # +2.5 offset gives a 25 C cold junction.
+    labjack = FakeThermocoupleLabJack({}, thermocouple_v=-0.010)
+    direct = read_channels(labjack, [], ["furnace_thermocouple"])
+    via_csv = row_to_channels(
+        {"thermocouples": [{"name": "furnace_thermocouple"}]},
+        {"Local_temperature (C)": 25.0, "furnace_thermocouple_Voltage (mV)": 10.0},
+    )
+    assert direct == {"furnace_thermocouple_C": via_csv["furnace_thermocouple_C"]}
+    assert direct["furnace_thermocouple_C"] == pytest.approx(270.68, abs=0.1)
+
+
+def test_read_channels_drops_an_out_of_range_thermocouple():
+    """An unplugged thermocouple must not stop the pressures going out."""
+    labjack = FakeThermocoupleLabJack({10: 3.5}, thermocouple_v=-1.0)  # 1000 mV
+    channels = read_channels(labjack, [DEFAULT_GAUGES[0]], ["furnace_thermocouple"])
+    assert set(channels) == {"WGM701"}
+
+
+def test_sampler_test_mode_simulates_the_thermocouple():
+    sampler = LabJackSampler(
+        DEFAULT_GAUGES, test_mode=True, thermocouples=["furnace_thermocouple"]
+    )
+    channels = sampler.sample()
+    assert 20 < channels["furnace_thermocouple_C"] < 35
+
+
 # =============================================================================
 # The rolling window
 # =============================================================================

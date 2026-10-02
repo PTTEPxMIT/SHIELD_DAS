@@ -31,6 +31,7 @@ from dataclasses import dataclass, field, fields
 
 import numpy as np
 
+from .analysis import voltage_to_temperature
 from .publisher import (
     DEFAULT_CONFIG_PATH,
     DryRunClient,
@@ -40,6 +41,7 @@ from .publisher import (
 )
 from .publisher import PublisherConfig as _PublisherConfig
 from .run_monitor import _convert_gauge_voltage, find_active_run
+from .thermocouple import Thermocouple
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +81,14 @@ DEFAULT_GAUGES = [
     },
 ]
 
+# The rig's thermocouples, by name (as in ``run_metadata.json``). Each is read
+# as a ``Thermocouple``, whose input channel is fixed in that class, so these
+# names only label the ``<name>_C`` channels the viewer shows.
+DEFAULT_THERMOCOUPLES = ["furnace_thermocouple"]
+
+# Valid span of the Type K conversion (degC); NaN also fails the check.
+_TYPE_K_RANGE_C = (-200.0, 1372.0)
+
 
 @dataclass
 class BeaconConfig:
@@ -95,6 +105,8 @@ class BeaconConfig:
         results_dir: Local directory containing recorded runs, watched only
             to detect that a run has started (the beacon then goes dormant).
         gauges: Gauge descriptions in ``run_metadata.json`` form.
+        thermocouples: Thermocouple names; each is published as
+            ``<name>_C`` in degrees Celsius.
         primary_channel: Gauge whose history is kept and headlined by the
             viewer site.
         sample_period_s: Seconds between LabJack samples.
@@ -109,6 +121,9 @@ class BeaconConfig:
     supabase_key: str | None = None
     results_dir: str = "results"
     gauges: list[dict] = field(default_factory=lambda: list(DEFAULT_GAUGES))
+    thermocouples: list[str] = field(
+        default_factory=lambda: list(DEFAULT_THERMOCOUPLES)
+    )
     primary_channel: str = "WGM701"
     sample_period_s: float = 1.0
     history_seconds: float = 60.0
@@ -153,23 +168,30 @@ class BeaconConfig:
         return max(1, round(self.history_seconds / self.sample_period_s))
 
 
-def read_channels(labjack, gauges: list[dict]) -> dict[str, float]:
-    """Read every gauge once and convert the voltages to physical units.
+def read_channels(
+    labjack, gauges: list[dict], thermocouples: list[str] = ()
+) -> dict[str, float]:
+    """Read every gauge and thermocouple once, in physical units.
 
     Uses the same metadata-driven conversion as the publisher
     (``run_monitor._convert_gauge_voltage``), so a beacon reading and a
     recorded reading of the same gauge agree exactly. Unknown gauge types
     fall back to raw volts under a ``<name>_V`` key; non-finite values are
-    dropped (jsonb cannot hold NaN).
+    dropped (jsonb cannot hold NaN). Thermocouples are converted to degrees
+    Celsius as the publisher does (``analysis.voltage_to_temperature``); a
+    reading outside the Type K range, as from an unplugged thermocouple, is
+    dropped so the pressures still go out.
 
     Args:
         labjack: An open LabJack U6 handle, or None to read simulated
             voltages (test mode).
         gauges: Gauge descriptions in ``run_metadata.json`` form.
+        thermocouples: Thermocouple names.
 
     Returns:
-        Mapping of channel name to value: ``<gauge>`` in torr, or
-        ``<gauge>_V`` in volts for gauge types with no conversion.
+        Mapping of channel name to value: ``<gauge>`` in torr,
+        ``<gauge>_V`` in volts for gauge types with no conversion, and
+        ``<thermocouple>_C`` in degrees Celsius.
     """
     channels: dict[str, float] = {}
     for gauge in gauges:
@@ -191,11 +213,26 @@ def read_channels(labjack, gauges: list[dict]) -> dict[str, float]:
             continue
         name = str(gauge["name"]) if unit == "torr" else f"{gauge['name']}_V"
         channels[name] = _round_sig(value)
+
+    for name in thermocouples:
+        voltage_mv, local_temperature = Thermocouple(name).read(labjack)
+        temperature = float(
+            voltage_to_temperature(
+                local_temperature=np.asarray([local_temperature], dtype=float),
+                voltage=np.asarray([voltage_mv], dtype=float),
+            )[0]
+        )
+        # The conversion extrapolates rather than raising for array input, so
+        # an unplugged thermocouple would otherwise show a nonsense number.
+        if not _TYPE_K_RANGE_C[0] <= temperature <= _TYPE_K_RANGE_C[1]:
+            logger.debug("%s out of Type K range (%.3f mV)", name, voltage_mv)
+            continue
+        channels[f"{name}_C"] = _round_sig(temperature)
     return channels
 
 
 class LabJackSampler:
-    """Samples the gauges by opening and closing the LabJack each time.
+    """Samples gauges and thermocouples, opening and closing the LabJack each time.
 
     One open/read/close cycle measures ~20 ms. In principle that leaves the
     device free ~98 % of the time -- but on the rig's Windows UD driver,
@@ -207,14 +244,21 @@ class LabJackSampler:
     Args:
         gauges: Gauge descriptions in ``run_metadata.json`` form.
         test_mode: Generate simulated voltages instead of touching hardware.
+        thermocouples: Thermocouple names.
     """
 
-    def __init__(self, gauges: list[dict], test_mode: bool = False):
+    def __init__(
+        self,
+        gauges: list[dict],
+        test_mode: bool = False,
+        thermocouples: list[str] = (),
+    ):
         self.gauges = gauges
         self.test_mode = test_mode
+        self.thermocouples = list(thermocouples)
 
     def sample(self) -> dict[str, float]:
-        """Take one reading of every gauge.
+        """Take one reading of every gauge and thermocouple.
 
         Returns:
             Mapping of channel name to value in physical units.
@@ -223,7 +267,7 @@ class LabJackSampler:
             RuntimeError: If the LabJack cannot be opened or read.
         """
         if self.test_mode:
-            return read_channels(None, self.gauges)
+            return read_channels(None, self.gauges, self.thermocouples)
 
         import u6
 
@@ -231,7 +275,7 @@ class LabJackSampler:
         try:
             labjack = u6.U6(firstFound=True)
             labjack.getCalibrationData()
-            return read_channels(labjack, self.gauges)
+            return read_channels(labjack, self.gauges, self.thermocouples)
         except Exception as exc:
             raise RuntimeError(f"LabJack read failed: {exc}") from None
         finally:
@@ -505,7 +549,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.dry_run
         else SupabaseClient(config.supabase_url, _get_key(config))
     )
-    sampler = LabJackSampler(config.gauges, test_mode=args.test_mode)
+    sampler = LabJackSampler(
+        config.gauges, test_mode=args.test_mode, thermocouples=config.thermocouples
+    )
 
     logger.info(
         "Beacon: %s every %.1f s, %.0f s window, pushing every %.1f s",
