@@ -26,17 +26,16 @@ FURNACE_SETPOINT = 500
 
 # Sample under test. Substrate and coating materials are spelled out in full
 # (e.g. "carbon steel", "316L steel"; "tungsten", not "W"). Thickness in
-# metres. SAMPLE_ID identifies the physical specimen (e.g. "S07") — it pairs
-# leak tests with the permeation runs on the same sample, so keep it
-# identical for every run of one mounted sample.
+# metres. SAMPLE_ID optionally identifies the physical specimen (e.g. "S07");
+# keep it identical for every run of one mounted sample.
 SAMPLE_SUBSTRATE = "carbon steel"
 SAMPLE_COATING = "uncoated"  # e.g. "800nm tungsten", or "uncoated"
 SAMPLE_COATING_LAYERS = []  # e.g. [{"material": "tungsten", "thickness_nm": 800}]
 SAMPLE_THICKNESS = 0.001
-SAMPLE_ID = None  # e.g. "S07"; REQUIRED when RUN_TYPE = "leak_test"
+SAMPLE_ID = None  # e.g. "S07"; optional
 
-# Run type: "permeation_exp", "leak_test" (background leak-rate measurement,
-# needs SAMPLE_ID), or "test_mode" (no hardware needed — for testing the DAS)
+# Run type: "permeation_exp", "leak_test" (standalone background leak-rate
+# measurement), or "test_mode" (no hardware needed — for testing the DAS)
 RUN_TYPE = "permeation_exp"
 
 # Leak test only: the downstream isolation setpoint (torr, 0.0025-1);
