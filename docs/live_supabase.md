@@ -308,9 +308,11 @@ noise recording or background subtraction: a straight-line background leaves
 the residuals unchanged and only shifts τ_L, which is taken as where the line
 crosses the pre-step downstream level (a few to ~15 % shorter than the
 toolbox's τ_L on the September 2026 316L runs, so the window starts a little
-earlier). The window is shaded, the y range fits its residuals, and the
-readout gives τ_L and the window start. A systematic arc in the shaded
-window means not settled yet; flat noise about zero means settled.
+earlier). The residual is drawn from the upstream step on, with the y-axis
+autoscaled to all of it; the window is shaded and the readout gives τ_L and
+the window start. Settled is the residual decaying onto zero and staying
+flat there across the shaded window; a residual that only reaches zero at
+the very end (a short window, "not converged") is not.
 
 First paint fetches the whole run as time-bucketed series from the
 `run_series` RPC: one JSON document of at most 1 200 points per channel

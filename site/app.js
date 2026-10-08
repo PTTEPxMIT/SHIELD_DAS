@@ -53,6 +53,7 @@ const ANALYSIS_HOURS = 30;
 const PRE_STEP_WINDOW_S = 60;
 const SS_START_TAUS = 3.0;
 const SS_MAX_ITER = 20;
+const RESIDUAL_GAUGE_TYPE = "Baratron626D_Gauge";
 
 // -- pure helpers (kept dependency-free for easy eyeballing/testing) ---------
 
@@ -90,7 +91,7 @@ function channelPlan(metadata) {
     const panel = panels[gauge.gauge_location];
     if (!panel) continue;
     if (panel === 2 && DOWNSTREAM_HIDDEN_GAUGE_TYPES.has(gauge.type)) continue;
-    plan.push({ key: gauge.name, fallbackKey: `${gauge.name}_V`, panel });
+    plan.push({ key: gauge.name, fallbackKey: `${gauge.name}_V`, panel, type: gauge.type });
   }
   for (const tc of metadata.thermocouples || []) {
     plan.push({ key: `${tc.name}_C`, fallbackKey: null, panel: 3 });
@@ -133,7 +134,7 @@ function lineFit(xs, ys) {
 // all the same length.
 // Returns null before there is a pressure step and four usable samples,
 // else {residualPa (null outside the usable span), tInitS, timeLagS,
-// windowStartS (absolute s), windowResidualPa, converged}.
+// windowStartS (absolute s), converged}.
 function steadyStateResidual(timesS, upstreamTorr, downstreamTorr) {
   const n = timesS.length;
   const valid = (i) =>
@@ -211,7 +212,6 @@ function steadyStateResidual(timesS, upstreamTorr, downstreamTorr) {
     tInitS: tInit,
     timeLagS: line.tau,
     windowStartS: tInit + tRel[window[0]],
-    windowResidualPa: window.map((i) => residualPa[i]),
     converged,
   };
 }
@@ -384,9 +384,11 @@ function buildFigure(run, series, tokens) {
     });
   });
 
-  // Residual: the first upstream and downstream gauges reading in torr.
+  // Residual: the upstream and downstream Baratrons, as the toolbox uses,
+  // else the first gauge on each panel reading in torr.
   const torrChannel = (panel) => {
-    const entry = plan.find((e) => e.panel === panel && e.key in series.channels);
+    const inTorr = plan.filter((e) => e.panel === panel && e.key in series.channels);
+    const entry = inTorr.find((e) => e.type === RESIDUAL_GAUGE_TYPE) || inTorr[0];
     return entry ? series.channels[entry.key] : null;
   };
   const upstream = torrChannel(1);
@@ -518,9 +520,9 @@ function buildFigure(run, series, tokens) {
   return { traces, layout };
 }
 
-// Zero line, shaded steady-state window and the τ_L readout; the y-range
-// fits the window's residuals so the pre-steady-state rise, often orders of
-// magnitude larger, runs off the top instead of flattening the window.
+// Zero line, shaded steady-state window and the τ_L readout (inside the
+// panel, top right, clear of its title). The y-axis
+// autoscales so the whole residual shows, from the upstream step on.
 function addResidualDecor(layout, residual, x, tokens) {
   const windowStart = new Date(residual.windowStartS * 1000).toISOString();
   const lastX = x[x.length - 1];
@@ -549,8 +551,6 @@ function addResidualDecor(layout, residual, x, tokens) {
       line: { color: tokens.baseline, width: 1 },
     },
   );
-  const extent = Math.max(...residual.windowResidualPa.map(Math.abs));
-  if (extent > 0) layout.yaxis4.range = [-2 * extent, 2 * extent];
 
   const tau = residual.timeLagS;
   const readout =
@@ -561,10 +561,10 @@ function addResidualDecor(layout, residual, x, tokens) {
     text: readout,
     xref: "paper",
     yref: "paper",
-    x: BOTTOM_RIGHT_X[1],
-    y: BOTTOM_DOMAIN[1] + 0.005,
+    x: BOTTOM_RIGHT_X[1] - 0.005,
+    y: BOTTOM_DOMAIN[1] - 0.005,
     xanchor: "right",
-    yanchor: "bottom",
+    yanchor: "top",
     showarrow: false,
     font: { color: tokens.muted, size: 11 },
   });
