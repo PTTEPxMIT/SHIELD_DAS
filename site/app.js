@@ -1,11 +1,11 @@
 // SHIELD live viewer: polls the Supabase mirror with the read-only anon key.
 //
 // Two modes, picked automatically:
-//   * a run is recording -> the same three panels as the on-rig dashboard:
+//   * a run is recording -> the on-rig dashboard's three panels plus one:
 //     downstream torr (linear-y fixed to 0-1 torr, WGM701 hidden) full-width
-//     on top, upstream torr (log-y) and temperature degC side by side beneath
-//     it at a quarter of the height; filled by the publisher
-//     (shield-das-publish);
+//     on top; upstream torr (log-y), temperature degC and the downstream's
+//     residual about its steady-state line (Pa) side by side beneath it at a
+//     quarter of the height; filled by the publisher (shield-das-publish);
 //   * no run is recording -> the standby card: the rig's present vacuum level
 //     and the last minute of it, filled by the beacon (shield-das-beacon).
 //
@@ -31,15 +31,28 @@ const STANDBY_FRESH_MS = 60000;
 // wide-range WGM701 is omitted there (twin of live_dashboard.py's constants).
 const DOWNSTREAM_RANGE_TORR = [0, 1];
 const DOWNSTREAM_HIDDEN_GAUGE_TYPES = new Set(["WGM701_Gauge"]);
-// Panel geometry (paper fractions): downstream owns the top; upstream and
-// temperature share the strip beneath it at a quarter of its height.
+// Panel geometry (paper fractions): downstream owns the top; upstream,
+// temperature and the steady-state residual share the strip beneath it at a
+// quarter of its height.
 const TOP_DOMAIN = [0.3, 0.98];
 const BOTTOM_DOMAIN = [0.03, 0.2];
-const BOTTOM_LEFT_X = [0, 0.46];
-const BOTTOM_RIGHT_X = [0.54, 1];
-// Trace y-axes stay y/y2/y3 for panels 1/2/3; the x-axes are laid out so the
-// downstream panel (2) owns the primary one.
-const PANEL_X_AXIS = { 1: "x2", 2: "x", 3: "x3" };
+const BOTTOM_LEFT_X = [0, 0.28];
+const BOTTOM_MIDDLE_X = [0.36, 0.64];
+const BOTTOM_RIGHT_X = [0.72, 1];
+// Trace y-axes stay y/y2/y3/y4 for panels 1/2/3/4; the x-axes are laid out
+// so the downstream panel (2) owns the primary one.
+const PANEL_X_AXIS = { 1: "x2", 2: "x", 3: "x3", 4: "x4" };
+// Residual panel: the toolbox's steady-state fit (shield_toolbox
+// analysis.time_lag.fit_steady_state) without the background subtraction,
+// which is a straight line and so leaves the residuals unchanged. Constants
+// twin the toolbox defaults.
+const TORR_TO_PA = 133.322368;
+const PRESSURISED_TORR = 10.0;
+const DOWNSTREAM_MAX_TORR = 0.95;
+const ANALYSIS_HOURS = 30;
+const PRE_STEP_WINDOW_S = 60;
+const SS_START_TAUS = 3.0;
+const SS_MAX_ITER = 20;
 
 // -- pure helpers (kept dependency-free for easy eyeballing/testing) ---------
 
@@ -83,6 +96,130 @@ function channelPlan(metadata) {
     plan.push({ key: `${tc.name}_C`, fallbackKey: null, panel: 3 });
   }
   return plan;
+}
+
+// -- steady-state residual ----------------------------------------------------
+
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+// Least-squares line y = slope*x + intercept.
+function lineFit(xs, ys) {
+  const n = xs.length;
+  const mx = xs.reduce((s, v) => s + v, 0) / n;
+  const my = ys.reduce((s, v) => s + v, 0) / n;
+  let sxy = 0;
+  let sxx = 0;
+  for (let i = 0; i < n; i++) {
+    sxy += (xs[i] - mx) * (ys[i] - my);
+    sxx += (xs[i] - mx) ** 2;
+  }
+  const slope = sxy / sxx;
+  return { slope, intercept: my - slope * mx };
+}
+
+// Downstream minus the steady-state line, as the toolbox's residual plot.
+//
+// t_init is the first sample above half the upstream plateau (the median of
+// the readings above PRESSURISED_TORR). The line is fitted to the downstream
+// from SS_START_TAUS·τ_L to the last usable sample, τ_L being where the line
+// crosses the pre-step downstream level; τ_L and the window start are
+// iterated from a quarter of the span until τ_L moves by less than 1 s.
+//
+// Args: timesS (s), upstreamTorr and downstreamTorr (torr, null for gaps),
+// all the same length.
+// Returns null before there is a pressure step and four usable samples,
+// else {residualPa (null outside the usable span), tInitS, timeLagS,
+// windowStartS (absolute s), windowResidualPa, converged}.
+function steadyStateResidual(timesS, upstreamTorr, downstreamTorr) {
+  const n = timesS.length;
+  const valid = (i) =>
+    typeof upstreamTorr[i] === "number" && typeof downstreamTorr[i] === "number";
+  const pressurised = upstreamTorr.filter(
+    (v) => typeof v === "number" && v > PRESSURISED_TORR,
+  );
+  if (pressurised.length === 0) return null;
+  const half = 0.5 * median(pressurised);
+  const initIndex = upstreamTorr.findIndex((v) => typeof v === "number" && v > half);
+  const tInit = timesS[initIndex];
+
+  // Level the downstream starts from: the last minute before the step, or
+  // the first reading at it when the recording starts pressurised.
+  const before = [];
+  for (let i = 0; i < initIndex; i++) {
+    if (valid(i) && timesS[i] >= tInit - PRE_STEP_WINDOW_S) before.push(downstreamTorr[i]);
+  }
+  const startLevel = before.length ? median(before) : downstreamTorr[initIndex];
+  if (typeof startLevel !== "number") return null;
+
+  const tRel = timesS.map((t) => t - tInit);
+  const usable = [];
+  for (let i = 0; i < n; i++) {
+    if (
+      valid(i) &&
+      tRel[i] > 0 &&
+      tRel[i] <= ANALYSIS_HOURS * 3600 &&
+      upstreamTorr[i] > PRESSURISED_TORR &&
+      downstreamTorr[i] < DOWNSTREAM_MAX_TORR
+    ) {
+      usable.push(i);
+    }
+  }
+  if (usable.length < 4) return null;
+  const endS = tRel[usable[usable.length - 1]];
+
+  const windowFrom = (startS) => usable.filter((i) => tRel[i] >= startS);
+  const fit = (window) => {
+    const { slope, intercept } = lineFit(
+      window.map((i) => tRel[i]),
+      window.map((i) => downstreamTorr[i]),
+    );
+    return { slope, intercept, tau: (startLevel - intercept) / slope };
+  };
+
+  let tau = 0.25 * endS; // first guess
+  let window = windowFrom(SS_START_TAUS * tau);
+  if (window.length < 4) {
+    tau = (0.5 * endS) / SS_START_TAUS;
+    window = windowFrom(SS_START_TAUS * tau);
+  }
+  let line = fit(window);
+  let converged = false;
+  for (let iter = 1; iter < SS_MAX_ITER; iter++) {
+    if (Math.abs(line.tau - tau) < 1) {
+      converged = true;
+      break;
+    }
+    tau = Math.max(line.tau, 60);
+    const next = windowFrom(SS_START_TAUS * tau);
+    if (next.length < 4) break; // next start lies past the data
+    window = next;
+    line = fit(window);
+  }
+  if (!converged) converged = Math.abs(line.tau - tau) < 1;
+
+  const residualPa = new Array(n).fill(null);
+  for (const i of usable) {
+    residualPa[i] =
+      (downstreamTorr[i] - (line.intercept + line.slope * tRel[i])) * TORR_TO_PA;
+  }
+  return {
+    residualPa,
+    tInitS: tInit,
+    timeLagS: line.tau,
+    windowStartS: tInit + tRel[window[0]],
+    windowResidualPa: window.map((i) => residualPa[i]),
+    converged,
+  };
+}
+
+function formatHours(seconds) {
+  return seconds < 3600
+    ? `${(seconds / 60).toFixed(0)} min`
+    : `${(seconds / 3600).toFixed(1)} h`;
 }
 
 // Pressure in torr as a readable magnitude: "1.93 x 10^-4 torr" for the
@@ -247,6 +384,37 @@ function buildFigure(run, series, tokens) {
     });
   });
 
+  // Residual: the first upstream and downstream gauges reading in torr.
+  const torrChannel = (panel) => {
+    const entry = plan.find((e) => e.panel === panel && e.key in series.channels);
+    return entry ? series.channels[entry.key] : null;
+  };
+  const upstream = torrChannel(1);
+  const downstream = torrChannel(2);
+  const residual =
+    upstream && downstream
+      ? steadyStateResidual(
+          x.map((t) => Date.parse(t) / 1000),
+          upstream,
+          downstream,
+        )
+      : null;
+  if (residual) {
+    traces.push({
+      type: "scattergl",
+      mode: "lines",
+      name: "residual",
+      showlegend: false,
+      x,
+      y: residual.residualPa,
+      xaxis: "x4",
+      yaxis: "y4",
+      line: { width: 1.5, color: tokens.ink },
+      hovertemplate: "%{y:.3g} Pa<extra>residual</extra>",
+      connectgaps: false,
+    });
+  }
+
   const axisBase = {
     gridcolor: tokens.grid,
     linecolor: tokens.baseline,
@@ -283,8 +451,10 @@ function buildFigure(run, series, tokens) {
     annotations: [
       panelTitle("Downstream pressure", TOP_DOMAIN[1] + 0.005, 0, tokens),
       panelTitle("Upstream pressure", BOTTOM_DOMAIN[1] + 0.005, 0, tokens),
-      panelTitle("Temperature", BOTTOM_DOMAIN[1] + 0.005, BOTTOM_RIGHT_X[0], tokens),
+      panelTitle("Temperature", BOTTOM_DOMAIN[1] + 0.005, BOTTOM_MIDDLE_X[0], tokens),
+      panelTitle("Steady-state residual", BOTTOM_DOMAIN[1] + 0.005, BOTTOM_RIGHT_X[0], tokens),
     ],
+    shapes: [],
   };
   const timeTitle = { text: "Time", font: { color: tokens.muted, size: 12 } };
   // Downstream: full-width top panel on the primary time axis
@@ -303,7 +473,7 @@ function buildFigure(run, series, tokens) {
   layout.xaxis3 = {
     ...axisBase,
     anchor: "y3",
-    domain: BOTTOM_RIGHT_X,
+    domain: BOTTOM_MIDDLE_X,
     matches: "x",
     title: timeTitle,
   };
@@ -313,19 +483,103 @@ function buildFigure(run, series, tokens) {
     domain: BOTTOM_DOMAIN,
     title: { text: "Temperature (°C)", font: { color: tokens.muted, size: 12 } },
   };
+  layout.xaxis4 = {
+    ...axisBase,
+    anchor: "y4",
+    domain: BOTTOM_RIGHT_X,
+    matches: "x",
+    title: timeTitle,
+  };
+  layout.yaxis4 = {
+    ...axisBase,
+    anchor: "x4",
+    domain: BOTTOM_DOMAIN,
+    title: { text: "Residual (Pa)", font: { color: tokens.muted, size: 12 } },
+  };
 
   if (!panelHasData[3]) {
-    layout.annotations.push({
-      text: "no thermocouple in this run",
-      xref: "paper",
-      yref: "paper",
-      x: (BOTTOM_RIGHT_X[0] + BOTTOM_RIGHT_X[1]) / 2,
-      y: (BOTTOM_DOMAIN[0] + BOTTOM_DOMAIN[1]) / 2,
-      showarrow: false,
-      font: { color: tokens.muted },
-    });
+    layout.annotations.push(
+      panelNote("no thermocouple in this run", BOTTOM_MIDDLE_X, tokens),
+    );
+  }
+  if (residual) {
+    addResidualDecor(layout, residual, x, tokens);
+  } else {
+    layout.annotations.push(
+      panelNote(
+        upstream && downstream
+          ? "waiting for the upstream step"
+          : "needs upstream and downstream in torr",
+        BOTTOM_RIGHT_X,
+        tokens,
+      ),
+    );
   }
   return { traces, layout };
+}
+
+// Zero line, shaded steady-state window and the τ_L readout; the y-range
+// fits the window's residuals so the pre-steady-state rise, often orders of
+// magnitude larger, runs off the top instead of flattening the window.
+function addResidualDecor(layout, residual, x, tokens) {
+  const windowStart = new Date(residual.windowStartS * 1000).toISOString();
+  const lastX = x[x.length - 1];
+  layout.shapes.push(
+    {
+      type: "rect",
+      xref: "x4",
+      yref: "y4 domain",
+      x0: windowStart,
+      x1: lastX,
+      y0: 0,
+      y1: 1,
+      fillcolor: tokens.muted,
+      opacity: 0.12,
+      line: { width: 0 },
+      layer: "below",
+    },
+    {
+      type: "line",
+      xref: "x4 domain",
+      yref: "y4",
+      x0: 0,
+      x1: 1,
+      y0: 0,
+      y1: 0,
+      line: { color: tokens.baseline, width: 1 },
+    },
+  );
+  const extent = Math.max(...residual.windowResidualPa.map(Math.abs));
+  if (extent > 0) layout.yaxis4.range = [-2 * extent, 2 * extent];
+
+  const tau = residual.timeLagS;
+  const readout =
+    (tau > 0 ? `τ<sub>L</sub> ${formatHours(tau)}` : "τ<sub>L</sub> —") +
+    ` · window from ${formatHours(residual.windowStartS - residual.tInitS)}` +
+    (residual.converged ? "" : " · not converged");
+  layout.annotations.push({
+    text: readout,
+    xref: "paper",
+    yref: "paper",
+    x: BOTTOM_RIGHT_X[1],
+    y: BOTTOM_DOMAIN[1] + 0.005,
+    xanchor: "right",
+    yanchor: "bottom",
+    showarrow: false,
+    font: { color: tokens.muted, size: 11 },
+  });
+}
+
+function panelNote(text, xDomain, tokens) {
+  return {
+    text,
+    xref: "paper",
+    yref: "paper",
+    x: (xDomain[0] + xDomain[1]) / 2,
+    y: (BOTTOM_DOMAIN[0] + BOTTOM_DOMAIN[1]) / 2,
+    showarrow: false,
+    font: { color: tokens.muted },
+  };
 }
 
 function panelTitle(text, y, x, tokens) {

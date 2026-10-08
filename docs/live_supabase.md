@@ -292,12 +292,25 @@ a run is live it shows the run panels described below; otherwise it shows the
 sparkline, the other gauges and the furnace temperature underneath, and a STANDBY badge that flips to
 STALE if the beacon stops reporting. It polls the mirror every 10 s (5 s on
 the standby card, matching the beacon's push cadence) with the **anon** key
-(read-only via row-level security) and renders the same three panels as the
-on-rig dashboard: downstream pressure (torr, linear y fixed to 0–1 torr,
-WGM701 hidden) full-width on top, with upstream pressure (torr, log y) and
-temperature (°C) side by side beneath it at a quarter of the height, and a
+(read-only via row-level security) and renders the on-rig dashboard's three
+panels plus one: downstream pressure (torr, linear y fixed to 0–1 torr,
+WGM701 hidden) full-width on top, with upstream pressure (torr, log y),
+temperature (°C) and the steady-state residual side by side beneath it at a
+quarter of the height, and a
 LIVE / STALE / ENDED / WAITING badge
 driven by the server-stamped heartbeat.
+
+The residual panel is there to show when the downstream rise has settled. It
+is the downstream minus a straight line fitted from 3 τ_L to the newest
+usable sample, as in the toolbox's `plot_residuals`, recomputed in the
+browser on every poll (`steadyStateResidual` in `site/app.js`). There is no
+noise recording or background subtraction: a straight-line background leaves
+the residuals unchanged and only shifts τ_L, which is taken as where the line
+crosses the pre-step downstream level (a few to ~15 % shorter than the
+toolbox's τ_L on the September 2026 316L runs, so the window starts a little
+earlier). The window is shaded, the y range fits its residuals, and the
+readout gives τ_L and the window start. A systematic arc in the shaded
+window means not settled yet; flat noise about zero means settled.
 
 First paint fetches the whole run as time-bucketed series from the
 `run_series` RPC: one JSON document of at most 1 200 points per channel
