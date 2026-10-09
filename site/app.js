@@ -4,7 +4,7 @@
 //   * a run is recording -> the on-rig dashboard's three panels plus one:
 //     downstream torr (linear-y fixed to 0-1 torr, WGM701 hidden) full-width
 //     on top; upstream torr (log-y), temperature degC and the downstream's
-//     residual about its steady-state line (Pa) side by side beneath it at a
+//     steady-state flux check (site/steady_flux.js) side by side beneath it at a
 //     quarter of the height; filled by the publisher (shield-das-publish);
 //   * no run is recording -> the standby card: the rig's present vacuum level
 //     and the last minute of it, filled by the beacon (shield-das-beacon).
@@ -32,7 +32,7 @@ const STANDBY_FRESH_MS = 60000;
 const DOWNSTREAM_RANGE_TORR = [0, 1];
 const DOWNSTREAM_HIDDEN_GAUGE_TYPES = new Set(["WGM701_Gauge"]);
 // Panel geometry (paper fractions): downstream owns the top; upstream,
-// temperature and the steady-state residual share the strip beneath it at a
+// temperature and the steady-state flux share the strip beneath it at a
 // quarter of its height.
 const TOP_DOMAIN = [0.3, 0.98];
 const BOTTOM_DOMAIN = [0.03, 0.2];
@@ -42,18 +42,17 @@ const BOTTOM_RIGHT_X = [0.72, 1];
 // Trace y-axes stay y/y2/y3/y4 for panels 1/2/3/4; the x-axes are laid out
 // so the downstream panel (2) owns the primary one.
 const PANEL_X_AXIS = { 1: "x2", 2: "x", 3: "x3", 4: "x4" };
-// Residual panel: the toolbox's steady-state fit (shield_toolbox
-// analysis.time_lag.fit_steady_state) without the background subtraction,
-// which is a straight line and so leaves the residuals unchanged. Constants
-// twin the toolbox defaults.
-const TORR_TO_PA = 133.322368;
-const PRESSURISED_TORR = 10.0;
-const DOWNSTREAM_MAX_TORR = 0.95;
-const ANALYSIS_HOURS = 30;
-const PRE_STEP_WINDOW_S = 60;
-const SS_START_TAUS = 3.0;
-const SS_MAX_ITER = 20;
-const RESIDUAL_GAUGE_TYPE = "Baratron626D_Gauge";
+// Steady-state flux panel: judged on the upstream and downstream Baratrons, as
+// the toolbox uses (site/steady_flux.js holds the criterion and its constants).
+const STEADY_GAUGE_TYPE = "Baratron626D_Gauge";
+const STEADY_LABELS = {
+  waiting: "WAITING",
+  rising: "NOT STEADY",
+  settling: "SETTLING",
+  steady: "STEADY",
+  drifted: "DRIFTED",
+  "cannot-confirm": "CAN'T CONFIRM",
+};
 
 // -- pure helpers (kept dependency-free for easy eyeballing/testing) ---------
 
@@ -97,123 +96,6 @@ function channelPlan(metadata) {
     plan.push({ key: `${tc.name}_C`, fallbackKey: null, panel: 3 });
   }
   return plan;
-}
-
-// -- steady-state residual ----------------------------------------------------
-
-function median(values) {
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = sorted.length >> 1;
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
-
-// Least-squares line y = slope*x + intercept.
-function lineFit(xs, ys) {
-  const n = xs.length;
-  const mx = xs.reduce((s, v) => s + v, 0) / n;
-  const my = ys.reduce((s, v) => s + v, 0) / n;
-  let sxy = 0;
-  let sxx = 0;
-  for (let i = 0; i < n; i++) {
-    sxy += (xs[i] - mx) * (ys[i] - my);
-    sxx += (xs[i] - mx) ** 2;
-  }
-  const slope = sxy / sxx;
-  return { slope, intercept: my - slope * mx };
-}
-
-// Downstream minus the steady-state line, as the toolbox's residual plot.
-//
-// t_init is the first sample above half the upstream plateau (the median of
-// the readings above PRESSURISED_TORR). The line is fitted to the downstream
-// from SS_START_TAUS·τ_L to the last usable sample, τ_L being where the line
-// crosses the pre-step downstream level; τ_L and the window start are
-// iterated from a quarter of the span until τ_L moves by less than 1 s.
-//
-// Args: timesS (s), upstreamTorr and downstreamTorr (torr, null for gaps),
-// all the same length.
-// Returns null before there is a pressure step and four usable samples,
-// else {residualPa (null outside the usable span), tInitS, timeLagS,
-// windowStartS (absolute s), converged}.
-function steadyStateResidual(timesS, upstreamTorr, downstreamTorr) {
-  const n = timesS.length;
-  const valid = (i) =>
-    typeof upstreamTorr[i] === "number" && typeof downstreamTorr[i] === "number";
-  const pressurised = upstreamTorr.filter(
-    (v) => typeof v === "number" && v > PRESSURISED_TORR,
-  );
-  if (pressurised.length === 0) return null;
-  const half = 0.5 * median(pressurised);
-  const initIndex = upstreamTorr.findIndex((v) => typeof v === "number" && v > half);
-  const tInit = timesS[initIndex];
-
-  // Level the downstream starts from: the last minute before the step, or
-  // the first reading at it when the recording starts pressurised.
-  const before = [];
-  for (let i = 0; i < initIndex; i++) {
-    if (valid(i) && timesS[i] >= tInit - PRE_STEP_WINDOW_S) before.push(downstreamTorr[i]);
-  }
-  const startLevel = before.length ? median(before) : downstreamTorr[initIndex];
-  if (typeof startLevel !== "number") return null;
-
-  const tRel = timesS.map((t) => t - tInit);
-  const usable = [];
-  for (let i = 0; i < n; i++) {
-    if (
-      valid(i) &&
-      tRel[i] > 0 &&
-      tRel[i] <= ANALYSIS_HOURS * 3600 &&
-      upstreamTorr[i] > PRESSURISED_TORR &&
-      downstreamTorr[i] < DOWNSTREAM_MAX_TORR
-    ) {
-      usable.push(i);
-    }
-  }
-  if (usable.length < 4) return null;
-  const endS = tRel[usable[usable.length - 1]];
-
-  const windowFrom = (startS) => usable.filter((i) => tRel[i] >= startS);
-  const fit = (window) => {
-    const { slope, intercept } = lineFit(
-      window.map((i) => tRel[i]),
-      window.map((i) => downstreamTorr[i]),
-    );
-    return { slope, intercept, tau: (startLevel - intercept) / slope };
-  };
-
-  let tau = 0.25 * endS; // first guess
-  let window = windowFrom(SS_START_TAUS * tau);
-  if (window.length < 4) {
-    tau = (0.5 * endS) / SS_START_TAUS;
-    window = windowFrom(SS_START_TAUS * tau);
-  }
-  let line = fit(window);
-  let converged = false;
-  for (let iter = 1; iter < SS_MAX_ITER; iter++) {
-    if (Math.abs(line.tau - tau) < 1) {
-      converged = true;
-      break;
-    }
-    tau = Math.max(line.tau, 60);
-    const next = windowFrom(SS_START_TAUS * tau);
-    if (next.length < 4) break; // next start lies past the data
-    window = next;
-    line = fit(window);
-  }
-  if (!converged) converged = Math.abs(line.tau - tau) < 1;
-
-  const residualPa = new Array(n).fill(null);
-  for (const i of usable) {
-    residualPa[i] =
-      (downstreamTorr[i] - (line.intercept + line.slope * tRel[i])) * TORR_TO_PA;
-  }
-  return {
-    residualPa,
-    tInitS: tInit,
-    timeLagS: line.tau,
-    windowStartS: tInit + tRel[window[0]],
-    converged,
-  };
 }
 
 function formatHours(seconds) {
@@ -296,6 +178,9 @@ function themeTokens() {
     muted: token("--text-muted"),
     grid: token("--gridline"),
     baseline: token("--baseline"),
+    good: token("--status-good"),
+    warn: token("--status-warn"),
+    bad: token("--status-bad"),
     series: [1, 2, 3, 4, 5, 6].map((n) => token(`--series-${n}`)),
   };
 }
@@ -384,36 +269,54 @@ function buildFigure(run, series, tokens) {
     });
   });
 
-  // Residual: the upstream and downstream Baratrons, as the toolbox uses,
-  // else the first gauge on each panel reading in torr.
+  // Steady-state flux: the upstream and downstream Baratrons, as the toolbox
+  // uses, else the first gauge on each panel reading in torr.
   const torrChannel = (panel) => {
     const inTorr = plan.filter((e) => e.panel === panel && e.key in series.channels);
-    const entry = inTorr.find((e) => e.type === RESIDUAL_GAUGE_TYPE) || inTorr[0];
+    const entry = inTorr.find((e) => e.type === STEADY_GAUGE_TYPE) || inTorr[0];
     return entry ? series.channels[entry.key] : null;
   };
   const upstream = torrChannel(1);
   const downstream = torrChannel(2);
-  const residual =
+  const steady =
     upstream && downstream
-      ? steadyStateResidual(
+      ? steadyFlux(
           x.map((t) => Date.parse(t) / 1000),
           upstream,
           downstream,
         )
       : null;
-  if (residual) {
+  if (steady && !steady.chunks.length && x.length) {
+    // Nothing to plot yet: an empty trace keeps the panel on the time axis.
     traces.push({
-      type: "scattergl",
-      mode: "lines",
-      name: "residual",
+      type: "scatter",
+      mode: "markers",
       showlegend: false,
-      x,
-      y: residual.residualPa,
+      hoverinfo: "skip",
+      x: [x[0], x[x.length - 1]],
+      y: [null, null],
       xaxis: "x4",
       yaxis: "y4",
-      line: { width: 1.5, color: tokens.ink },
-      hovertemplate: "%{y:.3g} Pa<extra>residual</extra>",
-      connectgaps: false,
+    });
+  }
+  if (steady && steady.chunks.length) {
+    const colour = steadyColour(steady.state, tokens);
+    traces.push({
+      type: "scatter",
+      mode: "lines+markers",
+      name: "flux",
+      showlegend: false,
+      x: steady.chunks.map((c) => new Date(c.tMidS * 1000).toISOString()),
+      y: steady.chunks.map((c) => 100 * c.fraction),
+      customdata: steady.chunks.map((c) => c.flux),
+      xaxis: "x4",
+      yaxis: "y4",
+      line: { width: 1.2, color: tokens.baseline },
+      marker: {
+        size: steady.chunks.map((c) => (c.inSpan ? 8 : 6)),
+        color: steady.chunks.map((c) => (c.inSpan ? colour : tokens.muted)),
+      },
+      hovertemplate: "%{y:.1f} % of current<br>%{customdata:.3e} torr/s<extra>flux</extra>",
     });
   }
 
@@ -454,7 +357,7 @@ function buildFigure(run, series, tokens) {
       panelTitle("Downstream pressure", TOP_DOMAIN[1] + 0.005, 0, tokens),
       panelTitle("Upstream pressure", BOTTOM_DOMAIN[1] + 0.005, 0, tokens),
       panelTitle("Temperature", BOTTOM_DOMAIN[1] + 0.005, BOTTOM_MIDDLE_X[0], tokens),
-      panelTitle("Steady-state residual", BOTTOM_DOMAIN[1] + 0.005, BOTTOM_RIGHT_X[0], tokens),
+      panelTitle("Steady-state flux", BOTTOM_DOMAIN[1] + 0.005, BOTTOM_RIGHT_X[0], tokens),
     ],
     shapes: [],
   };
@@ -496,7 +399,7 @@ function buildFigure(run, series, tokens) {
     ...axisBase,
     anchor: "x4",
     domain: BOTTOM_DOMAIN,
-    title: { text: "Residual (Pa)", font: { color: tokens.muted, size: 12 } },
+    title: { text: "Flux (% of current)", font: { color: tokens.muted, size: 12 } },
   };
 
   if (!panelHasData[3]) {
@@ -504,8 +407,8 @@ function buildFigure(run, series, tokens) {
       panelNote("no thermocouple in this run", BOTTOM_MIDDLE_X, tokens),
     );
   }
-  if (residual) {
-    addResidualDecor(layout, residual, x, tokens);
+  if (steady) {
+    addSteadyDecor(layout, steady, tokens);
   } else {
     layout.annotations.push(
       panelNote(
@@ -517,25 +420,70 @@ function buildFigure(run, series, tokens) {
       ),
     );
   }
-  return { traces, layout };
+  return { traces, layout, steady };
 }
 
-// Zero line, shaded steady-state window and the τ_L readout (inside the
-// panel, top right, clear of its title). The y-axis
-// autoscales so the whole residual shows, from the upstream step on.
-function addResidualDecor(layout, residual, x, tokens) {
-  const windowStart = new Date(residual.windowStartS * 1000).toISOString();
-  const lastX = x[x.length - 1];
+function steadyColour(state, tokens) {
+  if (state === "steady") return tokens.good;
+  if (state === "cannot-confirm") return tokens.bad;
+  if (state === "settling" || state === "drifted") return tokens.warn;
+  return tokens.muted;
+}
+
+// What the steady-state check says, in words: {headline, detail}. The
+// headline leads the panel and the header; the detail sits under it.
+function steadyReadout(steady) {
+  const label = STEADY_LABELS[steady.state];
+  const torr = (v) => `${v.toFixed(2)} torr`;
+  const hold = STEADY_HOLD_TORR.toFixed(2);
+  const pct = Math.round(100 * STEADY_TOLERANCE);
+  let headline;
+  if (steady.state === "waiting") {
+    headline = `${label} · too little rise to judge yet`;
+  } else if (steady.state === "rising") {
+    const change = Math.round(100 * steady.recentChange);
+    headline = `${label} · flux ${change >= 0 ? "+" : ""}${change} % over the last 0.1 torr`;
+  } else if (steady.state === "settling") {
+    const toGo = steady.toGoS !== null ? ` (~${formatHours(steady.toGoS)} to go)` : "";
+    headline = `${label} · held ±${pct} % over ${torr(steady.spanTorr)} of ${hold}${toGo}`;
+  } else if (steady.state === "steady") {
+    headline = `${label} · flux held ±${pct} % over ${torr(steady.spanTorr)} (${formatHours(steady.spanS)})`;
+  } else if (steady.state === "drifted") {
+    const change = Math.round(100 * steady.driftChange);
+    headline = `${label} · flux ${change >= 0 ? "+" : ""}${change} % since it was steady at ${steady.steadyFluxTorrPerS.toExponential(2)} torr/s`;
+  } else {
+    headline =
+      steady.rangeLeftTorr > 0
+        ? `${label} before 1 torr · held over ${torr(steady.spanTorr)} of ${hold}, ${torr(steady.rangeLeftTorr)} left`
+        : `${label} · reached the top of the gauge before the flux held ${hold} torr`;
+  }
+  const parts = [];
+  if (steady.fluxTorrPerS !== null) parts.push(`flux ${steady.fluxTorrPerS.toExponential(2)} torr/s`);
+  const left = `range left ${torr(steady.rangeLeftTorr)}`;
+  parts.push(
+    steady.rangeLeftS !== null && steady.rangeLeftTorr > 0
+      ? `${left} ≈ ${formatHours(steady.rangeLeftS)}`
+      : left,
+  );
+  return { headline, detail: parts.join(" · ") };
+}
+
+// ±tolerance band around 100 %, the steady span shaded, the state on the
+// panel title and the flux / range-left detail in its bottom-right corner,
+// clear of the points, which finish near 100 % on the right.
+function addSteadyDecor(layout, steady, tokens) {
+  const colour = steadyColour(steady.state, tokens);
+  const pct = 100 * STEADY_TOLERANCE;
   layout.shapes.push(
     {
       type: "rect",
-      xref: "x4",
-      yref: "y4 domain",
-      x0: windowStart,
-      x1: lastX,
-      y0: 0,
-      y1: 1,
-      fillcolor: tokens.muted,
+      xref: "x4 domain",
+      yref: "y4",
+      x0: 0,
+      x1: 1,
+      y0: 100 - pct,
+      y1: 100 + pct,
+      fillcolor: tokens.good,
       opacity: 0.12,
       line: { width: 0 },
       layer: "below",
@@ -546,28 +494,55 @@ function addResidualDecor(layout, residual, x, tokens) {
       yref: "y4",
       x0: 0,
       x1: 1,
-      y0: 0,
-      y1: 0,
-      line: { color: tokens.baseline, width: 1 },
+      y0: 100,
+      y1: 100,
+      line: { color: tokens.baseline, width: 1, dash: "dot" },
     },
   );
+  if (steady.spanStartS !== null && steady.chunks.length) {
+    const lastS = steady.chunks[steady.chunks.length - 1].tMidS;
+    layout.shapes.push({
+      type: "rect",
+      xref: "x4",
+      yref: "y4 domain",
+      x0: new Date(steady.spanStartS * 1000).toISOString(),
+      x1: new Date(Math.max(lastS, steady.spanStartS) * 1000).toISOString(),
+      y0: 0,
+      y1: 1,
+      fillcolor: colour,
+      opacity: 0.1,
+      line: { width: 0 },
+      layer: "below",
+    });
+  }
+  const fractions = steady.chunks.map((c) => 100 * c.fraction);
+  layout.yaxis4.range = [
+    Math.min(80, ...fractions.map((f) => f - 3)),
+    Math.max(110, ...fractions.map((f) => f + 3)),
+  ];
 
-  const tau = residual.timeLagS;
-  const readout =
-    (tau > 0 ? `τ<sub>L</sub> ${formatHours(tau)}` : "τ<sub>L</sub> —") +
-    ` · window from ${formatHours(residual.windowStartS - residual.tInitS)}` +
-    (residual.converged ? "" : " · not converged");
-  layout.annotations.push({
-    text: readout,
-    xref: "paper",
-    yref: "paper",
-    x: BOTTOM_RIGHT_X[1] - 0.005,
-    y: BOTTOM_DOMAIN[1] - 0.005,
-    xanchor: "right",
-    yanchor: "top",
-    showarrow: false,
-    font: { color: tokens.muted, size: 11 },
-  });
+  // The panel is too narrow for the headline (it leads the header instead):
+  // the short state rides on the panel title, the detail sits inside.
+  const { detail } = steadyReadout(steady);
+  const title = layout.annotations.find((a) => a.text === "Steady-state flux");
+  if (title) {
+    const labelColour = steady.state === "waiting" || steady.state === "rising" ? tokens.muted : colour;
+    title.text += ` · <span style="color:${labelColour}"><b>${STEADY_LABELS[steady.state]}</b></span>`;
+  }
+  layout.annotations.push(
+    {
+      text: detail,
+      xref: "paper",
+      yref: "paper",
+      x: BOTTOM_RIGHT_X[1] - 0.005,
+      y: BOTTOM_DOMAIN[0] + 0.005,
+      xanchor: "right",
+      yanchor: "bottom",
+      showarrow: false,
+      bgcolor: tokens.surface,
+      font: { color: tokens.muted, size: 10 },
+    },
+  );
 }
 
 function panelNote(text, xDomain, tokens) {
@@ -672,6 +647,7 @@ function renderStandby(tokens, nowMs) {
   el("row-count").textContent = "";
   el("sample-info").textContent = "";
 
+  el("steady-status").hidden = true;
   el("standby-primary").textContent = primary;
   el("standby-value").textContent = formatTorr(channels[primary]);
   el("standby-age").textContent = fresh
@@ -710,6 +686,7 @@ function render() {
   badge.textContent = status.toUpperCase();
   badge.className = status;
 
+  if (!state.run || state.series.ts.length === 0) el("steady-status").hidden = true;
   if (!state.run) {
     el("run-id").textContent = "—";
     el("message").textContent = "Waiting for a run to start…";
@@ -737,13 +714,26 @@ function render() {
 
   el("message").hidden = true;
   el("chart").hidden = false;
-  const { traces, layout } = buildFigure(state.run, state.series, tokens);
+  const { traces, layout, steady } = buildFigure(state.run, state.series, tokens);
+  renderSteadyStatus(steady);
   Plotly.react("chart", traces, layout, {
     responsive: true,
     displaylogo: false,
     modeBarButtonsToRemove: ["lasso2d", "select2d"],
   });
   state.plotted = true;
+}
+
+// Header pill: the steady-state verdict where it is seen first.
+function renderSteadyStatus(steady) {
+  const pill = el("steady-status");
+  if (!steady) {
+    pill.hidden = true;
+    return;
+  }
+  pill.hidden = false;
+  pill.textContent = steadyReadout(steady).headline;
+  pill.className = steady.state;
 }
 
 // -- polling loop ------------------------------------------------------------

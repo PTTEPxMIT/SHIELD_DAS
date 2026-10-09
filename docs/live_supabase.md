@@ -295,24 +295,49 @@ the standby card, matching the beacon's push cadence) with the **anon** key
 (read-only via row-level security) and renders the on-rig dashboard's three
 panels plus one: downstream pressure (torr, linear y fixed to 0–1 torr,
 WGM701 hidden) full-width on top, with upstream pressure (torr, log y),
-temperature (°C) and the steady-state residual side by side beneath it at a
+temperature (°C) and the steady-state flux check side by side beneath it at a
 quarter of the height, and a
 LIVE / STALE / ENDED / WAITING badge
 driven by the server-stamped heartbeat.
 
-The residual panel is there to show when the downstream rise has settled. It
-is the downstream minus a straight line fitted from 3 τ_L to the newest
-usable sample, as in the toolbox's `plot_residuals`, recomputed in the
-browser on every poll (`steadyStateResidual` in `site/app.js`). There is no
-noise recording or background subtraction: a straight-line background leaves
-the residuals unchanged and only shifts τ_L, which is taken as where the line
-crosses the pre-step downstream level (a few to ~15 % shorter than the
-toolbox's τ_L on the September 2026 316L runs, so the window starts a little
-earlier). The residual is drawn from the upstream step on, with the y-axis
-autoscaled to all of it; the window is shaded and the readout gives τ_L and
-the window start. Settled is the residual decaying onto zero and staying
-flat there across the shaded window; a residual that only reaches zero at
-the very end (a short window, "not converged") is not.
+The steady-state flux panel answers "is this run done?". It is computed in
+the browser on every poll (`steadyFlux` in `site/steady_flux.js`) from the
+upstream and downstream Baratrons:
+
+- The usable rise runs from the upstream step (first sample above half the
+  upstream plateau) until the downstream first reaches 0.95 torr.
+- The rise is cut into chunks of at least 0.05 torr **and** at least 12
+  samples, and each chunk's flux (dp/dt) is a least-squares slope. Chunks are
+  sized in torr because a slope's scatter depends on how much pressure it
+  spans, not how long it took; the sample floor keeps fast fills (one live
+  point per 5 s) from fitting slopes to a handful of points.
+- The **steady span** is the trailing stretch over which every chunk is within
+  ±3 % of the current flux (the newest two chunks). The run is **steady** once
+  that span reaches 0.25 torr, or 0.1 torr held for 8 h on slow runs.
+- Once steady it stays steady while the flux stays within 5 % of the flux it
+  was called at; beyond that it is reported as **drifted**.
+
+The panel plots each chunk's flux as a percentage of the current flux inside
+a shaded ±3 % band, with the steady span shaded. The state is on the panel
+title and, in full, in a pill in the page header:
+
+| State | Meaning |
+|---|---|
+| WAITING | too little rise to judge yet |
+| NOT STEADY | flux still changing (shows the % change over the last 0.1 torr) |
+| SETTLING | flux level, not yet held for 0.25 torr (shows time to go) |
+| STEADY | flux held ±3 % over at least 0.25 torr |
+| DRIFTED | was steady, flux has since moved more than 5 % |
+| CAN'T CONFIRM | the hold can no longer finish before 0.95 torr |
+
+The panel's corner gives the current flux (torr/s) and the range left before
+0.95 torr, in torr and minutes at the current rate.
+
+Replayed at the live cadence on 85 recorded runs, and on the September–October
+2026 runs compressed to 30 and 15 min fills, it never called a run steady
+while its flux was still rising by more than 5 %. It replaces the residual
+about a 3 τ_L line, which always looked converged: the line was fitted to the
+last few minutes, so the residual there was ~0 whatever the run was doing.
 
 First paint fetches the whole run as time-bucketed series from the
 `run_series` RPC: one JSON document of at most 1 200 points per channel

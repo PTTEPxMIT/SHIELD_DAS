@@ -19,6 +19,9 @@
       --badge-stale: #fab219;
       --badge-standby: #2a78d6;
       --badge-ink: #ffffff;
+      --status-good: #0ca30c;
+      --status-warn: #c98500;
+      --status-bad: #d03b3b;
       --series-1: #2a78d6;
       --series-2: #eb6834;
       --series-3: #1baf7a;
@@ -44,6 +47,9 @@
         --series-5: #d55181;
         --series-6: #008300;
         --badge-standby: #3987e5;
+        --status-good: #3fb950;
+        --status-warn: #d29922;
+        --status-bad: #f85149;
       }
     }
     * { box-sizing: border-box; }
@@ -78,6 +84,22 @@
     #status-badge.ended { background: var(--text-secondary); }
     #status-badge.standby { background: var(--badge-standby); }
     .meta { color: var(--text-muted); font-size: 0.85rem; }
+    #steady-status {
+      font-size: 0.8rem;
+      font-weight: 650;
+      padding: 0.15rem 0.6rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+    }
+    #steady-status.settling,
+    #steady-status.drifted { color: var(--status-warn); border-color: var(--status-warn); }
+    #steady-status.steady {
+      color: var(--badge-ink);
+      background: var(--status-good);
+      border-color: var(--status-good);
+    }
+    #steady-status.cannot-confirm { color: var(--status-bad); border-color: var(--status-bad); }
     #sample-info {
       flex-basis: 100%;
       color: var(--text-muted);
@@ -152,6 +174,7 @@
     <span id="status-badge">WAITING</span>
     <span id="elapsed" class="meta"></span>
     <span id="row-count" class="meta"></span>
+    <span id="steady-status" hidden></span>
     <span id="sample-info"></span>
   </header>
   <main>
@@ -182,6 +205,7 @@
   </footer>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
   <script src="config.js"></script>
+  <script src="steady_flux.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
