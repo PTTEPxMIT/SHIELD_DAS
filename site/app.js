@@ -178,9 +178,10 @@ function themeTokens() {
     muted: token("--text-muted"),
     grid: token("--gridline"),
     baseline: token("--baseline"),
-    good: token("--status-good"),
-    warn: token("--status-warn"),
-    bad: token("--status-bad"),
+    // Fallbacks for an index.html cached from before these tokens existed.
+    good: token("--status-good") || "#3fb950",
+    warn: token("--status-warn") || "#d29922",
+    bad: token("--status-bad") || "#f85149",
     series: [1, 2, 3, 4, 5, 6].map((n) => token(`--series-${n}`)),
   };
 }
@@ -279,7 +280,7 @@ function buildFigure(run, series, tokens) {
   const upstream = torrChannel(1);
   const downstream = torrChannel(2);
   const steady =
-    upstream && downstream
+    upstream && downstream && typeof steadyFlux === "function"
       ? steadyFlux(
           x.map((t) => Date.parse(t) / 1000),
           upstream,
@@ -647,7 +648,7 @@ function renderStandby(tokens, nowMs) {
   el("row-count").textContent = "";
   el("sample-info").textContent = "";
 
-  el("steady-status").hidden = true;
+  renderSteadyStatus(null);
   el("standby-primary").textContent = primary;
   el("standby-value").textContent = formatTorr(channels[primary]);
   el("standby-age").textContent = fresh
@@ -686,7 +687,7 @@ function render() {
   badge.textContent = status.toUpperCase();
   badge.className = status;
 
-  if (!state.run || state.series.ts.length === 0) el("steady-status").hidden = true;
+  if (!state.run || state.series.ts.length === 0) renderSteadyStatus(null);
   if (!state.run) {
     el("run-id").textContent = "—";
     el("message").textContent = "Waiting for a run to start…";
@@ -724,9 +725,11 @@ function render() {
   state.plotted = true;
 }
 
-// Header pill: the steady-state verdict where it is seen first.
+// Header pill: the steady-state verdict where it is seen first. Absent from
+// an index.html cached from before it existed, so skip quietly then.
 function renderSteadyStatus(steady) {
   const pill = el("steady-status");
+  if (!pill) return;
   if (!steady) {
     pill.hidden = true;
     return;
@@ -780,6 +783,21 @@ async function tick() {
   }
 }
 
+// steady_flux.js normally arrives via its own <script> tag, but GitHub Pages
+// lets browsers cache index.html and app.js separately for up to 10 min, so a
+// cached page from before the tag existed can run this app.js without it.
+// Load it here in that case rather than break the whole view.
+function ensureSteadyFlux() {
+  if (typeof steadyFlux === "function") return Promise.resolve();
+  return new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = `steady_flux.js?t=${Date.now()}`;
+    script.onload = resolve;
+    script.onerror = resolve; // the view still renders, minus the check
+    document.head.appendChild(script);
+  });
+}
+
 function start() {
   if (!config.supabaseUrl || !config.supabaseAnonKey) {
     el("message").textContent =
@@ -802,4 +820,4 @@ function start() {
     );
 }
 
-start();
+ensureSteadyFlux().then(start);
