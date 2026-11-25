@@ -12,6 +12,40 @@ import u6
 from .pressure_gauge import PressureGauge
 from .thermocouple import Thermocouple
 
+LIVE_VIEWER_URL = "https://pttepxmit.github.io/SHIELD_DAS/"
+
+# On-screen run-start sequence: (metadata key, instruction). The operator
+# presses SPACEBAR after each step and the time is written to
+# run_metadata.json under run_info[<key>]. Keys starting with "v" are drawn
+# as valve markers on the pressure plot.
+RUN_START_STEPS: list[tuple[str, str]] = [
+    ("v1_closed_check_time", "Make sure V1 is closed"),
+    ("v2_close_time", "Close V2"),
+    ("v3_close_time", "Close V3"),
+    ("v4_close_time", "Close V4"),
+    ("v5_close_time", "Close V5"),
+    ("vg_close_time", "Close Vg"),
+    ("h2_bottle_open_time", "Open the hydrogen bottle"),
+    (
+        "pressure_setpoint_time",
+        "Set the pressure controller: press SETPT, use up/down on each digit "
+        "until the desired pressure is reached, then press SET.\n"
+        "      WARNING: if V4 is open, hydrogen will pump into the room "
+        "through the roughing pump!",
+    ),
+    ("v2_open_time", "Open V2 to start the run"),
+]
+
+# Shown once every run-start step has been recorded.
+RUN_START_FINISHED_MESSAGE = (
+    "All run-start steps recorded - the run is set up on the laptop.\n"
+    "Now:\n"
+    "  - Turn off the Pfeiffer vacuum pump\n"
+    "  - Unplug the roughing pump under the desk\n"
+    f"You may now leave and monitor the run live at {LIVE_VIEWER_URL}\n"
+    "Return for the venting sequence once steady-state permeation is reached."
+)
+
 
 class DataRecorder:
     """
@@ -50,11 +84,10 @@ class DataRecorder:
         run_dir: Directory for the current run's results
         backup_dir: Directory for backup files
         elapsed_time: Time elapsed since the start of recording
-        v4_close_time: Timestamp when V4 valve was closed (spacebar press 1)
-        v5_close_time: Timestamp when V5 valve was closed (spacebar press 2)
-        v6_close_time: Timestamp when V6 valve was closed (spacebar press 3)
-        v3_open_time: Timestamp when V3 valve was opened (spacebar press 4)
-        valve_event_sequence: Ordered list of valve events to track
+        valve_event_sequence: Ordered metadata keys of the run-start steps
+            (see RUN_START_STEPS)
+        valve_event_times: Metadata key -> timestamp recorded by SPACEBAR for
+            each run-start step, None until recorded
         current_valve_index: Current position in the valve event sequence
     """
 
@@ -73,12 +106,9 @@ class DataRecorder:
     run_dir: str
     backup_dir: str
     elapsed_time: float
-    v4_close_time: str | None
-    v5_close_time: str | None
-    v6_close_time: str | None
-    v3_open_time: str | None
     start_time: datetime
     valve_event_sequence: list[str]
+    valve_event_times: dict[str, str | None]
     current_valve_index: int
 
     def __init__(
@@ -108,19 +138,12 @@ class DataRecorder:
         self.thread = None
 
         self.elapsed_time = 0.0
-        self.v4_close_time = None
-        self.v5_close_time = None
-        self.v6_close_time = None
-        self.v3_open_time = None
         self.start_time = None
 
-        # Valve event sequence tracking
-        self.valve_event_sequence = [
-            "v4_close_time",
-            "v5_close_time",
-            "v6_close_time",
-            "v3_open_time",
-        ]
+        # Run-start step tracking
+        self._valve_event_instructions = dict(RUN_START_STEPS)
+        self.valve_event_sequence = [key for key, _ in RUN_START_STEPS]
+        self.valve_event_times = dict.fromkeys(self.valve_event_sequence)
         self.current_valve_index = 0
 
     @property
@@ -324,8 +347,8 @@ class DataRecorder:
             )
             return
 
-        current_event = self.valve_event_sequence[self.current_valve_index]
-        print(f"Press SPACEBAR to record {current_event}...")
+        print("\nRun-start sequence: press SPACEBAR after completing each step.")
+        print(self._valve_event_prompt(self.current_valve_index))
 
         def on_spacebar():
             if self.current_valve_index < len(self.valve_event_sequence):
@@ -333,24 +356,29 @@ class DataRecorder:
                 # Include milliseconds for precise timing
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
-                # Set the appropriate attribute
-                setattr(self, current_event, timestamp)
-
-                print(f"{current_event} recorded: {timestamp}")
+                self.valve_event_times[current_event] = timestamp
                 self._update_metadata_with_valve_time(current_event, timestamp)
 
                 # Move to next event
                 self.current_valve_index += 1
 
-                # Show next event or completion message
+                # Show next step or completion message
                 if self.current_valve_index < len(self.valve_event_sequence):
-                    next_event = self.valve_event_sequence[self.current_valve_index]
-                    print(f"Next: Press SPACEBAR to record {next_event}...")
+                    print(self._valve_event_prompt(self.current_valve_index))
                 else:
-                    print("All valve events recorded!")
+                    print(f"\n{RUN_START_FINISHED_MESSAGE}\n")
 
         # Set up keyboard listener for spacebar
         keyboard.on_press_key("space", lambda _: on_spacebar())
+
+    def _valve_event_prompt(self, index: int) -> str:
+        """On-screen prompt for run-start step ``index`` (0-based)."""
+        key = self.valve_event_sequence[index]
+        instruction = self._valve_event_instructions[key]
+        total = len(self.valve_event_sequence)
+        return (
+            f"\n[{index + 1}/{total}] {instruction}\n      -> press SPACEBAR when done"
+        )
 
     def _is_ci_environment(self) -> bool:
         """Detect if we're running in a CI environment."""
@@ -383,14 +411,11 @@ class DataRecorder:
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2)
 
-        print(f"Updated metadata with {event_name}: {timestamp}")
+        print(f"      recorded {event_name}: {timestamp}")
 
     def _reset_valve_events(self):
         """Reset all valve event times and tracking for a new recording session."""
-        self.v4_close_time = None
-        self.v5_close_time = None
-        self.v6_close_time = None
-        self.v3_open_time = None
+        self.valve_event_times = dict.fromkeys(self.valve_event_sequence)
         self.current_valve_index = 0
 
     def start(self):
