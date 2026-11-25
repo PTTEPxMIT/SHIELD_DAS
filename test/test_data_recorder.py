@@ -278,8 +278,8 @@ def test_data_recorder_initializes_elapsed_time_to_zero(mock_gauge):
 
 def test_data_recorder_initializes_valve_times_to_none(mock_gauge):
     """
-    Test DataRecorder to verify all valve event times (v4_close, v5_close,
-    v6_close, v3_open) are initialized to None.
+    Test DataRecorder to verify every run-start step time is initialized to
+    None.
     """
     recorder = DataRecorder(
         gauges=[mock_gauge],
@@ -288,10 +288,8 @@ def test_data_recorder_initializes_valve_times_to_none(mock_gauge):
         sample_material="316",
         sample_thickness=0.001,
     )
-    assert recorder.v4_close_time is None
-    assert recorder.v5_close_time is None
-    assert recorder.v6_close_time is None
-    assert recorder.v3_open_time is None
+    assert set(recorder.valve_event_times) == set(recorder.valve_event_sequence)
+    assert all(t is None for t in recorder.valve_event_times.values())
 
 
 def test_data_recorder_initializes_current_valve_index_to_zero(mock_gauge):
@@ -321,8 +319,42 @@ def test_data_recorder_initializes_valve_event_sequence(mock_gauge):
         sample_material="316",
         sample_thickness=0.001,
     )
-    expected = ["v4_close_time", "v5_close_time", "v6_close_time", "v3_open_time"]
+    expected = [
+        "v1_closed_check_time",
+        "v2_close_time",
+        "v3_close_time",
+        "v4_close_time",
+        "v5_close_time",
+        "vg_close_time",
+        "h2_bottle_open_time",
+        "pressure_setpoint_time",
+        "v2_open_time",
+    ]
     assert recorder.valve_event_sequence == expected
+
+
+def test_data_recorder_valve_event_prompt_shows_step_and_instruction(mock_gauge):
+    """
+    Test DataRecorder _valve_event_prompt to verify it numbers the step and
+    shows the operator instruction rather than the metadata key.
+    """
+    recorder = DataRecorder(
+        gauges=[mock_gauge],
+        thermocouples=[],
+        furnace_setpoint=600.0,
+        sample_material="316",
+        sample_thickness=0.001,
+    )
+    total = len(recorder.valve_event_sequence)
+
+    first = recorder._valve_event_prompt(0)
+    assert f"[1/{total}]" in first
+    assert "Make sure V1 is closed" in first
+    assert "SPACEBAR" in first
+
+    last = recorder._valve_event_prompt(total - 1)
+    assert f"[{total}/{total}]" in last
+    assert "Open V2 to start the run" in last
 
 
 # =============================================================================
@@ -855,16 +887,13 @@ def test_data_recorder_start_resets_valve_times(recorder):
     to None at the beginning of a new recording session.
     """
     # Set some valve times
-    recorder.v4_close_time = "2025-01-01 12:00:00"
-    recorder.v5_close_time = "2025-01-01 12:01:00"
+    recorder.valve_event_times["v2_close_time"] = "2025-01-01 12:00:00"
+    recorder.valve_event_times["v2_open_time"] = "2025-01-01 12:01:00"
 
     recorder.start()
     time.sleep(0.05)
 
-    assert recorder.v4_close_time is None
-    assert recorder.v5_close_time is None
-    assert recorder.v6_close_time is None
-    assert recorder.v3_open_time is None
+    assert all(t is None for t in recorder.valve_event_times.values())
 
     recorder.stop()
 
